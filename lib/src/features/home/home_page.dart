@@ -34,6 +34,33 @@ class _HomePageState extends State<HomePage> {
   var _index = 0;
 
   @override
+  void initState() {
+    super.initState();
+    widget.controller.addListener(_onControllerChanged);
+  }
+
+  @override
+  void didUpdateWidget(HomePage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.controller != widget.controller) {
+      oldWidget.controller.removeListener(_onControllerChanged);
+      widget.controller.addListener(_onControllerChanged);
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.controller.removeListener(_onControllerChanged);
+    super.dispose();
+  }
+
+  void _onControllerChanged() {
+    if (mounted && _index == 0) {
+      setState(() {});
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
     final pages = [
       MessagesTab(controller: widget.controller),
@@ -106,11 +133,25 @@ class _HomePageState extends State<HomePage> {
 
   String get _title {
     return switch (_index) {
-      0 => '消息',
+      0 => _messagesTitle,
       1 => '通讯录',
       2 => '发现',
       _ => '我的',
     };
+  }
+
+  String get _messagesTitle {
+    final status = widget.controller.imStatusText;
+    if (status == '连接中' || status == '重连中') {
+      return status;
+    }
+    if (status == '已连接' && widget.controller.imError == null) {
+      return '消息';
+    }
+    if (widget.controller.imError != null) {
+      return status.isEmpty ? '连接异常' : status;
+    }
+    return '消息';
   }
 }
 
@@ -213,19 +254,9 @@ class _MessagesTabState extends State<MessagesTab> {
 
   @override
   Widget build(BuildContext context) {
-    final header = Column(
-      children: [
-        _SearchBar(
-          hintText: '搜索',
-          onTap: () =>
-              _push(context, SearchPage(controller: widget.controller)),
-        ),
-        if (widget.controller.imError != null)
-          _ConnectionHeader(
-            text:
-                '${widget.controller.imStatusText} · ${widget.controller.imError}',
-          ),
-      ],
+    final header = _SearchBar(
+      hintText: '搜索',
+      onTap: () => _push(context, SearchPage(controller: widget.controller)),
     );
     if (_loading && _conversations.isEmpty) {
       return Column(
@@ -3067,28 +3098,6 @@ class _AsyncListState extends State<_AsyncList> {
           },
         );
       },
-    );
-  }
-}
-
-class _ConnectionHeader extends StatelessWidget {
-  const _ConnectionHeader({required this.text});
-
-  final String text;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      height: 36,
-      alignment: Alignment.centerLeft,
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      color: _fillColor,
-      child: Text(
-        text,
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        style: const TextStyle(color: _mutedColor, fontSize: 13),
-      ),
     );
   }
 }

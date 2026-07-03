@@ -205,6 +205,10 @@ class BusinessImService extends ChangeNotifier {
   Future<List<Map<String, Object?>>> syncConversationsFromServer() async {
     final session = _requireSession();
     final chat = _requireChat();
+    final statusBeforeSync = _statusText;
+    if (statusBeforeSync == '已连接') {
+      _setStatus('同步中');
+    }
     try {
       final list = await _api.conversations(
         session: session,
@@ -222,8 +226,14 @@ class BusinessImService extends ChangeNotifier {
         'server conversations synced',
         data: {'count': _latestConversations.length},
       );
+      if (_statusText == '同步中') {
+        _setStatus('已连接');
+      }
       return _latestConversations;
     } catch (error, stackTrace) {
+      if (_statusText == '同步中') {
+        _setStatus(statusBeforeSync);
+      }
       AppLogger.error(
         'im',
         'server conversations sync failed',
@@ -1150,10 +1160,37 @@ class BusinessImService extends ChangeNotifier {
           channelType: channelType,
         )
         .toList();
+    if (channelType == chat.channelTypeGroup) {
+      return _readAliasMessagesForChannel(
+        channelId: channelId,
+        channelType: channelType,
+        primary: primary,
+        belongsToAlias: (message) => _messageBelongsToGroup(message, channelId),
+        logSource: 'group message cache migrated',
+      );
+    }
     if (channelType != chat.channelTypePerson) {
       return primary;
     }
 
+    return _readAliasMessagesForChannel(
+      channelId: channelId,
+      channelType: channelType,
+      primary: primary,
+      belongsToAlias: (message) =>
+          _messageBelongsToPrivatePeer(message, channelId),
+      logSource: 'private message cache migrated',
+    );
+  }
+
+  List<Map<String, Object?>> _readAliasMessagesForChannel({
+    required String channelId,
+    required int channelType,
+    required List<Map<String, Object?>> primary,
+    required bool Function(Map<String, Object?> message) belongsToAlias,
+    required String logSource,
+  }) {
+    final chat = _requireChat();
     final merged = primary
         .map((item) => Map<String, Object?>.from(item))
         .toList();
@@ -1174,7 +1211,7 @@ class BusinessImService extends ChangeNotifier {
       );
       for (final raw in aliasMessages) {
         final message = Map<String, Object?>.from(raw);
-        if (!_messageBelongsToPrivatePeer(message, channelId)) {
+        if (!belongsToAlias(message)) {
           continue;
         }
         migrated = true;
@@ -1197,7 +1234,7 @@ class BusinessImService extends ChangeNotifier {
       _writeMessages(channelId, channelType, sorted);
       AppLogger.info(
         'im',
-        'private message cache migrated',
+        logSource,
         data: {'channel_id': channelId, 'count': sorted.length},
       );
       return sorted;
@@ -1560,6 +1597,9 @@ class BusinessImService extends ChangeNotifier {
       return channelId;
     }
     final chat = _requireChat();
+    if (channelType == chat.channelTypeGroup) {
+      return _canonicalGroupChannelId(channelId);
+    }
     if (channelType != chat.channelTypePerson) {
       return channelId;
     }
@@ -1568,6 +1608,21 @@ class BusinessImService extends ChangeNotifier {
       return fromConversation.isNotEmpty ? fromConversation : channelId;
     }
     return _uidFromUserId(_receiverIdFromChannel(channelId));
+  }
+
+  String _canonicalGroupChannelId(String channelId) {
+    final chat = _requireChat();
+    for (final item in _cache.readConversations(chat.uid)) {
+      final itemChannelId = _value(item, ['channel_id', 'uid']);
+      final itemGroupId = _value(item, ['group_id', 'id']);
+      if (channelId == itemChannelId) {
+        return itemChannelId;
+      }
+      if (itemGroupId.isNotEmpty && channelId == itemGroupId) {
+        return itemChannelId.isNotEmpty ? itemChannelId : channelId;
+      }
+    }
+    return channelId;
   }
 
   String _privatePeerChannelFromConversations(String channelId) {
@@ -1686,6 +1741,26 @@ class BusinessImService extends ChangeNotifier {
     ];
     for (final candidate in candidates) {
       if (candidate.isNotEmpty && _receiverIdFromChannel(candidate) == peerId) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  bool _messageBelongsToGroup(Map<String, Object?> message, String channelId) {
+    final groupId = _groupIdForChannel(channelId);
+    final payload = _asMap(message['payload']);
+    final candidates = [
+      _value(message, ['channel_id']),
+      _value(message, ['group_id']),
+      _value(payload, ['channel_id']),
+      _value(payload, ['group_id']),
+    ];
+    for (final candidate in candidates) {
+      if (candidate.isEmpty) {
+        continue;
+      }
+      if (candidate == channelId || candidate == groupId) {
         return true;
       }
     }
