@@ -50,6 +50,7 @@ class AppLogger {
   static final List<AppLogEntry> _entries = <AppLogEntry>[];
   static File? _file;
   static String _filePath = '';
+  static Future<void> _writeQueue = Future<void>.value();
 
   static List<AppLogEntry> get entries => List.unmodifiable(_entries);
   static String get filePath => _filePath;
@@ -184,7 +185,7 @@ class AppLogger {
     _entries.clear();
     final file = _file;
     if (file != null) {
-      unawaited(file.writeAsString('', flush: true).catchError((_) => file));
+      _enqueueWrite(() => file.writeAsString('', flush: true));
     }
     revision.value++;
   }
@@ -210,16 +211,16 @@ class AppLogger {
     debugPrint('[BIM] ${entry.line}');
     final file = _file;
     if (file != null) {
-      unawaited(_appendLine(file, entry.line));
+      _enqueueWrite(
+        () => file.writeAsString('${entry.line}\n', mode: FileMode.append),
+      );
     }
   }
 
-  static Future<void> _appendLine(File file, String line) async {
-    try {
-      await file.writeAsString('$line\n', mode: FileMode.append);
-    } catch (error) {
+  static void _enqueueWrite(Future<void> Function() task) {
+    _writeQueue = _writeQueue.then((_) => task()).catchError((Object error) {
       debugPrint('[BIM] log write failed: $error');
-    }
+    });
   }
 
   static Future<void> _rotateIfNeeded() async {

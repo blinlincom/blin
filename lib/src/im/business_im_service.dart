@@ -28,6 +28,7 @@ class BusinessImService extends ChangeNotifier {
   UserSession? _session;
   String _device = '';
   Socket? _socket;
+  int _socketEpoch = 0;
   TcpImCrypto _crypto = TcpImCrypto();
   TcpImProto _proto = TcpImProto();
   Uint8List _frameBuffer = Uint8List(0);
@@ -36,6 +37,8 @@ class BusinessImService extends ChangeNotifier {
   bool _started = false;
   bool _manualStop = false;
   bool _connecting = false;
+  bool _foreground = true;
+  bool _closingForBackground = false;
   int _missedPongCount = 0;
   int _reconnectAttempt = 0;
   int _conversationVersion = 0;
@@ -43,6 +46,8 @@ class BusinessImService extends ChangeNotifier {
   String? _lastError;
   List<Map<String, Object?>> _latestConversations = const [];
   final Map<String, int> _channelMessageVersions = <String, int>{};
+  final Map<String, Future<List<Map<String, Object?>>>> _syncingChannels =
+      <String, Future<List<Map<String, Object?>>>>{};
   final Set<String> _historySyncedChannels = <String>{};
   final Set<String> _openMessageChannels = <String>{};
 
@@ -99,12 +104,22 @@ class BusinessImService extends ChangeNotifier {
 
   void onAppBackgrounded(String state) {
     AppLogger.info('im', 'app backgrounded', data: {'state': state});
+    if (state == 'inactive') {
+      return;
+    }
+    _foreground = false;
+    _reconnectTimer?.cancel();
+    _reconnectTimer = null;
+    _stopTcpHeartbeat();
+    _closingForBackground = true;
+    unawaited(_closeSocketOnly());
   }
 
   void resumeConnection() {
     if (!_started || _session == null) {
       return;
     }
+    _foreground = true;
     if (_socket == null && !_connecting) {
       unawaited(_connectTcp());
     }
@@ -241,6 +256,38 @@ class BusinessImService extends ChangeNotifier {
   }
 
   Future<List<Map<String, Object?>>> syncChannelMessages({
+    required String channelID,
+    required int channelType,
+    String groupId = '',
+    int limit = 50,
+  }) async {
+    final key = _messageKey(channelID, channelType);
+    final running = _syncingChannels[key];
+    if (running != null) {
+      AppLogger.info(
+        'im',
+        'reuse running channel history sync',
+        data: {'channel_id': channelID, 'channel_type': channelType},
+      );
+      return running;
+    }
+    final future = _syncChannelMessagesOnce(
+      channelID: channelID,
+      channelType: channelType,
+      groupId: groupId,
+      limit: limit,
+    );
+    _syncingChannels[key] = future;
+    try {
+      return await future;
+    } finally {
+      if (identical(_syncingChannels[key], future)) {
+        _syncingChannels.remove(key);
+      }
+    }
+  }
+
+  Future<List<Map<String, Object?>>> _syncChannelMessagesOnce({
     required String channelID,
     required int channelType,
     String groupId = '',
@@ -495,7 +542,7 @@ class BusinessImService extends ChangeNotifier {
   }
 
   Future<void> _connectTcp() async {
-    if (_manualStop || _connecting) {
+    if (_manualStop || _connecting || !_foreground) {
       return;
     }
     final chat = _requireChat();
@@ -511,6 +558,7 @@ class BusinessImService extends ChangeNotifier {
     _reconnectTimer?.cancel();
     _reconnectTimer = null;
     _stopTcpHeartbeat();
+    _closingForBackground = false;
     await _closeSocketOnly();
     _crypto = TcpImCrypto();
     _proto = TcpImProto();
@@ -526,11 +574,15 @@ class BusinessImService extends ChangeNotifier {
         endpoint.port,
         timeout: const Duration(seconds: 6),
       );
+      final epoch = ++_socketEpoch;
       _socket = socket;
       _connecting = false;
       socket.listen(
         _onTcpData,
         onError: (Object error, StackTrace stackTrace) {
+          if (epoch != _socketEpoch) {
+            return;
+          }
           AppLogger.error(
             'im',
             'tcp socket error',
@@ -539,7 +591,12 @@ class BusinessImService extends ChangeNotifier {
           );
           _handleTcpClosed('socket_error', error.toString());
         },
-        onDone: () => _handleTcpClosed('socket_done', ''),
+        onDone: () {
+          if (epoch != _socketEpoch) {
+            return;
+          }
+          _handleTcpClosed('socket_done', '');
+        },
         cancelOnError: true,
       );
       _sendConnectPacket(chat);
@@ -798,6 +855,11 @@ class BusinessImService extends ChangeNotifier {
     if (_manualStop) {
       return;
     }
+    if (_closingForBackground) {
+      _closingForBackground = false;
+      _setStatus('未连接');
+      return;
+    }
     _stopTcpHeartbeat();
     unawaited(_closeSocketOnly());
     _lastError = reason?.isEmpty == false ? reason : _lastError;
@@ -806,7 +868,12 @@ class BusinessImService extends ChangeNotifier {
   }
 
   void _scheduleReconnect(String source) {
-    if (!_started || _manualStop) {
+    if (!_started || _manualStop || !_foreground) {
+      AppLogger.info(
+        'im',
+        'skip tcp reconnect while backgrounded',
+        data: {'source': source},
+      );
       return;
     }
     _reconnectTimer?.cancel();
@@ -827,6 +894,7 @@ class BusinessImService extends ChangeNotifier {
   Future<void> _closeSocketOnly() async {
     final socket = _socket;
     _socket = null;
+    _socketEpoch++;
     if (socket == null) {
       return;
     }
