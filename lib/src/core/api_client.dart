@@ -387,21 +387,6 @@ class ApiClient {
     return result.data;
   }
 
-  Future<void> userHeartbeat({
-    required UserSession session,
-    required String device,
-  }) async {
-    final result = await signedImPost<Object?>(
-      'user_heartbeat',
-      session: session,
-      device: device,
-      params: const {},
-    );
-    if (!result.isSuccess) {
-      throw ApiException(result.message, code: result.code);
-    }
-  }
-
   Future<void> logout({
     required UserSession session,
     required String device,

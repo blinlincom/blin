@@ -11,6 +11,7 @@ class ImCacheStore {
   static const _recentPrefix = 'im_recent_channels';
   static const _conversationPrefix = 'im_conversations';
   static const _messagePrefix = 'im_messages';
+  static const _readPrefix = 'im_read_marker';
 
   String readDraft({required String channelId, required int channelType}) {
     return _kv.decodeString(_draftKey(channelId, channelType)) ?? '';
@@ -91,12 +92,48 @@ class ImCacheStore {
     rememberRecentChannel(uid: uid, channelId: '$channelType:$channelId');
   }
 
+  Map<String, Object?> readReadMarker({
+    required String uid,
+    required String channelId,
+    required int channelType,
+  }) {
+    return _readMap(_readMarkerKey(uid, channelId, channelType));
+  }
+
+  void writeReadMarker({
+    required String uid,
+    required String channelId,
+    required int channelType,
+    required Map<String, Object?> marker,
+  }) {
+    _kv.encodeString(
+      _readMarkerKey(uid, channelId, channelType),
+      jsonEncode(marker),
+    );
+  }
+
   String _draftKey(String channelId, int channelType) {
     return '$_draftPrefix:$channelType:$channelId';
   }
 
   String _messageKey(String uid, String channelId, int channelType) {
     return '$_messagePrefix:$uid:$channelType:$channelId';
+  }
+
+  String _readMarkerKey(String uid, String channelId, int channelType) {
+    return '$_readPrefix:$uid:$channelType:$channelId';
+  }
+
+  Map<String, Object?> _readMap(String key) {
+    final raw = _kv.decodeString(key);
+    if (raw == null || raw.isEmpty) {
+      return const {};
+    }
+    final decoded = jsonDecode(raw);
+    if (decoded is Map) {
+      return _normalizeMap(decoded);
+    }
+    return const {};
   }
 
   List<Map<String, Object?>> _readMapList(String key) {

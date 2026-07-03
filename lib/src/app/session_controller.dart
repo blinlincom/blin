@@ -301,6 +301,20 @@ class SessionController extends ChangeNotifier {
     );
   }
 
+  Future<void> openConversation({
+    required String channelId,
+    required int channelType,
+  }) {
+    return _im.openConversation(channelID: channelId, channelType: channelType);
+  }
+
+  void closeConversation({
+    required String channelId,
+    required int channelType,
+  }) {
+    _im.closeConversation(channelID: channelId, channelType: channelType);
+  }
+
   Future<Map<String, Object?>?> localMessageByClientMsgNo(String clientMsgNo) {
     return _im.localMessageByClientMsgNo(clientMsgNo);
   }

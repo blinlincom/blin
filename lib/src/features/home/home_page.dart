@@ -124,12 +124,17 @@ class MessagesTab extends StatefulWidget {
 
 class _MessagesTabState extends State<MessagesTab> {
   late int _conversationRevision;
+  List<Map<String, Object?>> _conversations = const [];
+  bool _loading = true;
+  String? _error;
+  int _loadToken = 0;
 
   @override
   void initState() {
     super.initState();
     _conversationRevision = widget.controller.conversationVersion;
     widget.controller.addListener(_onControllerChanged);
+    _loadConversations(showLoading: true);
   }
 
   @override
@@ -153,64 +158,124 @@ class _MessagesTabState extends State<MessagesTab> {
     }
     final next = widget.controller.conversationVersion;
     if (next != _conversationRevision) {
-      setState(() => _conversationRevision = next);
+      _conversationRevision = next;
+      _loadConversations(showLoading: false);
+    }
+  }
+
+  Future<void> _loadConversations({required bool showLoading}) async {
+    final token = ++_loadToken;
+    if (showLoading) {
+      setState(() {
+        _loading = true;
+        _error = null;
+      });
+    }
+    try {
+      final list = await widget.controller.loadConversations();
+      if (!mounted || token != _loadToken) {
+        return;
+      }
+      setState(() {
+        _conversations = list;
+        _loading = false;
+        _error = null;
+      });
+    } catch (error) {
+      if (!mounted || token != _loadToken) {
+        return;
+      }
+      setState(() {
+        _loading = false;
+        _error = error.toString();
+      });
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    return _AsyncList(
-      revision: _conversationRevision,
-      loader: widget.controller.loadConversations,
-      emptyText: '暂无会话',
-      header: Column(
-        children: [
-          _SearchBar(
-            hintText: '搜索',
-            onTap: () =>
-                _push(context, SearchPage(controller: widget.controller)),
+    final header = Column(
+      children: [
+        _SearchBar(
+          hintText: '搜索',
+          onTap: () =>
+              _push(context, SearchPage(controller: widget.controller)),
+        ),
+        if (widget.controller.imError != null)
+          _ConnectionHeader(
+            text:
+                '${widget.controller.imStatusText} · ${widget.controller.imError}',
           ),
-          if (widget.controller.imError != null)
-            _ConnectionHeader(
-              text:
-                  '${widget.controller.imStatusText} · ${widget.controller.imError}',
-            ),
+      ],
+    );
+    if (_loading && _conversations.isEmpty) {
+      return Column(
+        children: [
+          header,
+          const Expanded(child: Center(child: CircularProgressIndicator())),
         ],
-      ),
-      itemBuilder: (context, item) {
-        final title = _conversationTitle(item);
-        final content = item['content']?.toString() ?? '';
-        final time = item['msg_time']?.toString() ?? '';
-        final unread = _intValue(item, ['unread_quantity']);
-        final channelId = _value(item, ['channel_id']);
-        final channelType = _intValue(item, ['channel_type']);
-        return _ConversationTile(
-          title: title,
-          subtitle: content.isEmpty ? '暂无最新消息' : content,
-          time: time,
-          unread: unread,
-          isGroup: channelType == _groupChannelType,
-          onTap: () {
-            if (channelId.isEmpty) {
-              return;
-            }
-            Navigator.of(context).push(
-              MaterialPageRoute<void>(
-                builder: (_) => ChatPage(
-                  controller: widget.controller,
-                  title: title,
-                  channelId: channelId,
-                  groupId: _value(item, [
-                    'group_id',
-                    'id',
-                  ], fallback: channelId),
-                  channelType: channelType == 0
-                      ? _channelTypeFromConversation(item)
-                      : channelType,
-                ),
-              ),
-            );
-          },
+      );
+    }
+    if (_error != null && _conversations.isEmpty) {
+      return Column(
+        children: [
+          header,
+          Expanded(
+            child: _ErrorState(
+              text: _error!,
+              onRetry: () => _loadConversations(showLoading: true),
+            ),
+          ),
+        ],
+      );
+    }
+    if (_conversations.isEmpty) {
+      return Column(
+        children: [
+          header,
+          const Expanded(child: _EmptyState(text: '暂无会话')),
+        ],
+      );
+    }
+    return ListView.builder(
+      physics: const ClampingScrollPhysics(),
+      itemCount: _conversations.length + 1,
+      itemBuilder: (context, index) {
+        if (index == 0) {
+          return header;
+        }
+        return _conversationTile(context, _conversations[index - 1]);
+      },
+    );
+  }
+
+  Widget _conversationTile(BuildContext context, Map<String, Object?> item) {
+    final title = _conversationTitle(item);
+    final content = item['content']?.toString() ?? '';
+    final time = item['msg_time']?.toString() ?? '';
+    final unread = _intValue(item, ['unread_quantity']);
+    final channelId = _value(item, ['channel_id']);
+    final channelType = _channelTypeFromConversation(item);
+    return _ConversationTile(
+      title: title,
+      subtitle: content.isEmpty ? '暂无最新消息' : content,
+      time: time,
+      unread: unread,
+      isGroup: channelType == _groupChannelType,
+      onTap: () {
+        if (channelId.isEmpty) {
+          return;
+        }
+        Navigator.of(context).push(
+          MaterialPageRoute<void>(
+            builder: (_) => ChatPage(
+              controller: widget.controller,
+              title: title,
+              channelId: channelId,
+              groupId: _value(item, ['group_id', 'id'], fallback: channelId),
+              channelType: channelType,
+            ),
+          ),
         );
       },
     );
@@ -2076,6 +2141,12 @@ class _ChatPageState extends State<ChatPage> {
     _conversationRevision = widget.controller.conversationVersion;
     _messageRevision = _currentMessageRevision();
     widget.controller.addListener(_onControllerChanged);
+    unawaited(
+      widget.controller.openConversation(
+        channelId: widget.channelId,
+        channelType: widget.channelType,
+      ),
+    );
     _loadMessagesIntoState(showLoading: true);
     _textController.text = widget.controller.readDraft(
       channelId: widget.channelId,
@@ -2103,6 +2174,12 @@ class _ChatPageState extends State<ChatPage> {
       _conversationRevision = widget.controller.conversationVersion;
       _messageRevision = _currentMessageRevision();
       _messages = const [];
+      unawaited(
+        widget.controller.openConversation(
+          channelId: widget.channelId,
+          channelType: widget.channelType,
+        ),
+      );
       _loadMessagesIntoState(showLoading: true);
     }
   }
@@ -2145,14 +2222,6 @@ class _ChatPageState extends State<ChatPage> {
     );
   }
 
-  void _reloadMessages() {
-    setState(() {
-      _conversationRevision = widget.controller.conversationVersion;
-      _messageRevision = _currentMessageRevision();
-    });
-    _loadMessagesIntoState(showLoading: _messages.isEmpty);
-  }
-
   Future<void> _loadMessagesIntoState({required bool showLoading}) async {
     final token = ++_messageLoadToken;
     if (showLoading && mounted) {
@@ -2183,6 +2252,10 @@ class _ChatPageState extends State<ChatPage> {
 
   @override
   void dispose() {
+    widget.controller.closeConversation(
+      channelId: widget.channelId,
+      channelType: widget.channelType,
+    );
     widget.controller.removeListener(_onControllerChanged);
     widget.controller.writeDraft(
       channelId: widget.channelId,
@@ -2228,11 +2301,6 @@ class _ChatPageState extends State<ChatPage> {
               ),
               icon: const Icon(Icons.person_outline),
             ),
-          IconButton(
-            tooltip: '刷新',
-            onPressed: _reloadMessages,
-            icon: const Icon(Icons.refresh),
-          ),
         ],
       ),
       body: SafeArea(
@@ -2820,16 +2888,12 @@ class _AsyncList extends StatefulWidget {
     required this.loader,
     required this.itemBuilder,
     required this.emptyText,
-    this.revision = 0,
-    this.header,
   });
 
   final Future<List<Map<String, Object?>>> Function() loader;
   final Widget Function(BuildContext context, Map<String, Object?> item)
   itemBuilder;
   final String emptyText;
-  final int revision;
-  final Widget? header;
 
   @override
   State<_AsyncList> createState() => _AsyncListState();
@@ -2847,8 +2911,7 @@ class _AsyncListState extends State<_AsyncList> {
   @override
   void didUpdateWidget(_AsyncList oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.loader != widget.loader ||
-        oldWidget.revision != widget.revision) {
+    if (oldWidget.loader != widget.loader) {
       _future = _load();
     }
   }
@@ -2874,21 +2937,12 @@ class _AsyncListState extends State<_AsyncList> {
         }
         final items = snapshot.data ?? [];
         if (items.isEmpty) {
-          return Column(
-            children: [
-              if (widget.header != null) widget.header!,
-              Expanded(child: _EmptyState(text: widget.emptyText)),
-            ],
-          );
+          return _EmptyState(text: widget.emptyText);
         }
         return ListView.builder(
-          itemCount: items.length + (widget.header == null ? 0 : 1),
+          itemCount: items.length,
           itemBuilder: (context, index) {
-            if (widget.header != null && index == 0) {
-              return widget.header!;
-            }
-            final itemIndex = widget.header == null ? index : index - 1;
-            return widget.itemBuilder(context, items[itemIndex]);
+            return widget.itemBuilder(context, items[index]);
           },
         );
       },

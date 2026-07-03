@@ -24,7 +24,7 @@ flutter run \
 - 收到可持久化消息后发送 `recvack`。
 - 发送消息仍必须调用业务端 `im_person_send` / `im_group_send`，由业务端执行权限、好友、红包、转账、@、引用、阅后即焚等规则。
 
-客户端没有消息轮询。周期任务只有 TCP ping/pong 保活和 `user_heartbeat` 用户在线心跳，不会定时请求会话列表或消息列表。
+客户端没有消息轮询。周期任务只有 TCP ping/pong 保活，不会定时请求会话列表或消息列表。新版 IM 文档已经废弃旧 `user_heartbeat`，客户端不再调用该接口。
 
 ## 启动流程
 
@@ -32,7 +32,7 @@ flutter run \
 2. `SessionStore.ensureDeviceId()` 生成并持久化设备号，格式为 `bimotc.com-<随机16字节hex>`。
 3. 冷启动 `SessionController.coldStart()` 读取 MMKV 登录态。
 4. 已登录时调用 `im_connect`，请求携带 `device`、`device_flag=0`、`device_level=1`、`timestamp`、`sign`。
-5. `BusinessImService.start()` 读取本地 MMKV 会话缓存，启动 `user_heartbeat`，并连接 `tcp_addr`。
+5. `BusinessImService.start()` 读取本地 MMKV 会话缓存，并连接 `tcp_addr`。
 6. TCP 握手成功后状态变为“已连接”，聊天页依靠 TCP 收包实时刷新。
 
 热启动恢复时如果长连接已断开，`resumeConnection()` 会重新连接 TCP；不会循环请求业务端消息列表。
@@ -46,7 +46,7 @@ flutter run \
 - 参数按 key 排序后 JSON 编码，拼接 `secretKey={BIM_APP_KEY}`。
 - MD5 小写输出。
 
-`user_heartbeat` 是原用户在线心跳接口，客户端按签名请求携带 `appid`、`usertoken`、`device`、`device_flag`、`device_level`、`timestamp`、`sign`，用于维护在线状态，不用于拉消息。
+旧 `user_heartbeat` 属于历史接口，当前用户在线状态由 IM TCP 连接和服务端 `user.onlinestatus` 事件维护，客户端不再请求该接口。
 
 ## 消息发送
 
@@ -104,18 +104,16 @@ MMKV 存储：
 - 聊天草稿。
 - 最近访问频道索引。
 
-历史消息接口只在本次启动首次打开某个聊天时补偿同步一次；如果 TCP 断线后重连成功，也会对最近频道补偿同步一次：
+历史消息接口只在本次启动首次打开某个聊天且本地没有消息时补偿同步一次：
 
 - 私聊：`im_person_messages`
 - 群聊：`im_group_messages`
 
-这些同步都由用户打开会话或连接恢复事件触发，不会使用定时器反复请求历史消息，也不会用业务接口代替 TCP 收消息。
+这些同步由用户打开会话触发，不会使用定时器反复请求历史消息，也不会用业务接口代替 TCP 收消息。若历史接口返回错误，本次启动会标记为已尝试，避免继续重复请求；实时收发仍以 TCP 长连接为准。
 
-## 用户心跳
+## 连接保活
 
-`BusinessImService` 登录后启动 `user_heartbeat`，默认 55 秒一次，用于维护业务端在线状态。这个心跳不会读取会话、消息或好友数据。
-
-TCP 自身另有 30 秒 ping/pong 保活。如果连续未收到 pong，会关闭当前 socket 并按退避策略重连。
+TCP 使用 30 秒 ping/pong 保活。如果连续未收到 pong，会关闭当前 socket 并按退避策略重连。客户端不再调用旧 `user_heartbeat`。
 
 ## 用户端功能
 
@@ -138,7 +136,7 @@ TCP 自身另有 30 秒 ping/pong 保活。如果连续未收到 pong，会关�
 - TCP 连接、握手、断线、重连、ping/pong。
 - `client_msg_no`、频道、消息类型和发送结果。
 - TCP 收消息、解密、缓存写入和 UI 版本刷新。
-- `user_heartbeat` 成功或失败。
+- TCP 原始数据、帧类型、握手、断线、重连、ping/pong。
 
 敏感字段会脱敏：`token`、`password`、`sign`、`secret`、`key`。
 
