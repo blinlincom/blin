@@ -7,6 +7,7 @@ import '../../app/session_controller.dart';
 import '../../core/app_config.dart';
 import '../../core/app_logger.dart';
 import '../../core/models.dart';
+import '../../im/business_im_service.dart';
 import '../../im/im_message_types.dart';
 
 const _primaryColor = Color(0xff1677ff);
@@ -128,12 +129,14 @@ class _MessagesTabState extends State<MessagesTab> {
   bool _loading = true;
   String? _error;
   int _loadToken = 0;
+  StreamSubscription<BusinessImMessageEvent>? _messageSub;
 
   @override
   void initState() {
     super.initState();
     _conversationRevision = widget.controller.conversationVersion;
     widget.controller.addListener(_onControllerChanged);
+    _messageSub = widget.controller.messageEvents.listen(_onMessageEvent);
     _loadConversations(showLoading: true);
   }
 
@@ -142,12 +145,15 @@ class _MessagesTabState extends State<MessagesTab> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.controller != widget.controller) {
       oldWidget.controller.removeListener(_onControllerChanged);
+      _messageSub?.cancel();
       widget.controller.addListener(_onControllerChanged);
+      _messageSub = widget.controller.messageEvents.listen(_onMessageEvent);
     }
   }
 
   @override
   void dispose() {
+    _messageSub?.cancel();
     widget.controller.removeListener(_onControllerChanged);
     super.dispose();
   }
@@ -190,6 +196,19 @@ class _MessagesTabState extends State<MessagesTab> {
         _error = error.toString();
       });
     }
+  }
+
+  void _onMessageEvent(BusinessImMessageEvent event) {
+    if (!mounted || event.conversation.isEmpty) {
+      return;
+    }
+    final next = _upsertConversation(_conversations, event.conversation);
+    setState(() {
+      _conversations = next;
+      _loading = false;
+      _error = null;
+      _conversationRevision = widget.controller.conversationVersion;
+    });
   }
 
   @override
@@ -279,6 +298,31 @@ class _MessagesTabState extends State<MessagesTab> {
         );
       },
     );
+  }
+
+  List<Map<String, Object?>> _upsertConversation(
+    List<Map<String, Object?>> current,
+    Map<String, Object?> conversation,
+  ) {
+    final next = current
+        .map((item) => Map<String, Object?>.from(item))
+        .toList();
+    final channelId = _value(conversation, ['channel_id']);
+    final channelType = _channelTypeFromConversation(conversation);
+    final index = next.indexWhere(
+      (item) =>
+          _value(item, ['channel_id']) == channelId &&
+          _channelTypeFromConversation(item) == channelType,
+    );
+    if (index >= 0) {
+      next[index] = {...next[index], ...conversation};
+    } else {
+      next.insert(0, Map<String, Object?>.from(conversation));
+    }
+    next.sort(
+      (a, b) => _value(b, ['msg_time']).compareTo(_value(a, ['msg_time'])),
+    );
+    return next;
   }
 }
 
@@ -2129,6 +2173,7 @@ class _ChatPageState extends State<ChatPage> {
   int _messageLoadToken = 0;
   late int _conversationRevision;
   late int _messageRevision;
+  StreamSubscription<BusinessImMessageEvent>? _messageSub;
 
   bool get _isGroup => widget.channelType == _groupChannelType;
   String get _groupId =>
@@ -2141,6 +2186,7 @@ class _ChatPageState extends State<ChatPage> {
     _conversationRevision = widget.controller.conversationVersion;
     _messageRevision = _currentMessageRevision();
     widget.controller.addListener(_onControllerChanged);
+    _messageSub = widget.controller.messageEvents.listen(_onMessageEvent);
     unawaited(
       widget.controller.openConversation(
         channelId: widget.channelId,
@@ -2166,9 +2212,11 @@ class _ChatPageState extends State<ChatPage> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.controller != widget.controller) {
       oldWidget.controller.removeListener(_onControllerChanged);
+      _messageSub?.cancel();
       _conversationRevision = widget.controller.conversationVersion;
       _messageRevision = _currentMessageRevision();
       widget.controller.addListener(_onControllerChanged);
+      _messageSub = widget.controller.messageEvents.listen(_onMessageEvent);
     } else if (oldWidget.channelId != widget.channelId ||
         oldWidget.channelType != widget.channelType) {
       _conversationRevision = widget.controller.conversationVersion;
@@ -2197,6 +2245,26 @@ class _ChatPageState extends State<ChatPage> {
     _conversationRevision = nextConversation;
     _messageRevision = nextMessage;
     _loadMessagesIntoState(showLoading: false);
+  }
+
+  void _onMessageEvent(BusinessImMessageEvent event) {
+    if (!mounted ||
+        event.channelId != widget.channelId ||
+        event.channelType != widget.channelType) {
+      return;
+    }
+    setState(() {
+      _messages = _mergeMessageList(_messages, event.message, limit: 200);
+      _messagesLoading = false;
+      _messageRevision = _currentMessageRevision();
+      _conversationRevision = widget.controller.conversationVersion;
+    });
+    unawaited(
+      widget.controller.openConversation(
+        channelId: widget.channelId,
+        channelType: widget.channelType,
+      ),
+    );
   }
 
   int _currentMessageRevision() {
@@ -2252,6 +2320,7 @@ class _ChatPageState extends State<ChatPage> {
 
   @override
   void dispose() {
+    _messageSub?.cancel();
     widget.controller.closeConversation(
       channelId: widget.channelId,
       channelType: widget.channelType,
@@ -2264,6 +2333,39 @@ class _ChatPageState extends State<ChatPage> {
     );
     _textController.dispose();
     super.dispose();
+  }
+
+  List<Map<String, Object?>> _mergeMessageList(
+    List<Map<String, Object?>> current,
+    Map<String, Object?> incoming, {
+    required int limit,
+  }) {
+    final next = current
+        .map((item) => Map<String, Object?>.from(item))
+        .toList();
+    final clientMsgNo = _value(incoming, ['client_msg_no']);
+    final index = clientMsgNo.isEmpty
+        ? -1
+        : next.indexWhere(
+            (item) => _value(item, ['client_msg_no']) == clientMsgNo,
+          );
+    if (index >= 0) {
+      next[index] = {...next[index], ...incoming};
+    } else {
+      next.add(Map<String, Object?>.from(incoming));
+    }
+    next.sort((a, b) {
+      final seqA = _intValue(a, ['message_seq']);
+      final seqB = _intValue(b, ['message_seq']);
+      if (seqA > 0 && seqB > 0 && seqA != seqB) {
+        return seqA.compareTo(seqB);
+      }
+      return _value(a, ['timestamp']).compareTo(_value(b, ['timestamp']));
+    });
+    if (next.length <= limit) {
+      return next;
+    }
+    return next.sublist(next.length - limit);
   }
 
   @override

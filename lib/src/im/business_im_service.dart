@@ -22,6 +22,8 @@ class BusinessImService extends ChangeNotifier {
   final ApiClient _api;
   final ImCacheStore _cache;
   final Random _random = Random.secure();
+  final StreamController<BusinessImMessageEvent> _messageEvents =
+      StreamController<BusinessImMessageEvent>.broadcast();
 
   UserSession? _session;
   String _device = '';
@@ -44,6 +46,7 @@ class BusinessImService extends ChangeNotifier {
   final Set<String> _historySyncedChannels = <String>{};
   final Set<String> _openMessageChannels = <String>{};
 
+  Stream<BusinessImMessageEvent> get messageEvents => _messageEvents.stream;
   bool get isStarted => _started;
   String get statusText => _statusText;
   String? get lastError => _lastError;
@@ -396,6 +399,12 @@ class BusinessImService extends ChangeNotifier {
     );
     _upsertMessage(channelID, channelType, optimistic);
     _upsertConversationFromMessage(optimistic);
+    _publishMessageEvent(
+      source: 'send_local',
+      channelId: channelID,
+      channelType: channelType,
+      message: optimistic,
+    );
     _markMessageChannel(
       source: 'send_local',
       channelId: channelID,
@@ -431,6 +440,12 @@ class BusinessImService extends ChangeNotifier {
       );
       _upsertMessage(channelID, channelType, confirmed);
       _upsertConversationFromMessage(confirmed);
+      _publishMessageEvent(
+        source: 'send_confirmed',
+        channelId: channelID,
+        channelType: channelType,
+        message: confirmed,
+      );
       _markMessageChannel(
         source: 'send_confirmed',
         channelId: channelID,
@@ -452,6 +467,12 @@ class BusinessImService extends ChangeNotifier {
         ..['status'] = 'failed'
         ..['error'] = error.toString();
       _upsertMessage(channelID, channelType, failed);
+      _publishMessageEvent(
+        source: 'send_failed',
+        channelId: channelID,
+        channelType: channelType,
+        message: failed,
+      );
       _markMessageChannel(
         source: 'send_failed',
         channelId: channelID,
@@ -659,6 +680,12 @@ class BusinessImService extends ChangeNotifier {
     final message = _messageFromTcp(packet, channelId);
     _upsertMessage(channelId, packet.channelType, message);
     _upsertConversationFromMessage(message);
+    _publishMessageEvent(
+      source: 'tcp_recv',
+      channelId: channelId,
+      channelType: packet.channelType,
+      message: message,
+    );
     _markMessageChannel(
       source: 'tcp_recv',
       channelId: channelId,
@@ -1037,6 +1064,27 @@ class BusinessImService extends ChangeNotifier {
     _writeMessages(channelId, channelType, _sortAndLimit(messages, 200));
   }
 
+  void _publishMessageEvent({
+    required String source,
+    required String channelId,
+    required int channelType,
+    required Map<String, Object?> message,
+  }) {
+    if (_messageEvents.isClosed) {
+      return;
+    }
+    final conversation = _conversationForChannel(channelId, channelType);
+    _messageEvents.add(
+      BusinessImMessageEvent(
+        source: source,
+        channelId: channelId,
+        channelType: channelType,
+        message: Map<String, Object?>.from(message),
+        conversation: conversation,
+      ),
+    );
+  }
+
   List<Map<String, Object?>> _mergeMessages(
     List<Map<String, Object?>> current,
     List<Map<String, Object?>> incoming,
@@ -1135,6 +1183,21 @@ class BusinessImService extends ChangeNotifier {
     _latestConversations = conversations;
     _cache.writeConversations(uid: chat.uid, conversations: conversations);
     _bumpConversations('message_upsert');
+  }
+
+  Map<String, Object?> _conversationForChannel(
+    String channelId,
+    int channelType,
+  ) {
+    final chat = _requireChat();
+    for (final item in _cache.readConversations(chat.uid)) {
+      if (item['channel_id']?.toString() == channelId &&
+          (int.tryParse(item['channel_type']?.toString() ?? '') ?? 0) ==
+              channelType) {
+        return _normalizeConversation(item);
+      }
+    }
+    return const <String, Object?>{};
   }
 
   bool _clearConversationUnread(
@@ -1507,8 +1570,25 @@ class BusinessImService extends ChangeNotifier {
   @override
   void dispose() {
     unawaited(stop());
+    unawaited(_messageEvents.close());
     super.dispose();
   }
+}
+
+class BusinessImMessageEvent {
+  const BusinessImMessageEvent({
+    required this.source,
+    required this.channelId,
+    required this.channelType,
+    required this.message,
+    required this.conversation,
+  });
+
+  final String source;
+  final String channelId;
+  final int channelType;
+  final Map<String, Object?> message;
+  final Map<String, Object?> conversation;
 }
 
 class _TcpEndpoint {

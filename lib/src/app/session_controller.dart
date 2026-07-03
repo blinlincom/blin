@@ -57,6 +57,7 @@ class SessionController extends ChangeNotifier {
   String get imStatusText => _im.statusText;
   String? get imError => _im.lastError;
   int get conversationVersion => _im.conversationVersion;
+  Stream<BusinessImMessageEvent> get messageEvents => _im.messageEvents;
   int messageVersion({required String channelId, required int channelType}) =>
       _im.messageVersion(channelID: channelId, channelType: channelType);
 
