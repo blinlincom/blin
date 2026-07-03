@@ -1,5 +1,13 @@
 allprojects {
     repositories {
+        exclusiveContent {
+            forRepository {
+                maven("https://storage.googleapis.com/download.flutter.io")
+            }
+            filter {
+                includeGroup("io.flutter")
+            }
+        }
         google()
         mavenCentral()
         // GitHub Actions can hit intermittent 502s on regional mirrors, so they
