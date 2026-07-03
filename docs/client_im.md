@@ -63,7 +63,7 @@ SDK 回调：
 - `addOnNewMsgListener`：收到新消息后刷新本地会话。
 - `addOnRefreshMsgListener`：回执、撤回等消息刷新。
 - `addOnCmdListener`：处理已读、红包领取、转账收款、阅后即焚等命令后刷新。
-- `addOnSyncConversationListener`：SDK 冷启动/重连时调用业务端 `im_conversations`，转换为 `WKSyncConversation` 入库。
+- `addOnSyncConversationListener`：SDK 冷启动/重连时调用业务端 `im_conversations`，转换为 `WKSyncConversation` 入库；普通页面不能直接请求该接口刷新列表。
 - `addOnSyncChannelMsgListener`：SDK 拉频道历史时调用 `im_person_messages` 或 `im_group_messages`，转换为 `WKSyncChannelMsg` 入库。
 - `addOnGetChannelListener`：SDK 需要频道资料时从好友/群列表补全名称和头像。
 
@@ -85,6 +85,12 @@ SDK 回调：
 
 聊天页已经接入用户侧交互：文本、图片、语音、视频、文件、名片、表情、GIF、贴纸、红包、转账都从聊天工具面板进入；引用通过长按消息后点“引用”；群聊 @ 和阅后即焚通过“文本选项”设置；撤回、已读、领取红包、收转账通过长按消息进入。用户端不展示队列重试、在线连接、接口回执调试等运维入口。
 
+实时收发链路：
+
+- 收消息：SDK TCP 长连接收到消息后写入 SDK 本地库，`addOnNewMsgListener` / `addOnRefreshMsgListener` / `addOnCmdListener` 刷新会话和聊天页。
+- 发消息：客户端先请求业务端 `im_person_send` / `im_group_send`，由业务端执行好友关系、非好友三句限制、禁言、红包/转账资金和消息去重，再投递到悟空。业务端成功后客户端调用 SDK 频道同步，把服务端消息拉入 SDK 本地库并刷新 UI，不在客户端伪造本地消息。
+- 会话同步：`im_conversations` 只允许由 SDK `addOnSyncConversationListener` 触发；页面不直接请求该接口，避免反复轮询业务端。
+
 ## 客户端功能封装
 
 `lib/src/im/chat_feature_service.dart` 已封装业务端当前 IM 功能，所有方法都会使用 SDK 生成或复用 `client_msg_no`：
@@ -94,7 +100,7 @@ SDK 回调：
 - 群聊文本：支持 `mention_user_ids`、`mention_all`、`reply_client_msg_no`、`burn_after_read`。
 - 私聊文本：支持 `reply_client_msg_no`、`burn_after_read`。
 - 回执与动作：已读回执、回执状态、撤回、阅后即焚、红包领取、转账收款。
-- 好友：申请、处理申请、状态查询、删除好友。
+- 好友：搜索用户、申请、处理申请、状态查询、删除好友。
 - 群管理：建群、更新群资料、成员列表、加人、踢人、退出、解散、设置管理员、转让群主、禁言、解除禁言。
 - 用户侧会话：清空单聊会话、删除好友、群资料、群成员、退群、解散群。
 - 运维/后台能力：在线用户、重试发送失败队列、后台删除会话仍保留在业务端和服务封装里，不在普通客户端页面暴露。
@@ -113,7 +119,7 @@ SDK 回调：
 - `sendPrivateContactCard` / `sendGroupContactCard` -> `content_type=contact_card`
 - `sendPrivateTransfer` / `sendGroupTransfer` -> `content_type=transfer`
 - `sendPrivateRedPacket` / `sendGroupRedPacket` -> `content_type=red_packet`
-- `friendApply` / `friendHandle` / `friendApplyList` / `friendStatus` / `friendDelete` -> 好友接口
+- `friendSearch` / `friendApply` / `friendHandle` / `friendApplyList` / `friendStatus` / `friendDelete` -> 好友接口
 - `groupCreate` / `groupUpdate` / `groupMembers` / `groupMembersAdd` / `groupMembersRemove` / `groupMemberMute` / `groupMemberUnmute` / `groupAdminSet` / `groupOwnerTransfer` / `groupLeave` / `groupDelete` -> 群管理接口
 - `privateConversationDelete` -> 用户侧清空单聊会话
 - `retryMessages` / `onlineUsers` -> 后台或内部维护能力，普通客户端不开放入口
@@ -141,13 +147,28 @@ SDK 回调：
 ## 用户端页面
 
 - 登录/注册：业务端登录注册接口。
-- 消息：SDK 本地会话列表为主，业务端 `im_conversations` 为冷启动兜底。
+- 消息：只读取 SDK 本地会话列表。业务端 `im_conversations` 只能由悟空 SDK 会话同步回调触发，返回后由 SDK 入库并刷新 UI，页面层不做业务端兜底请求，避免重复轮询业务端。
 - 聊天页：读取 SDK 本地消息库；所有发送动作先走业务端 `im_person_send` / `im_group_send`，再由 SDK 长连接实时刷新；支持文本、图片、表情、GIF、贴纸、语音、视频、文件、名片、转账、红包、引用、群 @、阅后即焚、撤回、已读、红包领取、转账收款。
-- 联系人：好友列表、群聊列表、添加好友、好友申请、发起群聊。
+- 联系人：好友列表、群聊列表、添加好友、好友申请、搜索用户、发起群聊。
 - 发现：添加朋友、新的朋友、发起群聊、我的群聊，全部为用户侧入口。
 - 群资料：查看群成员、添加成员、禁言/解除禁言、设管理员、转让群主、移出成员、退群、解散群。
 - 私聊设置：查看好友状态、清空聊天、删除好友。
 - 我的：展示设备号、IM UID、TCP 地址、冷启动/热启动时间和连接状态。
+
+## 好友搜索
+
+客户端搜索页会同时筛选 SDK/业务端已同步的本地好友、群聊，并调用业务端新 IM 接口 `im_friend_search` 搜索用户候选。
+
+请求参数：`appid`、`usertoken`、`device`、`device_flag`、`device_level`、`timestamp`、`sign`，以及 `keyword` 或 `friend_id`，可选 `limit`。
+
+返回字段：`list[].user`、`friend_id`、`uid`、`channel_id`、`channel_type`、`is_friend`、`non_friend_message_limit`、`non_friend_message_count`、`pending_out_apply`、`pending_in_apply`。
+
+客户端规则：
+
+- 已是好友：点击搜索结果进入私聊，私聊频道使用返回的 `channel_id`。
+- 已发申请：显示已申请，不重复发起。
+- 对方已申请：跳转好友申请页处理。
+- 未建立关系：调用 `im_friend_apply` 发起好友申请。
 
 ## 校验
 

@@ -1,5 +1,6 @@
 import 'package:dio/dio.dart';
 
+import 'app_logger.dart';
 import 'api_signer.dart';
 import 'app_config.dart';
 import 'models.dart';
@@ -425,6 +426,17 @@ class ApiClient {
     Map<String, Object?> params, {
     String filePath = '',
   }) async {
+    final stopwatch = Stopwatch()..start();
+    AppLogger.info(
+      'api',
+      'post start',
+      data: {
+        'action': action,
+        'base_url': baseUrl,
+        'has_file': filePath.isNotEmpty,
+        'params': params,
+      },
+    );
     try {
       final requestData = <String, Object?>{'appid': appId, ...params};
       if (filePath.isNotEmpty) {
@@ -434,13 +446,55 @@ class ApiClient {
         action,
         data: FormData.fromMap(requestData),
       );
-      return _parse<T>(response.data);
+      final result = _parse<T>(response.data);
+      AppLogger.info(
+        'api',
+        'post success',
+        data: {
+          'action': action,
+          'code': result.code,
+          'msg': result.message,
+          'ms': stopwatch.elapsedMilliseconds,
+        },
+      );
+      return result;
     } on DioException catch (error) {
       final response = error.response?.data;
+      AppLogger.error(
+        'api',
+        'post dio error',
+        error: error.message,
+        data: {
+          'action': action,
+          'type': error.type.name,
+          'status_code': error.response?.statusCode,
+          'ms': stopwatch.elapsedMilliseconds,
+        },
+      );
       if (response != null) {
-        return _parse<T>(response);
+        final result = _parse<T>(response);
+        AppLogger.warn(
+          'api',
+          'post error response',
+          data: {
+            'action': action,
+            'code': result.code,
+            'msg': result.message,
+            'ms': stopwatch.elapsedMilliseconds,
+          },
+        );
+        return result;
       }
       throw ApiException(error.message ?? '网络请求失败');
+    } catch (error, stackTrace) {
+      AppLogger.error(
+        'api',
+        'post failed',
+        error: error,
+        stackTrace: stackTrace,
+        data: {'action': action, 'ms': stopwatch.elapsedMilliseconds},
+      );
+      rethrow;
     }
   }
 

@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import '../core/api_client.dart';
+import '../core/app_logger.dart';
 import '../core/models.dart';
 import '../core/session_store.dart';
 import '../im/chat_feature_service.dart';
@@ -34,6 +35,14 @@ class SessionController extends ChangeNotifier {
   String? _error;
   int _lastColdLaunchAt = 0;
   int _lastHotResumeAt = 0;
+  DateTime? _lastHotRefreshAt;
+  Future<void>? _refreshRequest;
+  List<Map<String, Object?>> _friendCache = const [];
+  List<Map<String, Object?>> _groupCache = const [];
+  DateTime? _friendCacheAt;
+  DateTime? _groupCacheAt;
+  Future<List<Map<String, Object?>>>? _friendRequest;
+  Future<List<Map<String, Object?>>>? _groupRequest;
 
   UserSession? get session => _session;
   AppInfo? get appInfo => _appInfo;
@@ -46,8 +55,10 @@ class SessionController extends ChangeNotifier {
   int get lastHotResumeAt => _lastHotResumeAt;
   String get imStatusText => _im.statusText;
   String? get imError => _im.lastError;
+  int get conversationVersion => _im.conversationVersion;
 
   Future<void> coldStart() async {
+    AppLogger.info('session', 'cold start');
     _booting = true;
     _error = null;
     notifyListeners();
@@ -62,14 +73,26 @@ class SessionController extends ChangeNotifier {
       if (_session != null) {
         await _refreshLoggedInSession();
       }
+      AppLogger.info(
+        'session',
+        'cold start success',
+        data: {'logged_in': _session != null, 'device': _device},
+      );
     } on ApiException catch (error) {
       if (error.code == 401 || error.code == 403) {
         _store.clearSession();
         _session = null;
       }
       _error = error.message;
+      AppLogger.error(
+        'session',
+        'cold start api error',
+        error: error,
+        data: {'code': error.code},
+      );
     } catch (error) {
       _error = error.toString();
+      AppLogger.error('session', 'cold start failed', error: error);
     } finally {
       _booting = false;
       notifyListeners();
@@ -77,23 +100,39 @@ class SessionController extends ChangeNotifier {
   }
 
   Future<void> hotResume() async {
+    AppLogger.info('session', 'hot resume');
     _lastHotResumeAt = _store.markHotResume();
     _session = _store.readSession();
     notifyListeners();
     if (_session == null) {
       return;
     }
+    final lastRefresh = _lastHotRefreshAt;
+    if (lastRefresh != null &&
+        DateTime.now().difference(lastRefresh) < const Duration(seconds: 20)) {
+      AppLogger.info('session', 'skip hot resume refresh');
+      return;
+    }
     try {
       await _refreshLoggedInSession();
+      _lastHotRefreshAt = DateTime.now();
+      AppLogger.info('session', 'hot resume success');
     } on ApiException catch (error) {
       if (error.code == 401 || error.code == 403) {
         _store.clearSession();
         _session = null;
       }
       _error = error.message;
+      AppLogger.error(
+        'session',
+        'hot resume api error',
+        error: error,
+        data: {'code': error.code},
+      );
       notifyListeners();
     } catch (error) {
       _error = error.toString();
+      AppLogger.error('session', 'hot resume failed', error: error);
       notifyListeners();
     }
   }
@@ -146,22 +185,83 @@ class SessionController extends ChangeNotifier {
   }
 
   Future<List<Map<String, Object?>>> loadConversations() async {
-    final current = _requireSession();
-    final local = await _im.refreshLocalConversations();
-    if (local.isNotEmpty) {
-      return local;
-    }
-    return _api.conversations(session: current, device: _device);
+    _requireSession();
+    AppLogger.info('session', 'load conversations start');
+    final local = await _im
+        .refreshLocalConversations(notify: false)
+        .timeout(
+          const Duration(seconds: 8),
+          onTimeout: () {
+            AppLogger.warn('session', 'local conversations timeout');
+            return <Map<String, Object?>>[];
+          },
+        );
+    AppLogger.info(
+      'session',
+      'load conversations sdk local success',
+      data: {'count': local.length},
+    );
+    return local;
   }
 
   Future<List<Map<String, Object?>>> loadFriends() async {
     final current = _requireSession();
-    return _api.friends(session: current, device: _device);
+    if (_isCacheFresh(_friendCacheAt)) {
+      AppLogger.info(
+        'session',
+        'load friends memory cache',
+        data: {'count': _friendCache.length},
+      );
+      return _friendCache;
+    }
+    if (_friendRequest != null) {
+      AppLogger.info('session', 'reuse friends request');
+      return _friendRequest!;
+    }
+    AppLogger.info('session', 'load friends start');
+    _friendRequest = _api
+        .friends(session: current, device: _device)
+        .timeout(const Duration(seconds: 15));
+    final list = await _friendRequest!.whenComplete(
+      () => _friendRequest = null,
+    );
+    _friendCache = list;
+    _friendCacheAt = DateTime.now();
+    AppLogger.info(
+      'session',
+      'load friends success',
+      data: {'count': list.length},
+    );
+    return list;
   }
 
   Future<List<Map<String, Object?>>> loadGroups() async {
     final current = _requireSession();
-    return _api.groups(session: current, device: _device);
+    if (_isCacheFresh(_groupCacheAt)) {
+      AppLogger.info(
+        'session',
+        'load groups memory cache',
+        data: {'count': _groupCache.length},
+      );
+      return _groupCache;
+    }
+    if (_groupRequest != null) {
+      AppLogger.info('session', 'reuse groups request');
+      return _groupRequest!;
+    }
+    AppLogger.info('session', 'load groups start');
+    _groupRequest = _api
+        .groups(session: current, device: _device)
+        .timeout(const Duration(seconds: 15));
+    final list = await _groupRequest!.whenComplete(() => _groupRequest = null);
+    _groupCache = list;
+    _groupCacheAt = DateTime.now();
+    AppLogger.info(
+      'session',
+      'load groups success',
+      data: {'count': list.length},
+    );
+    return list;
   }
 
   Future<List<Map<String, Object?>>> loadLocalMessages({
@@ -174,6 +274,10 @@ class SessionController extends ChangeNotifier {
       channelType: channelType,
       groupId: groupId,
     );
+  }
+
+  Future<void> refreshLocalConversations() {
+    return _im.refreshLocalConversations();
   }
 
   Future<void> sendTextMessage({
@@ -216,7 +320,11 @@ class SessionController extends ChangeNotifier {
       );
     }
     _chat.clearDraft(channelId: channelId, channelType: channelType);
-    await _im.refreshLocalConversations();
+    await _syncChannelAfterSend(
+      channelId: channelId,
+      channelType: channelType,
+      groupId: groupId,
+    );
   }
 
   String readDraft({required String channelId, required int channelType}) {
@@ -320,9 +428,9 @@ class SessionController extends ChangeNotifier {
     String url = '',
     String filePath = '',
     Map<String, Object?> params = const {},
-  }) {
+  }) async {
     final current = _requireSession();
-    return _chat.sendPrivateMedia(
+    final result = await _chat.sendPrivateMedia(
       session: current,
       device: _device,
       receiverId: receiverId,
@@ -331,17 +439,23 @@ class SessionController extends ChangeNotifier {
       filePath: filePath,
       params: params,
     );
+    await _syncChannelAfterSend(
+      channelId: _uidFromUserId(receiverId),
+      channelType: 1,
+    );
+    return result;
   }
 
   Future<Map<String, Object?>> sendGroupMedia({
     required String groupId,
     required String contentType,
+    String channelId = '',
     String url = '',
     String filePath = '',
     Map<String, Object?> params = const {},
-  }) {
+  }) async {
     final current = _requireSession();
-    return _chat.sendGroupMedia(
+    final result = await _chat.sendGroupMedia(
       session: current,
       device: _device,
       groupId: groupId,
@@ -350,47 +464,70 @@ class SessionController extends ChangeNotifier {
       filePath: filePath,
       params: params,
     );
+    await _syncChannelAfterSend(
+      channelId: channelId.isEmpty ? groupId : channelId,
+      channelType: 2,
+      groupId: groupId,
+    );
+    return result;
   }
 
   Future<Map<String, Object?>> sendPrivateContactCard({
     required String receiverId,
     required String cardUserId,
-  }) {
+  }) async {
     final current = _requireSession();
-    return _chat.sendPrivateContactCard(
+    final result = await _chat.sendPrivateContactCard(
       session: current,
       device: _device,
       receiverId: receiverId,
       cardUserId: cardUserId,
     );
+    await _syncChannelAfterSend(
+      channelId: _uidFromUserId(receiverId),
+      channelType: 1,
+    );
+    return result;
   }
 
   Future<Map<String, Object?>> sendGroupContactCard({
     required String groupId,
     required String cardUserId,
-  }) {
+    String channelId = '',
+  }) async {
     final current = _requireSession();
-    return _chat.sendGroupContactCard(
+    final result = await _chat.sendGroupContactCard(
       session: current,
       device: _device,
       groupId: groupId,
       cardUserId: cardUserId,
     );
+    await _syncChannelAfterSend(
+      channelId: channelId.isEmpty ? groupId : channelId,
+      channelType: 2,
+      groupId: groupId,
+    );
+    return result;
   }
 
   Future<Map<String, Object?>> sendPrivateTransfer({
     required String receiverId,
     required String money,
     required String assetType,
-  }) {
+  }) async {
     final current = _requireSession();
-    return _chat.sendPrivateTransfer(
+    final result = await _chat.sendPrivateTransfer(
       session: current,
       device: _device,
       receiverId: receiverId,
       money: money,
       assetType: assetType,
     );
+    await _syncChannelAfterSend(
+      channelId: _uidFromUserId(receiverId),
+      channelType: 1,
+    );
+    return result;
   }
 
   Future<Map<String, Object?>> sendGroupTransfer({
@@ -398,9 +535,10 @@ class SessionController extends ChangeNotifier {
     required String receiverId,
     required String money,
     required String assetType,
-  }) {
+    String channelId = '',
+  }) async {
     final current = _requireSession();
-    return _chat.sendGroupTransfer(
+    final result = await _chat.sendGroupTransfer(
       session: current,
       device: _device,
       groupId: groupId,
@@ -408,6 +546,12 @@ class SessionController extends ChangeNotifier {
       money: money,
       assetType: assetType,
     );
+    await _syncChannelAfterSend(
+      channelId: channelId.isEmpty ? groupId : channelId,
+      channelType: 2,
+      groupId: groupId,
+    );
+    return result;
   }
 
   Future<Map<String, Object?>> sendPrivateRedPacket({
@@ -415,9 +559,9 @@ class SessionController extends ChangeNotifier {
     required String money,
     required String assetType,
     String remark = '',
-  }) {
+  }) async {
     final current = _requireSession();
-    return _chat.sendPrivateRedPacket(
+    final result = await _chat.sendPrivateRedPacket(
       session: current,
       device: _device,
       receiverId: receiverId,
@@ -425,6 +569,11 @@ class SessionController extends ChangeNotifier {
       assetType: assetType,
       remark: remark,
     );
+    await _syncChannelAfterSend(
+      channelId: _uidFromUserId(receiverId),
+      channelType: 1,
+    );
+    return result;
   }
 
   Future<Map<String, Object?>> sendGroupRedPacket({
@@ -435,9 +584,10 @@ class SessionController extends ChangeNotifier {
     int quantity = 1,
     String receiverId = '',
     String remark = '',
-  }) {
+    String channelId = '',
+  }) async {
     final current = _requireSession();
-    return _chat.sendGroupRedPacket(
+    final result = await _chat.sendGroupRedPacket(
       session: current,
       device: _device,
       groupId: groupId,
@@ -448,6 +598,12 @@ class SessionController extends ChangeNotifier {
       receiverId: receiverId,
       remark: remark,
     );
+    await _syncChannelAfterSend(
+      channelId: channelId.isEmpty ? groupId : channelId,
+      channelType: 2,
+      groupId: groupId,
+    );
+    return result;
   }
 
   Future<Map<String, Object?>> applyFriend({
@@ -649,6 +805,21 @@ class SessionController extends ChangeNotifier {
     );
   }
 
+  Future<Map<String, Object?>> searchFriends({
+    String keyword = '',
+    String friendId = '',
+    int limit = 20,
+  }) {
+    final current = _requireSession();
+    return _chat.friendSearch(
+      session: current,
+      device: _device,
+      keyword: keyword,
+      friendId: friendId,
+      limit: limit,
+    );
+  }
+
   Future<Map<String, Object?>> deleteFriend(String friendId) {
     final current = _requireSession();
     return _chat.friendDelete(
@@ -687,9 +858,11 @@ class SessionController extends ChangeNotifier {
   }
 
   Future<void> logout() async {
+    AppLogger.info('session', 'logout start');
     final current = _session;
     _store.clearSession();
     _session = null;
+    _clearListCaches();
     notifyListeners();
     if (current == null) {
       return;
@@ -697,8 +870,10 @@ class SessionController extends ChangeNotifier {
     try {
       await _im.stop(logout: true);
       await _api.logout(session: current, device: _device);
+      AppLogger.info('session', 'logout success');
     } catch (_) {
       // 本地退出必须即时生效，服务端设备退出失败由下次登录覆盖 token。
+      AppLogger.warn('session', 'logout remote failed');
     }
   }
 
@@ -716,13 +891,66 @@ class SessionController extends ChangeNotifier {
   }
 
   Future<void> _refreshLoggedInSession() async {
+    final existing = _refreshRequest;
+    if (existing != null) {
+      AppLogger.info('session', 'reuse refresh logged in session request');
+      return existing;
+    }
+    _refreshRequest = _doRefreshLoggedInSession();
+    try {
+      await _refreshRequest;
+    } finally {
+      _refreshRequest = null;
+    }
+  }
+
+  Future<void> _doRefreshLoggedInSession() async {
     final current = _requireSession();
+    AppLogger.info('session', 'refresh logged in session start');
     final chat = await _api.connectIm(session: current, device: _device);
     final withChat = current.copyWith(chat: chat);
     final withProfile = await _api.getCurrentUser(withChat);
     _session = withProfile;
     _store.writeSession(withProfile);
     await _im.start(withProfile, device: _device);
+    AppLogger.info(
+      'session',
+      'refresh logged in session success',
+      data: {
+        'uid': withProfile.chat?.uid ?? '',
+        'tcp': withProfile.chat?.route.tcpAddr ?? '',
+      },
+    );
+  }
+
+  Future<void> _syncChannelAfterSend({
+    required String channelId,
+    required int channelType,
+    String groupId = '',
+  }) {
+    return _im.syncChannelAfterSend(
+      channelID: channelId,
+      channelType: channelType,
+      groupId: groupId,
+    );
+  }
+
+  bool _isCacheFresh(DateTime? time) {
+    if (time == null) {
+      return false;
+    }
+    return DateTime.now().difference(time) < const Duration(seconds: 30);
+  }
+
+  void _clearListCaches() {
+    _friendCache = const [];
+    _groupCache = const [];
+    _friendCacheAt = null;
+    _groupCacheAt = null;
+    _friendRequest = null;
+    _groupRequest = null;
+    _refreshRequest = null;
+    _lastHotRefreshAt = null;
   }
 
   Future<void> _runBusy(Future<void> Function() task) async {
@@ -733,9 +961,16 @@ class SessionController extends ChangeNotifier {
       await task();
     } on ApiException catch (error) {
       _error = error.message;
+      AppLogger.error(
+        'session',
+        'busy task api error',
+        error: error,
+        data: {'code': error.code},
+      );
       rethrow;
     } catch (error) {
       _error = error.toString();
+      AppLogger.error('session', 'busy task failed', error: error);
       rethrow;
     } finally {
       _busy = false;
@@ -746,6 +981,13 @@ class SessionController extends ChangeNotifier {
   String _userIdFromUid(String uid) {
     final match = RegExp(r'user(\d+)$').firstMatch(uid);
     return match?.group(1) ?? uid;
+  }
+
+  String _uidFromUserId(String userId) {
+    if (userId.startsWith('app')) {
+      return userId;
+    }
+    return 'app${_api.appId}user$userId';
   }
 
   @override

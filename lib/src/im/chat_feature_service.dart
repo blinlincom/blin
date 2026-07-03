@@ -367,6 +367,25 @@ class ChatFeatureService {
     );
   }
 
+  Future<Map<String, Object?>> friendSearch({
+    required UserSession session,
+    required String device,
+    String keyword = '',
+    String friendId = '',
+    int limit = 20,
+  }) {
+    return action(
+      action: 'im_friend_search',
+      session: session,
+      device: device,
+      params: {
+        if (keyword.isNotEmpty) 'keyword': keyword,
+        if (friendId.isNotEmpty) 'friend_id': friendId,
+        'limit': limit.toString(),
+      },
+    );
+  }
+
   Future<Map<String, Object?>> friendDelete({
     required UserSession session,
     required String device,

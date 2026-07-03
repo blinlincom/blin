@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../app/session_controller.dart';
 import '../../core/app_config.dart';
+import '../../core/app_logger.dart';
 import '../../core/models.dart';
 import '../../im/im_message_types.dart';
 
@@ -131,66 +132,102 @@ class _HomePageState extends State<HomePage> {
   }
 }
 
-class MessagesTab extends StatelessWidget {
+class MessagesTab extends StatefulWidget {
   const MessagesTab({required this.controller, super.key});
 
   final SessionController controller;
 
   @override
+  State<MessagesTab> createState() => _MessagesTabState();
+}
+
+class _MessagesTabState extends State<MessagesTab> {
+  late int _conversationRevision;
+
+  @override
+  void initState() {
+    super.initState();
+    _conversationRevision = widget.controller.conversationVersion;
+    widget.controller.addListener(_onControllerChanged);
+  }
+
+  @override
+  void didUpdateWidget(MessagesTab oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.controller != widget.controller) {
+      oldWidget.controller.removeListener(_onControllerChanged);
+      widget.controller.addListener(_onControllerChanged);
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.controller.removeListener(_onControllerChanged);
+    super.dispose();
+  }
+
+  void _onControllerChanged() {
+    if (!mounted) {
+      return;
+    }
+    final next = widget.controller.conversationVersion;
+    if (next != _conversationRevision) {
+      setState(() => _conversationRevision = next);
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: controller,
-      builder: (context, _) {
-        return _AsyncList(
-          loader: controller.loadConversations,
-          emptyText: '暂无会话',
-          header: Column(
-            children: [
-              _SearchBar(
-                hintText: '搜索',
-                onTap: () => _push(context, SearchPage(controller: controller)),
-              ),
-              _ConnectionHeader(
-                text: controller.imError == null
-                    ? controller.imStatusText
-                    : '${controller.imStatusText} · ${controller.imError}',
-              ),
-            ],
+    return _AsyncList(
+      revision: _conversationRevision,
+      loader: widget.controller.loadConversations,
+      emptyText: '暂无会话',
+      header: Column(
+        children: [
+          _SearchBar(
+            hintText: '搜索',
+            onTap: () =>
+                _push(context, SearchPage(controller: widget.controller)),
           ),
-          itemBuilder: (context, item) {
-            final title = _conversationTitle(item);
-            final content = item['content']?.toString() ?? '';
-            final time = item['msg_time']?.toString() ?? '';
-            final unread = _intValue(item, ['unread_quantity']);
-            final channelId = _value(item, ['channel_id']);
-            final channelType = _intValue(item, ['channel_type']);
-            return _ConversationTile(
-              title: title,
-              subtitle: content.isEmpty ? '暂无最新消息' : content,
-              time: time,
-              unread: unread,
-              isGroup: channelType == _groupChannelType,
-              onTap: () {
-                if (channelId.isEmpty) {
-                  return;
-                }
-                Navigator.of(context).push(
-                  MaterialPageRoute<void>(
-                    builder: (_) => ChatPage(
-                      controller: controller,
-                      title: title,
-                      channelId: channelId,
-                      groupId: _value(item, [
-                        'group_id',
-                        'id',
-                      ], fallback: channelId),
-                      channelType: channelType == 0
-                          ? _channelTypeFromConversation(item)
-                          : channelType,
-                    ),
-                  ),
-                );
-              },
+          _ConnectionHeader(
+            text: widget.controller.imError == null
+                ? widget.controller.imStatusText
+                : '${widget.controller.imStatusText} · ${widget.controller.imError}',
+          ),
+        ],
+      ),
+      itemBuilder: (context, item) {
+        final title = _conversationTitle(item);
+        final content = item['content']?.toString() ?? '';
+        final time = item['msg_time']?.toString() ?? '';
+        final unread = _intValue(item, ['unread_quantity']);
+        final channelId = _value(item, ['channel_id']);
+        final channelType = _intValue(item, ['channel_type']);
+        return _ConversationTile(
+          title: title,
+          subtitle: content.isEmpty ? '暂无最新消息' : content,
+          time: time,
+          unread: unread,
+          isGroup: channelType == _groupChannelType,
+          onTap: () {
+            if (channelId.isEmpty) {
+              return;
+            }
+            Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => ChatPage(
+                  controller: widget.controller,
+                  title: title,
+                  channelId: channelId,
+                  groupId: _value(item, [
+                    'group_id',
+                    'id',
+                  ], fallback: channelId),
+                  channelType: channelType == 0
+                      ? _channelTypeFromConversation(item)
+                      : channelType,
+                ),
+              ),
             );
           },
         );
@@ -199,21 +236,45 @@ class MessagesTab extends StatelessWidget {
   }
 }
 
-class ContactsTab extends StatelessWidget {
+class ContactsTab extends StatefulWidget {
   const ContactsTab({required this.controller, super.key});
 
   final SessionController controller;
 
   @override
+  State<ContactsTab> createState() => _ContactsTabState();
+}
+
+class _ContactsTabState extends State<ContactsTab> {
+  late Future<List<List<Map<String, Object?>>>> _future;
+
+  @override
+  void initState() {
+    super.initState();
+    _future = _load();
+  }
+
+  Future<List<List<Map<String, Object?>>>> _load() {
+    return Future.wait([
+      widget.controller.loadFriends(),
+      widget.controller.loadGroups(),
+    ]);
+  }
+
+  void _reload() {
+    setState(() => _future = _load());
+  }
+
+  @override
   Widget build(BuildContext context) {
     return FutureBuilder<List<List<Map<String, Object?>>>>(
-      future: Future.wait([controller.loadFriends(), controller.loadGroups()]),
+      future: _future,
       builder: (context, snapshot) {
         if (snapshot.connectionState != ConnectionState.done) {
           return const Center(child: CircularProgressIndicator());
         }
         if (snapshot.hasError) {
-          return _ErrorState(text: snapshot.error.toString());
+          return _ErrorState(text: snapshot.error.toString(), onRetry: _reload);
         }
         final friends = snapshot.data?[0] ?? [];
         final groups = snapshot.data?[1] ?? [];
@@ -222,22 +283,26 @@ class ContactsTab extends StatelessWidget {
           children: [
             _SearchBar(
               hintText: '搜索',
-              onTap: () => _push(context, SearchPage(controller: controller)),
+              onTap: () =>
+                  _push(context, SearchPage(controller: widget.controller)),
             ),
             _MenuTile(
               icon: Icons.person_add_alt_1,
               iconColor: const Color(0xffffa51f),
               title: '新的朋友',
               subtitle: '添加好友与处理申请',
-              onTap: () =>
-                  _push(context, FriendRequestsPage(controller: controller)),
+              onTap: () => _push(
+                context,
+                FriendRequestsPage(controller: widget.controller),
+              ),
             ),
             _MenuTile(
               icon: Icons.groups_outlined,
               iconColor: const Color(0xff34c759),
               title: '群聊',
               subtitle: '我的群与发起群聊',
-              onTap: () => _push(context, MyGroupsPage(controller: controller)),
+              onTap: () =>
+                  _push(context, MyGroupsPage(controller: widget.controller)),
             ),
             _MenuTile(
               icon: Icons.person_add_alt,
@@ -245,7 +310,7 @@ class ContactsTab extends StatelessWidget {
               title: '添加朋友',
               subtitle: '搜索用户 ID',
               onTap: () =>
-                  _push(context, AddFriendPage(controller: controller)),
+                  _push(context, AddFriendPage(controller: widget.controller)),
             ),
             const _SectionHeader(text: '好友'),
             if (friends.isEmpty) const _EmptyRow(text: '暂无好友'),
@@ -255,11 +320,11 @@ class ContactsTab extends StatelessWidget {
                 subtitle: _value(item, ['signature', 'remark', 'username']),
                 trailing: _friendUserId(item),
                 isGroup: false,
-                onTap: () => _openPrivateChat(context, controller, item),
+                onTap: () => _openPrivateChat(context, widget.controller, item),
                 onLongPress: () => _push(
                   context,
                   PrivateChatActionsPage(
-                    controller: controller,
+                    controller: widget.controller,
                     title: _friendTitle(item),
                     receiverId: _friendUserId(item),
                     channelId: _friendChannelId(item),
@@ -274,7 +339,7 @@ class ContactsTab extends StatelessWidget {
                 subtitle: _value(item, ['notice', 'description']),
                 trailing: '${_intValue(item, ['member_count', 'members'])}人',
                 isGroup: true,
-                onTap: () => _openGroupChat(context, controller, item),
+                onTap: () => _openGroupChat(context, widget.controller, item),
               ),
           ],
         );
@@ -536,11 +601,51 @@ class SearchPage extends StatefulWidget {
 
 class _SearchPageState extends State<SearchPage> {
   final _keyword = TextEditingController();
+  late Future<List<List<Map<String, Object?>>>> _future;
+  Future<Map<String, Object?>>? _friendSearchFuture;
+  String _friendSearchKeyword = '';
+  String _message = '';
+  String _error = '';
+  bool _acting = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _future = _load();
+  }
 
   @override
   void dispose() {
     _keyword.dispose();
     super.dispose();
+  }
+
+  Future<List<List<Map<String, Object?>>>> _load() {
+    return Future.wait([
+      widget.controller.loadFriends(),
+      widget.controller.loadGroups(),
+    ]);
+  }
+
+  void _reload() {
+    setState(() => _future = _load());
+  }
+
+  void _searchRemoteFriends() {
+    final keyword = _keyword.text.trim();
+    if (keyword.isEmpty) {
+      setState(() => _error = '请输入用户 ID、用户名或昵称');
+      return;
+    }
+    setState(() {
+      _friendSearchKeyword = keyword;
+      _friendSearchFuture = widget.controller.searchFriends(
+        keyword: keyword,
+        limit: 20,
+      );
+      _message = '';
+      _error = '';
+    });
   }
 
   @override
@@ -549,16 +654,16 @@ class _SearchPageState extends State<SearchPage> {
       appBar: AppBar(title: const Text('搜索')),
       body: SafeArea(
         child: FutureBuilder<List<List<Map<String, Object?>>>>(
-          future: Future.wait([
-            widget.controller.loadFriends(),
-            widget.controller.loadGroups(),
-          ]),
+          future: _future,
           builder: (context, snapshot) {
             if (snapshot.connectionState != ConnectionState.done) {
               return const Center(child: CircularProgressIndicator());
             }
             if (snapshot.hasError) {
-              return _ErrorState(text: snapshot.error.toString());
+              return _ErrorState(
+                text: snapshot.error.toString(),
+                onRetry: _reload,
+              );
             }
             final keyword = _keyword.text.trim().toLowerCase();
             final friends = (snapshot.data?[0] ?? []).where((item) {
@@ -577,11 +682,45 @@ class _SearchPageState extends State<SearchPage> {
                   child: TextField(
                     controller: _keyword,
                     autofocus: true,
+                    textInputAction: TextInputAction.search,
                     onChanged: (_) => setState(() {}),
+                    onSubmitted: (_) => _searchRemoteFriends(),
                     decoration: const InputDecoration(
                       prefixIcon: Icon(Icons.search),
-                      hintText: '搜索联系人、群聊',
+                      hintText: '搜索用户、联系人、群聊',
                     ),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: _ButtonRow(
+                    children: [
+                      FilledButton.icon(
+                        onPressed: _acting ? null : _searchRemoteFriends,
+                        icon: const Icon(Icons.person_search_outlined),
+                        label: const Text('搜索用户'),
+                      ),
+                      OutlinedButton.icon(
+                        onPressed: _reload,
+                        icon: const Icon(Icons.refresh),
+                        label: const Text('刷新本地'),
+                      ),
+                    ],
+                  ),
+                ),
+                if (_acting) const _LinearBusy(),
+                _ResultBlock(text: _message),
+                _ErrorBlock(text: _error),
+                const _SectionHeader(text: '搜索用户'),
+                _RemoteFriendSearchBlock(
+                  controller: widget.controller,
+                  keyword: _friendSearchKeyword,
+                  future: _friendSearchFuture,
+                  onOpenChat: _openRemoteFriendChat,
+                  onApply: _applyRemoteFriend,
+                  onHandleIncoming: () => _push(
+                    context,
+                    FriendRequestsPage(controller: widget.controller),
                   ),
                 ),
                 const _SectionHeader(text: '好友'),
@@ -612,6 +751,121 @@ class _SearchPageState extends State<SearchPage> {
           },
         ),
       ),
+    );
+  }
+
+  Future<void> _applyRemoteFriend(Map<String, Object?> item) async {
+    final friendId = _searchFriendId(item);
+    if (friendId.isEmpty) {
+      setState(() => _error = '用户 ID 为空');
+      return;
+    }
+    setState(() {
+      _acting = true;
+      _message = '';
+      _error = '';
+    });
+    try {
+      final result = await widget.controller.applyFriend(
+        friendId: friendId,
+        remark: '通过搜索添加',
+      );
+      _message = _friendlyResult(result, successText: '好友申请已发送');
+      if (_friendSearchKeyword.isNotEmpty) {
+        _friendSearchFuture = widget.controller.searchFriends(
+          keyword: _friendSearchKeyword,
+          limit: 20,
+        );
+      }
+    } catch (error) {
+      _error = error.toString();
+    } finally {
+      if (mounted) {
+        setState(() => _acting = false);
+      }
+    }
+  }
+
+  void _openRemoteFriendChat(Map<String, Object?> item) {
+    final user = _asObjectMap(item['user']);
+    final friendId = _searchFriendId(item);
+    final channelId = _value(item, [
+      'channel_id',
+      'uid',
+    ], fallback: _uidFromUserId(friendId));
+    if (friendId.isEmpty || channelId.isEmpty) {
+      setState(() => _error = '用户 IM 信息为空');
+      return;
+    }
+    _openPrivateChat(context, widget.controller, {
+      ...user,
+      'friend_id': friendId,
+      'userid': friendId,
+      'channel_id': channelId,
+    });
+  }
+}
+
+class _RemoteFriendSearchBlock extends StatelessWidget {
+  const _RemoteFriendSearchBlock({
+    required this.controller,
+    required this.keyword,
+    required this.future,
+    required this.onOpenChat,
+    required this.onApply,
+    required this.onHandleIncoming,
+  });
+
+  final SessionController controller;
+  final String keyword;
+  final Future<Map<String, Object?>>? future;
+  final void Function(Map<String, Object?> item) onOpenChat;
+  final void Function(Map<String, Object?> item) onApply;
+  final VoidCallback onHandleIncoming;
+
+  @override
+  Widget build(BuildContext context) {
+    final request = future;
+    if (request == null) {
+      return const _EmptyRow(text: '输入用户 ID、用户名或昵称后搜索');
+    }
+    return FutureBuilder<Map<String, Object?>>(
+      future: request,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState != ConnectionState.done) {
+          return const Padding(
+            padding: EdgeInsets.all(16),
+            child: Center(child: CircularProgressIndicator()),
+          );
+        }
+        if (snapshot.hasError) {
+          return _ErrorState(text: snapshot.error.toString());
+        }
+        final items = _listFromResult(snapshot.data ?? const {});
+        if (items.isEmpty) {
+          return _EmptyRow(text: keyword.isEmpty ? '暂无搜索结果' : '未找到用户');
+        }
+        return Column(
+          children: [
+            for (final item in items)
+              _PlainListTile(
+                icon: Icons.person_outline,
+                title: _searchFriendTitle(item),
+                subtitle: _searchFriendSubtitle(item),
+                trailing: _searchFriendActionText(item),
+                onTap: () {
+                  if (_boolValue(item['is_friend'])) {
+                    onOpenChat(item);
+                  } else if (_boolValue(item['pending_in_apply'])) {
+                    onHandleIncoming();
+                  } else {
+                    onApply(item);
+                  }
+                },
+              ),
+          ],
+        );
+      },
     );
   }
 }
@@ -664,7 +918,66 @@ class ConnectionInfoPage extends StatelessWidget {
               subtitle: _formatTime(controller.lastHotResumeAt),
               onTap: () {},
             ),
+            _MenuTile(
+              icon: Icons.bug_report_outlined,
+              iconColor: const Color(0xff5e6ad2),
+              title: '诊断日志',
+              subtitle: '查看接口请求和连接错误',
+              onTap: () => _push(context, const DiagnosticsLogPage()),
+            ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class DiagnosticsLogPage extends StatelessWidget {
+  const DiagnosticsLogPage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('诊断日志'),
+        actions: [
+          IconButton(
+            tooltip: '清空',
+            onPressed: AppLogger.clear,
+            icon: const Icon(Icons.delete_outline),
+          ),
+        ],
+      ),
+      body: SafeArea(
+        child: ValueListenableBuilder<int>(
+          valueListenable: AppLogger.revision,
+          builder: (context, _, _) {
+            final logs = AppLogger.entries.reversed.toList();
+            if (logs.isEmpty) {
+              return const _EmptyState(text: '暂无日志');
+            }
+            return ListView.separated(
+              padding: const EdgeInsets.all(12),
+              itemCount: logs.length,
+              separatorBuilder: (_, _) => const Divider(height: 12),
+              itemBuilder: (context, index) {
+                final item = logs[index];
+                final isError = item.level == 'ERROR';
+                final isWarn = item.level == 'WARN';
+                return SelectableText(
+                  item.line,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: isError
+                        ? _dangerColor
+                        : isWarn
+                        ? const Color(0xff8a5a00)
+                        : _textColor,
+                  ),
+                );
+              },
+            );
+          },
         ),
       ),
     );
@@ -919,9 +1232,16 @@ class _CreateGroupPageState extends State<CreateGroupPage> {
   final _avatar = TextEditingController();
   final _memberIds = TextEditingController();
   final _selected = <String>{};
+  late Future<List<Map<String, Object?>>> _friendsFuture;
   bool _loading = false;
   String _error = '';
   String _message = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _friendsFuture = _loadFriends();
+  }
 
   @override
   void dispose() {
@@ -930,6 +1250,14 @@ class _CreateGroupPageState extends State<CreateGroupPage> {
     _avatar.dispose();
     _memberIds.dispose();
     super.dispose();
+  }
+
+  Future<List<Map<String, Object?>>> _loadFriends() {
+    return widget.controller.loadFriends();
+  }
+
+  void _reloadFriends() {
+    setState(() => _friendsFuture = _loadFriends());
   }
 
   @override
@@ -974,12 +1302,18 @@ class _CreateGroupPageState extends State<CreateGroupPage> {
             _ErrorBlock(text: _error),
             const _SectionHeader(text: '选择好友'),
             FutureBuilder<List<Map<String, Object?>>>(
-              future: widget.controller.loadFriends(),
+              future: _friendsFuture,
               builder: (context, snapshot) {
                 if (snapshot.connectionState != ConnectionState.done) {
                   return const Padding(
                     padding: EdgeInsets.all(20),
                     child: Center(child: CircularProgressIndicator()),
+                  );
+                }
+                if (snapshot.hasError) {
+                  return _ErrorState(
+                    text: snapshot.error.toString(),
+                    onRetry: _reloadFriends,
                   );
                 }
                 final friends = snapshot.data ?? [];
@@ -1233,10 +1567,27 @@ class _GroupDetailPageState extends State<GroupDetailPage> {
   }
 }
 
-class MyGroupsPage extends StatelessWidget {
+class MyGroupsPage extends StatefulWidget {
   const MyGroupsPage({required this.controller, super.key});
 
   final SessionController controller;
+
+  @override
+  State<MyGroupsPage> createState() => _MyGroupsPageState();
+}
+
+class _MyGroupsPageState extends State<MyGroupsPage> {
+  late Future<List<Map<String, Object?>>> _future;
+
+  @override
+  void initState() {
+    super.initState();
+    _future = widget.controller.loadGroups();
+  }
+
+  void _reload() {
+    setState(() => _future = widget.controller.loadGroups());
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1244,13 +1595,16 @@ class MyGroupsPage extends StatelessWidget {
       appBar: AppBar(title: const Text('我的群聊')),
       body: SafeArea(
         child: FutureBuilder<List<Map<String, Object?>>>(
-          future: controller.loadGroups(),
+          future: _future,
           builder: (context, snapshot) {
             if (snapshot.connectionState != ConnectionState.done) {
               return const Center(child: CircularProgressIndicator());
             }
             if (snapshot.hasError) {
-              return _ErrorState(text: snapshot.error.toString());
+              return _ErrorState(
+                text: snapshot.error.toString(),
+                onRetry: _reload,
+              );
             }
             final groups = snapshot.data ?? [];
             if (groups.isEmpty) {
@@ -1265,11 +1619,12 @@ class MyGroupsPage extends StatelessWidget {
                     subtitle: _value(item, ['notice', 'description']),
                     trailing:
                         '${_intValue(item, ['member_count', 'members'])}人',
-                    onTap: () => _openGroupChat(context, controller, item),
+                    onTap: () =>
+                        _openGroupChat(context, widget.controller, item),
                     onLongPress: () => _push(
                       context,
                       GroupDetailPage(
-                        controller: controller,
+                        controller: widget.controller,
                         title: _groupTitle(item),
                         groupId: _groupIdFromItem(item),
                         channelId: _groupChannelId(item),
@@ -1588,6 +1943,8 @@ class _ChatPageState extends State<ChatPage> {
   Map<String, Object?> _selectedPayload = const {};
   String? _error;
   String _message = '';
+  late int _conversationRevision;
+  late Future<List<Map<String, Object?>>> _messagesFuture;
 
   bool get _isGroup => widget.channelType == _groupChannelType;
   String get _groupId =>
@@ -1597,6 +1954,9 @@ class _ChatPageState extends State<ChatPage> {
   @override
   void initState() {
     super.initState();
+    _conversationRevision = widget.controller.conversationVersion;
+    widget.controller.addListener(_onControllerChanged);
+    _messagesFuture = _loadMessages();
     _textController.text = widget.controller.readDraft(
       channelId: widget.channelId,
       channelType: widget.channelType,
@@ -1611,7 +1971,52 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   @override
+  void didUpdateWidget(ChatPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.controller != widget.controller) {
+      oldWidget.controller.removeListener(_onControllerChanged);
+      _conversationRevision = widget.controller.conversationVersion;
+      widget.controller.addListener(_onControllerChanged);
+    }
+  }
+
+  void _onControllerChanged() {
+    if (!mounted) {
+      return;
+    }
+    final next = widget.controller.conversationVersion;
+    if (next == _conversationRevision) {
+      return;
+    }
+    setState(() {
+      _conversationRevision = next;
+      _messagesFuture = _loadMessages();
+    });
+  }
+
+  Future<List<Map<String, Object?>>> _loadMessages() {
+    return AppLogger.measure(
+      'ui',
+      'load chat messages',
+      () => widget.controller.loadLocalMessages(
+        channelId: widget.channelId,
+        channelType: widget.channelType,
+        groupId: widget.groupId,
+      ),
+      data: {
+        'channel_id': widget.channelId,
+        'channel_type': widget.channelType,
+      },
+    );
+  }
+
+  void _reloadMessages() {
+    setState(() => _messagesFuture = _loadMessages());
+  }
+
+  @override
   void dispose() {
+    widget.controller.removeListener(_onControllerChanged);
     widget.controller.writeDraft(
       channelId: widget.channelId,
       channelType: widget.channelType,
@@ -1658,7 +2063,7 @@ class _ChatPageState extends State<ChatPage> {
             ),
           IconButton(
             tooltip: '刷新',
-            onPressed: () => setState(() {}),
+            onPressed: _reloadMessages,
             icon: const Icon(Icons.refresh),
           ),
         ],
@@ -1694,17 +2099,16 @@ class _ChatPageState extends State<ChatPage> {
                   ),
                 Expanded(
                   child: FutureBuilder<List<Map<String, Object?>>>(
-                    future: widget.controller.loadLocalMessages(
-                      channelId: widget.channelId,
-                      channelType: widget.channelType,
-                      groupId: widget.groupId,
-                    ),
+                    future: _messagesFuture,
                     builder: (context, snapshot) {
                       if (snapshot.connectionState != ConnectionState.done) {
                         return const Center(child: CircularProgressIndicator());
                       }
                       if (snapshot.hasError) {
-                        return _ErrorState(text: snapshot.error.toString());
+                        return _ErrorState(
+                          text: snapshot.error.toString(),
+                          onRetry: _reloadMessages,
+                        );
                       }
                       final messages = snapshot.data ?? [];
                       if (messages.isEmpty) {
@@ -1813,6 +2217,7 @@ class _ChatPageState extends State<ChatPage> {
       if (_isGroup) {
         await widget.controller.sendGroupMedia(
           groupId: _groupId,
+          channelId: widget.channelId,
           contentType: contentType,
           url: url,
           filePath: filePath,
@@ -1849,6 +2254,7 @@ class _ChatPageState extends State<ChatPage> {
       if (_isGroup) {
         await widget.controller.sendGroupContactCard(
           groupId: _groupId,
+          channelId: widget.channelId,
           cardUserId: cardUserId,
         );
       } else {
@@ -1888,6 +2294,7 @@ class _ChatPageState extends State<ChatPage> {
       if (_isGroup) {
         await widget.controller.sendGroupTransfer(
           groupId: _groupId,
+          channelId: widget.channelId,
           receiverId: data['receiver_id'] ?? '',
           money: data['money'] ?? '',
           assetType: data['asset_type'] ?? 'money',
@@ -1945,6 +2352,7 @@ class _ChatPageState extends State<ChatPage> {
       if (_isGroup) {
         await widget.controller.sendGroupRedPacket(
           groupId: _groupId,
+          channelId: widget.channelId,
           money: data['money'] ?? '',
           assetType: data['asset_type'] ?? 'money',
           packetType: data['packet_type'] ?? 'ordinary',
@@ -2101,7 +2509,8 @@ class _ChatPageState extends State<ChatPage> {
     });
     try {
       await task();
-      await widget.controller.loadConversations();
+      await widget.controller.refreshLocalConversations();
+      _messagesFuture = _loadMessages();
     } catch (error) {
       _error = error.toString();
     } finally {
@@ -2247,11 +2656,12 @@ class _ActionInputPageState extends State<ActionInputPage> {
   }
 }
 
-class _AsyncList extends StatelessWidget {
+class _AsyncList extends StatefulWidget {
   const _AsyncList({
     required this.loader,
     required this.itemBuilder,
     required this.emptyText,
+    this.revision = 0,
     this.header,
   });
 
@@ -2259,36 +2669,67 @@ class _AsyncList extends StatelessWidget {
   final Widget Function(BuildContext context, Map<String, Object?> item)
   itemBuilder;
   final String emptyText;
+  final int revision;
   final Widget? header;
+
+  @override
+  State<_AsyncList> createState() => _AsyncListState();
+}
+
+class _AsyncListState extends State<_AsyncList> {
+  late Future<List<Map<String, Object?>>> _future;
+
+  @override
+  void initState() {
+    super.initState();
+    _future = _load();
+  }
+
+  @override
+  void didUpdateWidget(_AsyncList oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.loader != widget.loader ||
+        oldWidget.revision != widget.revision) {
+      _future = _load();
+    }
+  }
+
+  Future<List<Map<String, Object?>>> _load() {
+    return AppLogger.measure('ui', 'load list', widget.loader);
+  }
+
+  void _reload() {
+    setState(() => _future = _load());
+  }
 
   @override
   Widget build(BuildContext context) {
     return FutureBuilder<List<Map<String, Object?>>>(
-      future: loader(),
+      future: _future,
       builder: (context, snapshot) {
         if (snapshot.connectionState != ConnectionState.done) {
           return const Center(child: CircularProgressIndicator());
         }
         if (snapshot.hasError) {
-          return _ErrorState(text: snapshot.error.toString());
+          return _ErrorState(text: snapshot.error.toString(), onRetry: _reload);
         }
         final items = snapshot.data ?? [];
         if (items.isEmpty) {
           return Column(
             children: [
-              if (header != null) header!,
-              Expanded(child: _EmptyState(text: emptyText)),
+              if (widget.header != null) widget.header!,
+              Expanded(child: _EmptyState(text: widget.emptyText)),
             ],
           );
         }
         return ListView.builder(
-          itemCount: items.length + (header == null ? 0 : 1),
+          itemCount: items.length + (widget.header == null ? 0 : 1),
           itemBuilder: (context, index) {
-            if (header != null && index == 0) {
-              return header!;
+            if (widget.header != null && index == 0) {
+              return widget.header!;
             }
-            final itemIndex = header == null ? index : index - 1;
-            return itemBuilder(context, items[itemIndex]);
+            final itemIndex = widget.header == null ? index : index - 1;
+            return widget.itemBuilder(context, items[itemIndex]);
           },
         );
       },
@@ -3269,19 +3710,33 @@ class _EmptyState extends StatelessWidget {
 }
 
 class _ErrorState extends StatelessWidget {
-  const _ErrorState({required this.text});
+  const _ErrorState({required this.text, this.onRetry});
 
   final String text;
+  final VoidCallback? onRetry;
 
   @override
   Widget build(BuildContext context) {
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(20),
-        child: Text(
-          text,
-          textAlign: TextAlign.center,
-          style: const TextStyle(color: _dangerColor),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              text,
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: _dangerColor),
+            ),
+            if (onRetry != null) ...[
+              const SizedBox(height: 12),
+              OutlinedButton.icon(
+                onPressed: onRetry,
+                icon: const Icon(Icons.refresh),
+                label: const Text('重试'),
+              ),
+            ],
+          ],
         ),
       ),
     );
@@ -3482,6 +3937,51 @@ String _friendUserId(Map<String, Object?> item) {
   return _privateReceiverIdFromChannel(_value(item, ['uid', 'channel_id']));
 }
 
+String _searchFriendId(Map<String, Object?> item) {
+  final user = _asObjectMap(item['user']);
+  return _value(item, [
+    'friend_id',
+    'user_id',
+    'userid',
+    'id',
+  ], fallback: _value(user, ['userid', 'user_id', 'id']));
+}
+
+String _searchFriendTitle(Map<String, Object?> item) {
+  final user = _asObjectMap(item['user']);
+  return _value(user, [
+    'nickname',
+    'username',
+    'name',
+  ], fallback: _value(item, ['nickname', 'username', 'name'], fallback: '用户'));
+}
+
+String _searchFriendSubtitle(Map<String, Object?> item) {
+  final user = _asObjectMap(item['user']);
+  final id = _searchFriendId(item);
+  final username = _value(user, ['username']);
+  final signature = _value(user, ['signature']);
+  return [
+    if (id.isNotEmpty) 'ID $id',
+    if (username.isNotEmpty) username,
+    if (signature.isNotEmpty) signature,
+    _friendStatusText(item),
+  ].join(' · ');
+}
+
+String _searchFriendActionText(Map<String, Object?> item) {
+  if (_boolValue(item['is_friend'])) {
+    return '发消息';
+  }
+  if (_boolValue(item['pending_out_apply'])) {
+    return '已申请';
+  }
+  if (_boolValue(item['pending_in_apply'])) {
+    return '待处理';
+  }
+  return '添加';
+}
+
 String _friendChannelId(Map<String, Object?> item) {
   final channelId = _value(item, ['channel_id', 'uid', 'im_uid']);
   if (channelId.isNotEmpty) {
@@ -3599,6 +4099,12 @@ int _intValue(Map<String, Object?> item, List<String> keys) {
 }
 
 bool _boolValue(Object? value) {
+  if (value is Map) {
+    return value.isNotEmpty;
+  }
+  if (value is Iterable) {
+    return value.isNotEmpty;
+  }
   final text = value?.toString().toLowerCase() ?? '';
   return text == '1' || text == 'true' || text == 'yes';
 }

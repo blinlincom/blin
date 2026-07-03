@@ -9,6 +9,7 @@ import 'package:wukongimfluttersdk/type/const.dart';
 import 'package:wukongimfluttersdk/wkim.dart';
 
 import '../core/api_client.dart';
+import '../core/app_logger.dart';
 import '../core/app_config.dart';
 import '../core/models.dart';
 import 'bim_message_content.dart';
@@ -24,28 +25,79 @@ class WukongImService extends ChangeNotifier {
   String _device = '';
   bool _listenersAttached = false;
   bool _contentRegistered = false;
+  bool _setupCompleted = false;
+  String _startedKey = '';
+  Future<void>? _startRequest;
   int _status = WKConnectStatus.fail;
   String _statusText = '未连接';
   String? _lastError;
   Timer? _refreshDebounce;
   List<Map<String, Object?>> _latestConversations = const [];
+  int _conversationVersion = 0;
+  DateTime? _lastConversationSyncAt;
+  String _lastConversationSyncKey = '';
+  WKSyncConversation? _lastConversationSyncResult;
+  Future<WKSyncConversation>? _conversationSyncRequest;
+  final Map<String, Future<WKSyncChannelMsg>> _channelSyncRequests =
+      <String, Future<WKSyncChannelMsg>>{};
   final Map<String, String> _groupIdsByChannel = <String, String>{};
 
   bool get isConnected => _status == WKConnectStatus.success;
   String get statusText => _statusText;
   String? get lastError => _lastError;
   List<Map<String, Object?>> get latestConversations => _latestConversations;
+  int get conversationVersion => _conversationVersion;
 
   Future<void> start(UserSession session, {required String device}) async {
+    final existingRequest = _startRequest;
+    if (existingRequest != null) {
+      AppLogger.info('im', 'reuse start request');
+      return existingRequest;
+    }
+    _startRequest = _startInternal(session, device: device);
+    try {
+      await _startRequest;
+    } finally {
+      _startRequest = null;
+    }
+  }
+
+  Future<void> _startInternal(
+    UserSession session, {
+    required String device,
+  }) async {
+    AppLogger.info('im', 'start requested');
     final chat = session.chat;
     if (chat == null || chat.uid.isEmpty || chat.token.isEmpty) {
       _lastError = 'IM 登录信息为空';
+      AppLogger.error('im', 'start failed', error: _lastError);
       _setStatus(WKConnectStatus.fail);
       return;
     }
     if (chat.route.tcpAddr.isEmpty) {
       _lastError = 'IM TCP 地址未配置';
+      AppLogger.error('im', 'start failed', error: _lastError);
       _setStatus(WKConnectStatus.fail);
+      return;
+    }
+    final startKey = [
+      chat.uid,
+      chat.token,
+      chat.route.tcpAddr,
+      chat.deviceFlag,
+      device,
+    ].join('|');
+    if (_startedKey == startKey &&
+        _setupCompleted &&
+        _isStartedStatus(_status)) {
+      _session = session;
+      _device = device;
+      AppLogger.info(
+        'im',
+        'start skipped same connection',
+        data: {'status': _statusText, 'uid': chat.uid},
+      );
+      await refreshLocalConversations(notify: false);
       return;
     }
 
@@ -67,16 +119,31 @@ class WukongImService extends ChangeNotifier {
     final initialized = await WKIM.shared.setup(options);
     if (!initialized) {
       _lastError = 'IM 本地数据库初始化失败';
+      _setupCompleted = false;
+      _startedKey = '';
+      AppLogger.error('im', 'setup failed', error: _lastError);
       _setStatus(WKConnectStatus.fail);
       return;
     }
 
     _lastError = null;
+    _setupCompleted = true;
+    _startedKey = startKey;
+    AppLogger.info(
+      'im',
+      'connect',
+      data: {
+        'uid': chat.uid,
+        'tcp': chat.route.tcpAddr,
+        'device_flag': chat.deviceFlag,
+      },
+    );
     WKIM.shared.connectionManager.connect();
     await refreshLocalConversations();
   }
 
   Future<void> stop({bool logout = false}) async {
+    AppLogger.info('im', 'stop', data: {'logout': logout});
     _refreshDebounce?.cancel();
     _refreshDebounce = null;
     if (_listenersAttached) {
@@ -92,7 +159,16 @@ class WukongImService extends ChangeNotifier {
     WKIM.shared.connectionManager.disconnect(logout);
     _session = null;
     _device = '';
+    _setupCompleted = false;
+    _startedKey = '';
+    _startRequest = null;
     _latestConversations = const [];
+    _conversationVersion++;
+    _lastConversationSyncAt = null;
+    _lastConversationSyncKey = '';
+    _lastConversationSyncResult = null;
+    _conversationSyncRequest = null;
+    _channelSyncRequests.clear();
     _lastError = null;
     _setStatus(WKConnectStatus.fail);
   }
@@ -116,6 +192,53 @@ class WukongImService extends ChangeNotifier {
     messages.sort((a, b) => a.orderSeq.compareTo(b.orderSeq));
     final start = messages.length > limit ? messages.length - limit : 0;
     return messages.skip(start).map(_messageToMap).toList();
+  }
+
+  Future<void> syncChannelAfterSend({
+    required String channelID,
+    required int channelType,
+    String groupId = '',
+  }) async {
+    if (channelType == WKChannelType.group && groupId.isNotEmpty) {
+      _groupIdsByChannel[channelID] = groupId;
+    }
+    final maxSeq = await WKIM.shared.messageManager
+        .getMaxMessageSeq(channelID, channelType)
+        .timeout(const Duration(seconds: 3), onTimeout: () => 0);
+    final completer = Completer<void>();
+    AppLogger.info(
+      'im',
+      'sync channel after send',
+      data: {
+        'channel_id': channelID,
+        'channel_type': channelType,
+        'max_seq': maxSeq,
+      },
+    );
+    WKIM.shared.messageManager.setSyncChannelMsgListener(
+      channelID,
+      channelType,
+      maxSeq,
+      0,
+      20,
+      0,
+      (_) {
+        if (!completer.isCompleted) {
+          completer.complete();
+        }
+      },
+    );
+    await completer.future.timeout(
+      const Duration(seconds: 8),
+      onTimeout: () {
+        AppLogger.warn(
+          'im',
+          'sync channel after send timeout',
+          data: {'channel_id': channelID, 'channel_type': channelType},
+        );
+      },
+    );
+    await refreshLocalConversations();
   }
 
   Future<List<dynamic>> _getOrSyncHistory({
@@ -145,10 +268,32 @@ class WukongImService extends ChangeNotifier {
     );
   }
 
-  Future<List<Map<String, Object?>>> refreshLocalConversations() async {
-    final list = await WKIM.shared.conversationManager.getAll();
-    _latestConversations = await _mapConversations(list);
-    notifyListeners();
+  Future<List<Map<String, Object?>>> refreshLocalConversations({
+    bool notify = true,
+  }) async {
+    final list = await WKIM.shared.conversationManager.getAll().timeout(
+      const Duration(seconds: 8),
+      onTimeout: () {
+        AppLogger.warn('im', 'conversation getAll timeout');
+        return <WKUIConversationMsg>[];
+      },
+    );
+    _latestConversations = await _mapConversations(list).timeout(
+      const Duration(seconds: 8),
+      onTimeout: () {
+        AppLogger.warn('im', 'conversation map timeout');
+        return <Map<String, Object?>>[];
+      },
+    );
+    AppLogger.info(
+      'im',
+      'local conversations refreshed',
+      data: {'count': _latestConversations.length, 'notify': notify},
+    );
+    if (notify) {
+      _conversationVersion++;
+      notifyListeners();
+    }
     return _latestConversations;
   }
 
@@ -191,12 +336,23 @@ class WukongImService extends ChangeNotifier {
       connectInfo,
     ) {
       _lastError = reasonCode == null ? null : '连接错误 $reasonCode';
+      AppLogger.info(
+        'im',
+        'connection status',
+        data: {'status': status, 'reason_code': reasonCode},
+      );
       _setStatus(status);
     });
     WKIM.shared.conversationManager.addOnRefreshMsgListListener(_listenerKey, (
       messages,
     ) async {
       _latestConversations = await _mapConversations(messages);
+      _conversationVersion++;
+      AppLogger.info(
+        'im',
+        'conversation refresh listener',
+        data: {'count': _latestConversations.length},
+      );
       notifyListeners();
     });
     WKIM.shared.messageManager.addOnNewMsgListener(
@@ -235,21 +391,61 @@ class WukongImService extends ChangeNotifier {
       back(WKSyncConversation());
       return;
     }
-    try {
-      final list = await _api.conversations(
-        session: current,
-        device: _device,
-        limit: msgCount <= 0 ? 50 : msgCount,
+    final syncKey = '$lastMsgSeqs|$msgCount|$version';
+    final now = DateTime.now();
+    final lastAt = _lastConversationSyncAt;
+    if (_conversationSyncRequest != null) {
+      AppLogger.info(
+        'im',
+        'reuse sync conversations request',
+        data: {'key': syncKey},
       );
-      _rememberGroupChannels(list);
-      final sync = WKSyncConversation()
-        ..uid = current.chat?.uid ?? ''
-        ..conversations = _buildSyncConversations(list);
+      back(await _conversationSyncRequest!);
+      return;
+    }
+    if (lastAt != null &&
+        syncKey == _lastConversationSyncKey &&
+        _lastConversationSyncResult != null &&
+        now.difference(lastAt) < const Duration(seconds: 5)) {
+      AppLogger.warn(
+        'im',
+        'reuse recent sync conversations result',
+        data: {'key': syncKey},
+      );
+      back(_lastConversationSyncResult!);
+      return;
+    }
+    try {
+      AppLogger.info(
+        'im',
+        'sync conversations start',
+        data: {
+          'last_msg_seqs': lastMsgSeqs,
+          'msg_count': msgCount,
+          'version': version,
+        },
+      );
+      _conversationSyncRequest = _loadSyncConversations(
+        current: current,
+        msgCount: msgCount,
+      );
+      final sync = await _conversationSyncRequest!;
+      _lastConversationSyncAt = DateTime.now();
+      _lastConversationSyncKey = syncKey;
+      _lastConversationSyncResult = sync;
+      AppLogger.info(
+        'im',
+        'sync conversations success',
+        data: {'count': sync.conversations?.length ?? 0},
+      );
       back(sync);
     } catch (error) {
       _lastError = error.toString();
+      AppLogger.error('im', 'sync conversations failed', error: error);
       back(WKSyncConversation());
       notifyListeners();
+    } finally {
+      _conversationSyncRequest = null;
     }
   }
 
@@ -267,39 +463,66 @@ class WukongImService extends ChangeNotifier {
       back(WKSyncChannelMsg());
       return;
     }
+    final requestKey = [
+      channelID,
+      channelType,
+      startMessageSeq,
+      endMessageSeq,
+      limit,
+      pullMode,
+    ].join('|');
+    final existingRequest = _channelSyncRequests[requestKey];
+    if (existingRequest != null) {
+      AppLogger.info(
+        'im',
+        'reuse sync channel messages request',
+        data: {'key': requestKey},
+      );
+      back(await existingRequest);
+      return;
+    }
     try {
-      final data = channelType == WKChannelType.group
-          ? await _api.groupMessagePage(
-              session: current,
-              device: _device,
-              groupId: _groupIdFromChannel(channelID),
-              startMessageSeq: startMessageSeq,
-              endMessageSeq: endMessageSeq,
-              limit: limit <= 0 ? 50 : limit,
-              pullMode: pullMode,
-            )
-          : await _api.personMessagePage(
-              session: current,
-              device: _device,
-              receiverId: _userIdFromUid(channelID),
-              startMessageSeq: startMessageSeq,
-              endMessageSeq: endMessageSeq,
-              limit: limit <= 0 ? 50 : limit,
-              pullMode: pullMode,
-            );
-      final messages = _buildSyncMessages(data['list']);
-      final sync = WKSyncChannelMsg()
-        ..messages = messages
-        ..more = _readInt(data, 'more');
-      if (messages.isNotEmpty) {
-        sync.startMessageSeq = messages.first.messageSeq;
-        sync.endMessageSeq = messages.last.messageSeq;
-      }
+      AppLogger.info(
+        'im',
+        'sync channel messages start',
+        data: {
+          'channel_id': channelID,
+          'channel_type': channelType,
+          'start_seq': startMessageSeq,
+          'end_seq': endMessageSeq,
+          'limit': limit,
+          'pull_mode': pullMode,
+        },
+      );
+      final request = _loadSyncChannelMessages(
+        current: current,
+        channelID: channelID,
+        channelType: channelType,
+        startMessageSeq: startMessageSeq,
+        endMessageSeq: endMessageSeq,
+        limit: limit,
+        pullMode: pullMode,
+      );
+      _channelSyncRequests[requestKey] = request;
+      final sync = await request;
+      AppLogger.info(
+        'im',
+        'sync channel messages success',
+        data: {'channel_id': channelID, 'count': sync.messages?.length ?? 0},
+      );
       back(sync);
     } catch (error) {
       _lastError = error.toString();
+      AppLogger.error(
+        'im',
+        'sync channel messages failed',
+        error: error,
+        data: {'channel_id': channelID, 'channel_type': channelType},
+      );
       back(WKSyncChannelMsg());
       notifyListeners();
+    } finally {
+      _channelSyncRequests.remove(requestKey);
     }
   }
 
@@ -348,10 +571,73 @@ class WukongImService extends ChangeNotifier {
         channel.username = friend?['username']?.toString() ?? '';
         channel.follow = friend == null ? 0 : 1;
       }
-    } catch (_) {
+    } catch (error) {
       // 频道资料失败不影响消息收发，SDK 仍能用 channelID 展示。
+      AppLogger.warn(
+        'im',
+        'load channel info failed',
+        data: {
+          'channel_id': channelID,
+          'channel_type': channelType,
+          'error': error.toString(),
+        },
+      );
     }
     back(channel);
+  }
+
+  Future<WKSyncConversation> _loadSyncConversations({
+    required UserSession current,
+    required int msgCount,
+  }) async {
+    final list = await _api.conversations(
+      session: current,
+      device: _device,
+      limit: msgCount <= 0 ? 50 : msgCount,
+    );
+    _rememberGroupChannels(list);
+    return WKSyncConversation()
+      ..uid = current.chat?.uid ?? ''
+      ..conversations = _buildSyncConversations(list);
+  }
+
+  Future<WKSyncChannelMsg> _loadSyncChannelMessages({
+    required UserSession current,
+    required String channelID,
+    required int channelType,
+    required int startMessageSeq,
+    required int endMessageSeq,
+    required int limit,
+    required int pullMode,
+  }) async {
+    final data = channelType == WKChannelType.group
+        ? await _api.groupMessagePage(
+            session: current,
+            device: _device,
+            groupId: _groupIdFromChannel(channelID),
+            startMessageSeq: startMessageSeq,
+            endMessageSeq: endMessageSeq,
+            limit: limit <= 0 ? 50 : limit,
+            pullMode: pullMode,
+          )
+        : await _api.personMessagePage(
+            session: current,
+            device: _device,
+            receiverId: _userIdFromUid(channelID),
+            startMessageSeq: startMessageSeq,
+            endMessageSeq: endMessageSeq,
+            limit: limit <= 0 ? 50 : limit,
+            pullMode: pullMode,
+          );
+    final messages = _buildSyncMessages(data['list']);
+    final sync = WKSyncChannelMsg()
+      ..messages = messages
+      ..more = _readInt(data, 'more');
+    if (messages.isNotEmpty) {
+      sync.startMessageSeq = messages.first.messageSeq;
+      sync.endMessageSeq = messages.last.messageSeq;
+    }
+    return sync;
   }
 
   List<WKSyncConvMsg> _buildSyncConversations(List<Map<String, Object?>> list) {
@@ -671,5 +957,12 @@ class WukongImService extends ChangeNotifier {
       _ => '未连接',
     };
     notifyListeners();
+  }
+
+  bool _isStartedStatus(int status) {
+    return status == WKConnectStatus.success ||
+        status == WKConnectStatus.syncMsg ||
+        status == WKConnectStatus.syncCompleted ||
+        status == WKConnectStatus.connecting;
   }
 }

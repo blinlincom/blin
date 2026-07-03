@@ -1,0 +1,194 @@
+import 'dart:convert';
+
+import 'package:flutter/foundation.dart';
+
+class AppLogEntry {
+  const AppLogEntry({
+    required this.time,
+    required this.level,
+    required this.scope,
+    required this.message,
+    this.data = const {},
+  });
+
+  final DateTime time;
+  final String level;
+  final String scope;
+  final String message;
+  final Map<String, Object?> data;
+
+  String get line {
+    final buffer = StringBuffer()
+      ..write(_formatTime(time))
+      ..write(' [$level] ')
+      ..write(scope)
+      ..write(' - ')
+      ..write(message);
+    if (data.isNotEmpty) {
+      buffer.write(' ');
+      buffer.write(jsonEncode(AppLogger._jsonReady(data)));
+    }
+    return buffer.toString();
+  }
+
+  static String _formatTime(DateTime value) {
+    String two(int input) => input.toString().padLeft(2, '0');
+    String three(int input) => input.toString().padLeft(3, '0');
+    return '${two(value.hour)}:${two(value.minute)}:${two(value.second)}.${three(value.millisecond)}';
+  }
+}
+
+class AppLogger {
+  AppLogger._();
+
+  static const _maxEntries = 300;
+  static final ValueNotifier<int> revision = ValueNotifier<int>(0);
+  static final List<AppLogEntry> _entries = <AppLogEntry>[];
+
+  static List<AppLogEntry> get entries => List.unmodifiable(_entries);
+
+  static void info(
+    String scope,
+    String message, {
+    Map<String, Object?> data = const {},
+  }) {
+    _add('INFO', scope, message, data);
+  }
+
+  static void warn(
+    String scope,
+    String message, {
+    Map<String, Object?> data = const {},
+  }) {
+    _add('WARN', scope, message, data);
+  }
+
+  static void error(
+    String scope,
+    String message, {
+    Object? error,
+    StackTrace? stackTrace,
+    Map<String, Object?> data = const {},
+  }) {
+    _add('ERROR', scope, message, {
+      ...data,
+      if (error != null) 'error': error.toString(),
+    });
+    if (stackTrace != null) {
+      debugPrint(stackTrace.toString());
+    }
+  }
+
+  static Future<T> measure<T>(
+    String scope,
+    String message,
+    Future<T> Function() task, {
+    Map<String, Object?> data = const {},
+  }) async {
+    final stopwatch = Stopwatch()..start();
+    info(scope, '$message start', data: data);
+    try {
+      final result = await task();
+      info(
+        scope,
+        '$message success',
+        data: {...data, 'ms': stopwatch.elapsedMilliseconds},
+      );
+      return result;
+    } catch (error, stackTrace) {
+      AppLogger.error(
+        scope,
+        '$message failed',
+        error: error,
+        stackTrace: stackTrace,
+        data: {...data, 'ms': stopwatch.elapsedMilliseconds},
+      );
+      rethrow;
+    }
+  }
+
+  static Map<String, Object?> sanitize(Map<String, Object?> input) {
+    return input.map((key, value) {
+      final lower = key.toLowerCase();
+      if (lower.contains('password') ||
+          lower.contains('token') ||
+          lower == 'sign' ||
+          lower.contains('secret') ||
+          lower.contains('key')) {
+        return MapEntry(key, _mask(value));
+      }
+      if (value is Map) {
+        return MapEntry(
+          key,
+          sanitize(value.map((k, v) => MapEntry(k.toString(), v))),
+        );
+      }
+      if (value is Iterable) {
+        return MapEntry(
+          key,
+          value.map((item) {
+            if (item is Map) {
+              return sanitize(item.map((k, v) => MapEntry(k.toString(), v)));
+            }
+            return item;
+          }).toList(),
+        );
+      }
+      return MapEntry(key, _jsonReady(value));
+    });
+  }
+
+  static String dump() => _entries.map((entry) => entry.line).join('\n');
+
+  static void clear() {
+    _entries.clear();
+    revision.value++;
+  }
+
+  static void _add(
+    String level,
+    String scope,
+    String message,
+    Map<String, Object?> data,
+  ) {
+    final entry = AppLogEntry(
+      time: DateTime.now(),
+      level: level,
+      scope: scope,
+      message: message,
+      data: sanitize(data),
+    );
+    _entries.add(entry);
+    if (_entries.length > _maxEntries) {
+      _entries.removeRange(0, _entries.length - _maxEntries);
+    }
+    revision.value++;
+    debugPrint('[BIM] ${entry.line}');
+  }
+
+  static String _mask(Object? value) {
+    final text = value?.toString() ?? '';
+    if (text.isEmpty) {
+      return '';
+    }
+    if (text.length <= 8) {
+      return '***';
+    }
+    return '${text.substring(0, 3)}***${text.substring(text.length - 3)}';
+  }
+
+  static Object? _jsonReady(Object? value) {
+    if (value == null || value is String || value is num || value is bool) {
+      return value;
+    }
+    if (value is Map) {
+      return value.map(
+        (key, item) => MapEntry(key.toString(), _jsonReady(item)),
+      );
+    }
+    if (value is Iterable) {
+      return value.map(_jsonReady).toList();
+    }
+    return value.toString();
+  }
+}
