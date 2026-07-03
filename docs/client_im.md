@@ -82,10 +82,10 @@ SDK 回调：
 
 ## 消息发送规则
 
-客户端不直接用 SDK 伪造业务消息。发送动作统一走业务端签名接口：
+聊天内容发送必须走 WuKongIM Flutter SDK：
 
-- 私聊：`im_person_send`
-- 群聊：`im_group_send`
+- 文本：`WKIM.shared.messageManager.sendWithOption(WKTextContent, WKChannel, WKSendOptions)`
+- 图片、语音、视频、文件、表情、GIF、贴纸、名片、转账、红包：`WKIM.shared.messageManager.sendWithOption(BimMessageContent, WKChannel, WKSendOptions)`
 - 已读：`im_message_read_receipt`
 - 回执查询：`im_message_receipt_status`
 - 撤回：`im_message_recall`
@@ -94,20 +94,20 @@ SDK 回调：
 - 群红包领取：`im_group_red_packet_receive`
 - 转账收款：`im_person_transfer_receive`
 
-原因：好友关系、非好友三句限制、禁言、红包扣款、转账入账、过期退回、队列重试和去重必须由服务端保证。客户端生成唯一 `client_msg_no`，格式短于服务端 `varchar(64)` 字段，提交业务接口；服务端发送到 IM 后，客户端通过 SDK 长连接或同步回写本地库。普通消息、撤回、回执、红包领取、转账收款都使用同一套编号规则，避免编号重复或同号不同内容。
+SDK 负责生成 `client_msg_no`、本地入库、会话更新、长连接投递和 sendack 状态刷新。客户端不再调用 `im_person_send` / `im_group_send` 作为代发接口，也不保留 HTTP 发送兜底，避免发送方无法即时显示、接收方无法通过 SDK 实时刷新。
 
 聊天页已经接入用户侧交互：文本、图片、语音、视频、文件、名片、表情、GIF、贴纸、红包、转账都从聊天工具面板进入；引用通过长按消息后点“引用”；群聊 @ 和阅后即焚通过“文本选项”设置；撤回、已读、领取红包、收转账通过长按消息进入。用户端不展示队列重试、在线连接、接口回执调试等运维入口。
 
 实时收发链路：
 
 - 收消息：SDK TCP 长连接收到消息后写入 SDK 本地库，`addOnNewMsgListener` / `addOnRefreshMsgListener` / `addOnCmdListener` 刷新会话和聊天页。
-- 发消息：客户端先请求业务端 `im_person_send` / `im_group_send`，由业务端执行好友关系、非好友三句限制、禁言、红包/转账资金和消息去重，再投递到悟空。业务端成功后客户端调用 SDK 频道同步，把服务端消息拉入 SDK 本地库并刷新 UI，不在客户端伪造本地消息。
+- 发消息：客户端调用 SDK `sendWithOption`。SDK 先写入本地库并触发 `addOnMsgInsertedListener`，聊天页立即更新；随后 SDK 通过长连接投递并通过 `addOnRefreshMsgListener` 更新发送状态。
 - 聊天页刷新：聊天页监听当前 `channel_id + channel_type` 的 SDK 消息版本；当前频道收到新消息、发送后同步、回执/撤回等刷新消息时会重载当前频道消息，不再只依赖会话列表变化。
 - 会话同步：`im_conversations` 只允许由 SDK `addOnSyncConversationListener` 触发；页面不直接请求该接口，避免反复轮询业务端。
 
 ## 客户端功能封装
 
-`lib/src/im/chat_feature_service.dart` 已封装业务端当前 IM 功能，所有发送和命令动作都会生成或复用短唯一 `client_msg_no`：
+`lib/src/im/wukong_im_service.dart` 封装 SDK 实时发送和监听；`lib/src/im/chat_feature_service.dart` 只保留业务动作接口，不再保留消息 HTTP 代发方法：
 
 - 私聊发送：文本、图片、表情、GIF、贴纸、语音、视频、文件、名片、转账、红包。
 - 群聊发送：文本、图片、表情、GIF、贴纸、语音、视频、文件、名片、指定转账、普通红包、拼手气红包、指定红包。
@@ -119,20 +119,18 @@ SDK 回调：
 - 用户侧会话：清空单聊会话、删除好友、群资料、群成员、退群、解散群。
 - 运维/后台能力：在线用户、重试发送失败队列、后台删除会话仍保留在业务端和服务封装里，不在普通客户端页面暴露。
 
-文件类消息支持两种方式：
+文件类消息支持两种 payload 方式：
 
 - 已上传资源：传 `url`。
-- 本地文件：传 `filePath`，客户端使用 `multipart/form-data` 上传 `file` 字段；签名只覆盖非文件字段。
+- 本地文件：传 `file_path`。当前客户端把文件路径作为 SDK 消息 payload 发送，不再走业务端 multipart 代发。
 
 常用方法和接口对应关系：
 
-- `sendPrivateText` -> `im_person_send content_type=text`
-- `sendGroupText` -> `im_group_send content_type=text`
-- `sendPrivateMedia` -> `im_person_send content_type=image|emoji|gif|sticker|voice|video|file`
-- `sendGroupMedia` -> `im_group_send content_type=image|emoji|gif|sticker|voice|video|file`
-- `sendPrivateContactCard` / `sendGroupContactCard` -> `content_type=contact_card`
-- `sendPrivateTransfer` / `sendGroupTransfer` -> `content_type=transfer`
-- `sendPrivateRedPacket` / `sendGroupRedPacket` -> `content_type=red_packet`
+- `sendTextMessage` -> SDK `WKTextContent` + `WKSendOptions`
+- `sendPrivateMedia` / `sendGroupMedia` -> SDK `BimMessageContent`，`content_type=image|emoji|gif|sticker|voice|video|file`
+- `sendPrivateContactCard` / `sendGroupContactCard` -> SDK `BimMessageContent`，`content_type=contact_card`
+- `sendPrivateTransfer` / `sendGroupTransfer` -> SDK `BimMessageContent`，`content_type=transfer`
+- `sendPrivateRedPacket` / `sendGroupRedPacket` -> SDK `BimMessageContent`，`content_type=red_packet`
 - `friendSearch` / `friendApply` / `friendHandle` / `friendApplyList` / `friendStatus` / `friendDelete` -> 好友接口
 - `groupCreate` / `groupUpdate` / `groupMembers` / `groupMembersAdd` / `groupMembersRemove` / `groupMemberMute` / `groupMemberUnmute` / `groupAdminSet` / `groupOwnerTransfer` / `groupLeave` / `groupDelete` -> 群管理接口
 - `privateConversationDelete` -> 用户侧清空单聊会话
@@ -162,7 +160,7 @@ SDK 回调：
 
 - 登录/注册：业务端登录注册接口。
 - 消息：只读取 SDK 本地会话列表。业务端 `im_conversations` 只能由悟空 SDK 会话同步回调触发，返回后由 SDK 入库并刷新 UI，页面层不做业务端兜底请求，避免重复轮询业务端。
-- 聊天页：读取 SDK 本地消息库；所有发送动作先走业务端 `im_person_send` / `im_group_send`，再由 SDK 长连接实时刷新；支持文本、图片、表情、GIF、贴纸、语音、视频、文件、名片、转账、红包、引用、群 @、阅后即焚、撤回、已读、红包领取、转账收款。
+- 聊天页：读取 SDK 本地消息库；所有聊天内容发送都走 SDK 长连接，不走业务端 HTTP 代发；支持文本、图片、表情、GIF、贴纸、语音、视频、文件、名片、转账、红包、引用、群 @、阅后即焚、撤回、已读、红包领取、转账收款。
 - 联系人：好友列表、群聊列表、添加好友、好友申请、搜索用户、发起群聊。
 - 发现：添加朋友、新的朋友、发起群聊、我的群聊，全部为用户侧入口。
 - 群资料：查看群成员、添加成员、禁言/解除禁言、设管理员、转让群主、移出成员、退群、解散群。

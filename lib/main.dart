@@ -19,7 +19,6 @@ Future<void> main() async {
   final im = WukongImService(api: api);
   final chat = ChatFeatureService(
     api: api,
-    im: im,
     cache: ImCacheStore(MMKV.defaultMMKV()),
   );
   final controller = SessionController(

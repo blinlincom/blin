@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -7,13 +9,13 @@ import '../../core/app_logger.dart';
 import '../../core/models.dart';
 import '../../im/im_message_types.dart';
 
-const _primaryColor = Color(0xff2f80ed);
-const _pageColor = Color(0xfff7f9fc);
-const _borderColor = Color(0xffe5eaf2);
-const _lightBorderColor = Color(0xffeef2f7);
-const _fillColor = Color(0xfff2f5f9);
-const _mutedColor = Color(0xff8a93a3);
-const _textColor = Color(0xff111827);
+const _primaryColor = Color(0xff1677ff);
+const _pageColor = Color(0xfff5f6f8);
+const _borderColor = Color(0xffe7e8ec);
+const _lightBorderColor = Color(0xfff0f1f4);
+const _fillColor = Color(0xfff4f5f7);
+const _mutedColor = Color(0xff9aa0aa);
+const _textColor = Color(0xff202124);
 const _dangerColor = Color(0xffa40000);
 const _privateChannelType = 1;
 const _groupChannelType = 2;
@@ -39,7 +41,14 @@ class _HomePageState extends State<HomePage> {
       MineTab(controller: widget.controller),
     ];
     return Scaffold(
-      appBar: AppBar(title: Text(_title), actions: _actions()),
+      appBar: _index == 3
+          ? null
+          : AppBar(
+              title: Text(_title),
+              centerTitle: true,
+              backgroundColor: Colors.white,
+              actions: _actions(),
+            ),
       backgroundColor: _pageColor,
       body: SafeArea(child: pages[_index]),
       bottomNavigationBar: Container(
@@ -52,24 +61,20 @@ class _HomePageState extends State<HomePage> {
           onTap: (value) => setState(() => _index = value),
           items: const [
             BottomNavigationBarItem(
-              icon: Icon(Icons.chat_bubble_outline),
-              activeIcon: Icon(Icons.chat_bubble),
+              icon: Icon(Icons.sms_outlined),
               label: '消息',
             ),
             BottomNavigationBarItem(
               icon: Icon(Icons.contacts_outlined),
-              activeIcon: Icon(Icons.contacts),
               label: '通讯录',
             ),
             BottomNavigationBarItem(
               icon: Icon(Icons.explore_outlined),
-              activeIcon: Icon(Icons.explore),
               label: '发现',
             ),
             BottomNavigationBarItem(
               icon: Icon(Icons.person_outline),
-              activeIcon: Icon(Icons.person),
-              label: '我的',
+              label: '我',
             ),
           ],
         ),
@@ -79,37 +84,12 @@ class _HomePageState extends State<HomePage> {
 
   List<Widget> _actions() {
     return [
-      if (_index == 1) ...[
-        IconButton(
-          tooltip: '加好友',
-          onPressed: () => _open(AddFriendPage(controller: widget.controller)),
-          icon: const Icon(Icons.person_add_alt_1),
-        ),
-        IconButton(
-          tooltip: '好友申请',
-          onPressed: () =>
-              _open(FriendRequestsPage(controller: widget.controller)),
-          icon: const Icon(Icons.inbox_outlined),
-        ),
-        IconButton(
-          tooltip: '建群',
-          onPressed: () =>
-              _open(CreateGroupPage(controller: widget.controller)),
-          icon: const Icon(Icons.group_add_outlined),
-        ),
-      ],
-      if (_index == 0)
+      if (_index == 0 || _index == 1)
         IconButton(
           tooltip: '更多',
           onPressed: () =>
               _open(QuickActionsPage(controller: widget.controller)),
           icon: const Icon(Icons.add_circle_outline),
-        )
-      else
-        IconButton(
-          tooltip: '刷新',
-          onPressed: () => setState(() {}),
-          icon: const Icon(Icons.refresh),
         ),
     ];
   }
@@ -190,11 +170,11 @@ class _MessagesTabState extends State<MessagesTab> {
             onTap: () =>
                 _push(context, SearchPage(controller: widget.controller)),
           ),
-          _ConnectionHeader(
-            text: widget.controller.imError == null
-                ? widget.controller.imStatusText
-                : '${widget.controller.imStatusText} · ${widget.controller.imError}',
-          ),
+          if (widget.controller.imError != null)
+            _ConnectionHeader(
+              text:
+                  '${widget.controller.imStatusText} · ${widget.controller.imError}',
+            ),
         ],
       ),
       itemBuilder: (context, item) {
@@ -279,69 +259,116 @@ class _ContactsTabState extends State<ContactsTab> {
         }
         final friends = snapshot.data?[0] ?? [];
         final groups = snapshot.data?[1] ?? [];
-        return ListView(
-          padding: const EdgeInsets.only(bottom: 16),
+        return Stack(
           children: [
-            _SearchBar(
-              hintText: '搜索',
-              onTap: () =>
-                  _push(context, SearchPage(controller: widget.controller)),
-            ),
-            _MenuTile(
-              icon: Icons.person_add_alt_1,
-              iconColor: const Color(0xffffa51f),
-              title: '新的朋友',
-              subtitle: '添加好友与处理申请',
-              onTap: () => _push(
-                context,
-                FriendRequestsPage(controller: widget.controller),
-              ),
-            ),
-            _MenuTile(
-              icon: Icons.groups_outlined,
-              iconColor: const Color(0xff34c759),
-              title: '群聊',
-              subtitle: '我的群与发起群聊',
-              onTap: () =>
-                  _push(context, MyGroupsPage(controller: widget.controller)),
-            ),
-            _MenuTile(
-              icon: Icons.person_add_alt,
-              iconColor: _primaryColor,
-              title: '添加朋友',
-              subtitle: '按用户名搜索用户',
-              onTap: () =>
-                  _push(context, SearchPage(controller: widget.controller)),
-            ),
-            const _SectionHeader(text: '好友'),
-            if (friends.isEmpty) const _EmptyRow(text: '暂无好友'),
-            for (final item in friends)
-              _ContactTile(
-                title: _friendTitle(item),
-                subtitle: _friendSubtitle(item),
-                trailing: _friendUserId(item),
-                isGroup: false,
-                onTap: () => _openPrivateChat(context, widget.controller, item),
-                onLongPress: () => _push(
-                  context,
-                  PrivateChatActionsPage(
-                    controller: widget.controller,
-                    title: _friendTitle(item),
-                    receiverId: _friendUserId(item),
-                    channelId: _friendChannelId(item),
+            ListView(
+              padding: const EdgeInsets.only(bottom: 20),
+              children: [
+                _SearchBar(
+                  hintText: '搜索',
+                  onTap: () =>
+                      _push(context, SearchPage(controller: widget.controller)),
+                ),
+                _MenuTile(
+                  icon: Icons.group_add,
+                  iconColor: const Color(0xffffa51f),
+                  title: '新的朋友',
+                  subtitle: '',
+                  onTap: () => _push(
+                    context,
+                    FriendRequestsPage(controller: widget.controller),
                   ),
                 ),
-              ),
-            const _SectionHeader(text: '群聊'),
-            if (groups.isEmpty) const _EmptyRow(text: '暂无群聊'),
-            for (final item in groups)
-              _ContactTile(
-                title: _groupTitle(item),
-                subtitle: _value(item, ['notice', 'description']),
-                trailing: '${_intValue(item, ['member_count', 'members'])}人',
-                isGroup: true,
-                onTap: () => _openGroupChat(context, widget.controller, item),
-              ),
+                _MenuTile(
+                  icon: Icons.groups,
+                  iconColor: const Color(0xff36c56f),
+                  title: '群聊',
+                  subtitle: '',
+                  onTap: () => _push(
+                    context,
+                    MyGroupsPage(controller: widget.controller),
+                  ),
+                ),
+                _MenuTile(
+                  icon: Icons.sell_outlined,
+                  iconColor: const Color(0xff2f80ed),
+                  title: '标签',
+                  subtitle: '',
+                  onTap: () => _showSoon(context),
+                ),
+                _MenuTile(
+                  icon: Icons.person,
+                  iconColor: const Color(0xff3d8bff),
+                  title: '公众号',
+                  subtitle: '',
+                  onTap: () => _showSoon(context),
+                ),
+                const _SectionHeader(text: '我的企业'),
+                _ContactTile(
+                  title: '产品设计部',
+                  subtitle: '',
+                  trailing: '',
+                  isGroup: true,
+                  avatarColor: const Color(0xff2f80ed),
+                  icon: Icons.business_center,
+                  onTap: () => _showSoon(context),
+                ),
+                _ContactTile(
+                  title: '运营部',
+                  subtitle: '',
+                  trailing: '',
+                  isGroup: true,
+                  avatarColor: const Color(0xff2f80ed),
+                  icon: Icons.diversity_3,
+                  onTap: () => _showSoon(context),
+                ),
+                _ContactTile(
+                  title: '技术部',
+                  subtitle: '',
+                  trailing: '',
+                  isGroup: true,
+                  avatarColor: const Color(0xff2f80ed),
+                  icon: Icons.grid_view,
+                  onTap: () => _showSoon(context),
+                ),
+                const _SectionHeader(text: '星标朋友'),
+                if (friends.isEmpty) const _EmptyRow(text: '暂无好友'),
+                for (final item in friends)
+                  _ContactTile(
+                    title: _friendTitle(item),
+                    subtitle: '',
+                    trailing: '',
+                    isGroup: false,
+                    onTap: () =>
+                        _openPrivateChat(context, widget.controller, item),
+                    onLongPress: () => _push(
+                      context,
+                      PrivateChatActionsPage(
+                        controller: widget.controller,
+                        title: _friendTitle(item),
+                        receiverId: _friendUserId(item),
+                        channelId: _friendChannelId(item),
+                      ),
+                    ),
+                  ),
+                if (groups.isNotEmpty) const _SectionHeader(text: '群聊'),
+                for (final item in groups)
+                  _ContactTile(
+                    title: _groupTitle(item),
+                    subtitle: '',
+                    trailing: '',
+                    isGroup: true,
+                    onTap: () =>
+                        _openGroupChat(context, widget.controller, item),
+                  ),
+              ],
+            ),
+            const Positioned(
+              right: 4,
+              top: 96,
+              bottom: 74,
+              child: IgnorePointer(child: _AlphabetIndex()),
+            ),
           ],
         );
       },
@@ -357,41 +384,72 @@ class DiscoverTab extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ListView(
-      padding: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.fromLTRB(0, 12, 0, 20),
       children: [
         _MenuTile(
-          icon: Icons.photo_camera_outlined,
-          iconColor: const Color(0xffff9f0a),
+          icon: Icons.camera_alt_outlined,
+          iconColor: const Color(0xff45c463),
           title: '朋友圈',
-          subtitle: '分享生活动态',
+          subtitle: '',
+          trailing: const _Avatar(
+            label: '我',
+            size: 28,
+            color: Color(0xff8e99a8),
+          ),
           onTap: () => _showSoon(context),
         ),
+        const _GroupGap(),
         _MenuTile(
-          icon: Icons.qr_code_scanner,
-          iconColor: _primaryColor,
+          icon: Icons.crop_free,
+          iconColor: const Color(0xff2f80ed),
           title: '扫一扫',
-          subtitle: '扫码添加朋友',
+          subtitle: '',
           onTap: () => _showSoon(context),
         ),
         _MenuTile(
-          icon: Icons.screen_search_desktop_outlined,
-          iconColor: const Color(0xff5e6ad2),
+          icon: Icons.vibration_outlined,
+          iconColor: const Color(0xff3d8bff),
+          title: '摇一摇',
+          subtitle: '',
+          onTap: () => _showSoon(context),
+        ),
+        const _GroupGap(),
+        _MenuTile(
+          icon: Icons.explore_outlined,
+          iconColor: const Color(0xffffb020),
+          title: '看一看',
+          subtitle: '',
+          onTap: () => _showSoon(context),
+        ),
+        _MenuTile(
+          icon: Icons.manage_search,
+          iconColor: const Color(0xffff5c5c),
           title: '搜一搜',
-          subtitle: '搜索联系人和群聊',
+          subtitle: '',
           onTap: () => _push(context, SearchPage(controller: controller)),
         ),
+        const _GroupGap(),
         _MenuTile(
-          icon: Icons.location_on_outlined,
-          iconColor: const Color(0xffffc043),
+          icon: Icons.people_outline,
+          iconColor: const Color(0xff3d8bff),
           title: '附近的人',
-          subtitle: '发现身边的人',
+          subtitle: '',
           onTap: () => _showSoon(context),
         ),
+        const _GroupGap(),
         _MenuTile(
-          icon: Icons.extension_outlined,
-          iconColor: const Color(0xff7c5cff),
+          icon: Icons.sports_esports_outlined,
+          iconColor: const Color(0xff45c463),
+          title: '游戏',
+          subtitle: '',
+          onTap: () => _showSoon(context),
+        ),
+        const _GroupGap(),
+        _MenuTile(
+          icon: Icons.music_note_outlined,
+          iconColor: const Color(0xff8a68ff),
           title: '小程序',
-          subtitle: '常用工具入口',
+          subtitle: '',
           onTap: () => _showSoon(context),
         ),
       ],
@@ -411,16 +469,16 @@ class MineTab extends StatelessWidget {
       animation: controller,
       builder: (context, _) {
         return ListView(
-          padding: const EdgeInsets.only(bottom: 20),
+          padding: const EdgeInsets.fromLTRB(0, 12, 0, 20),
           children: [
             Padding(
-              padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
+              padding: const EdgeInsets.fromLTRB(24, 28, 20, 26),
               child: Row(
                 children: [
                   _Avatar(
                     label: _avatarText(session),
-                    size: 64,
-                    color: _primaryColor,
+                    size: 68,
+                    color: const Color(0xff8e99a8),
                   ),
                   const SizedBox(width: 16),
                   Expanded(
@@ -435,6 +493,24 @@ class MineTab extends StatelessWidget {
                             fontSize: 18,
                             fontWeight: FontWeight.w800,
                           ),
+                        ),
+                        const SizedBox(height: 4),
+                        Row(
+                          children: const [
+                            Icon(
+                              Icons.check_circle,
+                              size: 13,
+                              color: Color(0xff36c56f),
+                            ),
+                            SizedBox(width: 4),
+                            Text(
+                              '在线',
+                              style: TextStyle(
+                                color: _mutedColor,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ],
                         ),
                         const SizedBox(height: 4),
                         Text(
@@ -456,44 +532,44 @@ class MineTab extends StatelessWidget {
               icon: Icons.security_outlined,
               iconColor: const Color(0xff20c997),
               title: '服务',
-              subtitle: '账号与安全服务',
+              subtitle: '',
               onTap: () => _showSoon(context),
             ),
+            const _GroupGap(),
             _MenuTile(
               icon: Icons.bookmark_border,
               iconColor: const Color(0xffff3b30),
               title: '收藏',
-              subtitle: '保存重要内容',
+              subtitle: '',
               onTap: () => _showSoon(context),
             ),
             _MenuTile(
               icon: Icons.photo_library_outlined,
               iconColor: const Color(0xff34c759),
               title: '朋友圈',
-              subtitle: '我的动态',
+              subtitle: '',
               onTap: () => _showSoon(context),
             ),
             _MenuTile(
               icon: Icons.wallet_outlined,
               iconColor: _primaryColor,
               title: '卡包',
-              subtitle: '红包与转账记录',
+              subtitle: '',
               onTap: () => _showSoon(context),
             ),
             _MenuTile(
               icon: Icons.emoji_emotions_outlined,
               iconColor: const Color(0xffffc043),
               title: '表情',
-              subtitle: '管理表情和贴纸',
+              subtitle: '',
               onTap: () => _showSoon(context),
             ),
-            const _SectionHeader(text: '设置'),
+            const _GroupGap(),
             _MenuTile(
-              icon: Icons.chat_bubble_outline,
-              iconColor: _primaryColor,
-              title: '消息连接',
-              subtitle:
-                  '${controller.imStatusText} · ${session?.chat?.uid ?? '未连接'}',
+              icon: Icons.settings_outlined,
+              iconColor: _mutedColor,
+              title: '设置',
+              subtitle: '',
               onTap: () =>
                   _push(context, ConnectionInfoPage(controller: controller)),
             ),
@@ -1983,9 +2059,11 @@ class _ChatPageState extends State<ChatPage> {
   Map<String, Object?> _selectedPayload = const {};
   String? _error;
   String _message = '';
+  List<Map<String, Object?>> _messages = const [];
+  bool _messagesLoading = true;
+  int _messageLoadToken = 0;
   late int _conversationRevision;
   late int _messageRevision;
-  late Future<List<Map<String, Object?>>> _messagesFuture;
 
   bool get _isGroup => widget.channelType == _groupChannelType;
   String get _groupId =>
@@ -1998,7 +2076,7 @@ class _ChatPageState extends State<ChatPage> {
     _conversationRevision = widget.controller.conversationVersion;
     _messageRevision = _currentMessageRevision();
     widget.controller.addListener(_onControllerChanged);
-    _messagesFuture = _loadMessages();
+    _loadMessagesIntoState(showLoading: true);
     _textController.text = widget.controller.readDraft(
       channelId: widget.channelId,
       channelType: widget.channelType,
@@ -2024,7 +2102,8 @@ class _ChatPageState extends State<ChatPage> {
         oldWidget.channelType != widget.channelType) {
       _conversationRevision = widget.controller.conversationVersion;
       _messageRevision = _currentMessageRevision();
-      _messagesFuture = _loadMessages();
+      _messages = const [];
+      _loadMessagesIntoState(showLoading: true);
     }
   }
 
@@ -2038,11 +2117,9 @@ class _ChatPageState extends State<ChatPage> {
         nextMessage == _messageRevision) {
       return;
     }
-    setState(() {
-      _conversationRevision = nextConversation;
-      _messageRevision = nextMessage;
-      _messagesFuture = _loadMessages();
-    });
+    _conversationRevision = nextConversation;
+    _messageRevision = nextMessage;
+    _loadMessagesIntoState(showLoading: false);
   }
 
   int _currentMessageRevision() {
@@ -2072,8 +2149,36 @@ class _ChatPageState extends State<ChatPage> {
     setState(() {
       _conversationRevision = widget.controller.conversationVersion;
       _messageRevision = _currentMessageRevision();
-      _messagesFuture = _loadMessages();
     });
+    _loadMessagesIntoState(showLoading: _messages.isEmpty);
+  }
+
+  Future<void> _loadMessagesIntoState({required bool showLoading}) async {
+    final token = ++_messageLoadToken;
+    if (showLoading && mounted) {
+      setState(() {
+        _messagesLoading = true;
+        _error = null;
+      });
+    }
+    try {
+      final messages = await _loadMessages();
+      if (!mounted || token != _messageLoadToken) {
+        return;
+      }
+      setState(() {
+        _messages = messages;
+        _messagesLoading = false;
+      });
+    } catch (error) {
+      if (!mounted || token != _messageLoadToken) {
+        return;
+      }
+      setState(() {
+        _messagesLoading = false;
+        _error = error.toString();
+      });
+    }
   }
 
   @override
@@ -2160,38 +2265,24 @@ class _ChatPageState extends State<ChatPage> {
                     }),
                   ),
                 Expanded(
-                  child: FutureBuilder<List<Map<String, Object?>>>(
-                    future: _messagesFuture,
-                    builder: (context, snapshot) {
-                      if (snapshot.connectionState != ConnectionState.done) {
-                        return const Center(child: CircularProgressIndicator());
-                      }
-                      if (snapshot.hasError) {
-                        return _ErrorState(
-                          text: snapshot.error.toString(),
-                          onRetry: _reloadMessages,
-                        );
-                      }
-                      final messages = snapshot.data ?? [];
-                      if (messages.isEmpty) {
-                        return const _EmptyState(text: '暂无消息');
-                      }
-                      return ListView.builder(
-                        padding: const EdgeInsets.symmetric(
-                          vertical: 12,
-                          horizontal: 8,
+                  child: _messagesLoading && _messages.isEmpty
+                      ? const Center(child: CircularProgressIndicator())
+                      : _messages.isEmpty
+                      ? const _EmptyState(text: '暂无消息')
+                      : ListView.builder(
+                          padding: const EdgeInsets.symmetric(
+                            vertical: 12,
+                            horizontal: 8,
+                          ),
+                          itemCount: _messages.length,
+                          itemBuilder: (context, index) {
+                            final item = _messages[index];
+                            return _MessageRow(
+                              item: item,
+                              onLongPress: () => _selectMessage(item),
+                            );
+                          },
                         ),
-                        itemCount: messages.length,
-                        itemBuilder: (context, index) {
-                          final item = messages[index];
-                          return _MessageRow(
-                            item: item,
-                            onLongPress: () => _selectMessage(item),
-                          );
-                        },
-                      );
-                    },
-                  ),
                 ),
                 if (_toolsOpen)
                   _ChatToolsPanel(
@@ -2234,12 +2325,13 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   Future<void> _sendText() async {
+    final text = _textController.text;
     await _runSending(() async {
       await widget.controller.sendTextMessage(
         channelId: widget.channelId,
         channelType: widget.channelType,
         groupId: widget.groupId,
-        text: _textController.text,
+        text: text,
         mentionUserIds: _mentionUserIds,
         mentionAll: _mentionAll,
         replyClientMsgNo: _replyClientMsgNo,
@@ -2571,13 +2663,12 @@ class _ChatPageState extends State<ChatPage> {
     });
     try {
       await task();
-      await widget.controller.refreshLocalConversations();
       if (mounted) {
         setState(() {
           _conversationRevision = widget.controller.conversationVersion;
           _messageRevision = _currentMessageRevision();
-          _messagesFuture = _loadMessages();
         });
+        unawaited(_loadMessagesIntoState(showLoading: false));
       }
     } catch (error) {
       _error = error.toString();
@@ -2885,16 +2976,16 @@ class _SearchBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 6, 16, 10),
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(6),
         child: Container(
-          height: 38,
+          height: 36,
           padding: const EdgeInsets.symmetric(horizontal: 12),
           decoration: BoxDecoration(
-            color: const Color(0xffeef2f7),
-            borderRadius: BorderRadius.circular(12),
+            color: const Color(0xffeeeeef),
+            borderRadius: BorderRadius.circular(6),
           ),
           child: Row(
             children: [
@@ -3016,6 +3107,8 @@ class _ContactTile extends StatelessWidget {
     required this.trailing,
     required this.isGroup,
     required this.onTap,
+    this.avatarColor,
+    this.icon,
     this.onLongPress,
   });
 
@@ -3024,6 +3117,8 @@ class _ContactTile extends StatelessWidget {
   final String trailing;
   final bool isGroup;
   final VoidCallback onTap;
+  final Color? avatarColor;
+  final IconData? icon;
   final VoidCallback? onLongPress;
 
   @override
@@ -3041,9 +3136,11 @@ class _ContactTile extends StatelessWidget {
           children: [
             _Avatar(
               label: title,
-              size: 42,
-              color: isGroup ? const Color(0xff34c759) : _primaryColor,
-              icon: isGroup ? Icons.groups : null,
+              size: 38,
+              color:
+                  avatarColor ??
+                  (isGroup ? const Color(0xff34c759) : _primaryColor),
+              icon: icon ?? (isGroup ? Icons.groups : null),
             ),
             const SizedBox(width: 12),
             Expanded(
@@ -3096,6 +3193,7 @@ class _MenuTile extends StatelessWidget {
     required this.title,
     required this.subtitle,
     required this.onTap,
+    this.trailing,
   });
 
   final IconData icon;
@@ -3103,6 +3201,7 @@ class _MenuTile extends StatelessWidget {
   final String title;
   final String subtitle;
   final VoidCallback onTap;
+  final Widget? trailing;
 
   @override
   Widget build(BuildContext context) {
@@ -3155,6 +3254,7 @@ class _MenuTile extends StatelessWidget {
                 ],
               ),
             ),
+            if (trailing != null) ...[const SizedBox(width: 8), trailing!],
             const Icon(Icons.chevron_right, color: _mutedColor, size: 20),
           ],
         ),
@@ -3730,18 +3830,84 @@ class _SectionHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      height: 36,
+      height: 30,
       alignment: Alignment.centerLeft,
       padding: const EdgeInsets.symmetric(horizontal: 16),
-      color: _fillColor,
+      color: _pageColor,
       child: Text(
         text,
         style: const TextStyle(
           color: _mutedColor,
-          fontSize: 13,
+          fontSize: 12,
           fontWeight: FontWeight.w700,
         ),
       ),
+    );
+  }
+}
+
+class _GroupGap extends StatelessWidget {
+  const _GroupGap();
+
+  @override
+  Widget build(BuildContext context) {
+    return const SizedBox(height: 8);
+  }
+}
+
+class _AlphabetIndex extends StatelessWidget {
+  const _AlphabetIndex();
+
+  @override
+  Widget build(BuildContext context) {
+    const letters = [
+      'A',
+      'B',
+      'C',
+      'D',
+      'E',
+      'F',
+      'G',
+      'H',
+      'I',
+      'J',
+      'K',
+      'L',
+      'M',
+      'N',
+      'O',
+      'P',
+      'Q',
+      'R',
+      'S',
+      'T',
+      'U',
+      'V',
+      'W',
+      'X',
+      'Y',
+      'Z',
+      '#',
+    ];
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        for (final letter in letters)
+          SizedBox(
+            height: 13,
+            width: 18,
+            child: Center(
+              child: Text(
+                letter,
+                style: const TextStyle(
+                  color: Color(0xff6f7785),
+                  fontSize: 10,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ),
+      ],
     );
   }
 }

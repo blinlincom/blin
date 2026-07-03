@@ -7,6 +7,7 @@ import '../core/app_logger.dart';
 import '../core/models.dart';
 import '../core/session_store.dart';
 import '../im/chat_feature_service.dart';
+import '../im/im_message_types.dart';
 import '../im/wukong_im_service.dart';
 
 class SessionController extends ChangeNotifier {
@@ -109,16 +110,21 @@ class SessionController extends ChangeNotifier {
     if (_session == null) {
       return;
     }
+    if (_im.isStarted) {
+      AppLogger.info('session', 'hot resume use existing im session');
+      _im.resumeConnection();
+      return;
+    }
     final lastRefresh = _lastHotRefreshAt;
     if (lastRefresh != null &&
         DateTime.now().difference(lastRefresh) < const Duration(seconds: 20)) {
       AppLogger.info('session', 'skip hot resume refresh');
-      _im.ensureConnected();
+      _im.resumeConnection();
       return;
     }
     try {
       await _refreshLoggedInSession();
-      _im.ensureConnected();
+      _im.resumeConnection();
       _lastHotRefreshAt = DateTime.now();
       AppLogger.info('session', 'hot resume success');
     } on ApiException catch (error) {
@@ -295,6 +301,10 @@ class SessionController extends ChangeNotifier {
     );
   }
 
+  Future<Map<String, Object?>?> localMessageByClientMsgNo(String clientMsgNo) {
+    return _im.localMessageByClientMsgNo(clientMsgNo);
+  }
+
   Future<void> refreshLocalConversations() {
     return _im.refreshLocalConversations();
   }
@@ -310,7 +320,7 @@ class SessionController extends ChangeNotifier {
     bool burnAfterRead = false,
     int burnAfterReadSeconds = 0,
   }) async {
-    final current = _requireSession();
+    _requireSession();
     final content = text.trim();
     if (content.isEmpty) {
       throw ApiException('消息内容不能为空');
@@ -325,35 +335,17 @@ class SessionController extends ChangeNotifier {
         'content_length': content.length,
       },
     );
-    if (channelType == 2) {
-      await _chat.sendGroupText(
-        session: current,
-        device: _device,
-        groupId: groupId.isEmpty ? channelId : groupId,
-        content: content,
-        mentionUserIds: mentionUserIds,
-        mentionAll: mentionAll,
-        replyClientMsgNo: replyClientMsgNo,
-        burnAfterRead: burnAfterRead,
-        burnAfterReadSeconds: burnAfterReadSeconds,
-      );
-    } else {
-      await _chat.sendPrivateText(
-        session: current,
-        device: _device,
-        receiverId: _userIdFromUid(channelId),
-        content: content,
-        replyClientMsgNo: replyClientMsgNo,
-        burnAfterRead: burnAfterRead,
-        burnAfterReadSeconds: burnAfterReadSeconds,
-      );
-    }
-    _chat.clearDraft(channelId: channelId, channelType: channelType);
-    await _syncChannelAfterSend(
-      channelId: channelId,
+    await _im.sendTextMessage(
+      channelID: channelId,
       channelType: channelType,
-      groupId: groupId,
+      content: content,
+      mentionUids: mentionUserIds.map(_uidFromUserId).toList(),
+      mentionAll: mentionAll,
+      replyClientMsgNo: replyClientMsgNo,
+      burnAfterRead: burnAfterRead,
+      burnAfterReadSeconds: burnAfterReadSeconds,
     );
+    _chat.clearDraft(channelId: channelId, channelType: channelType);
   }
 
   String readDraft({required String channelId, required int channelType}) {
@@ -392,7 +384,7 @@ class SessionController extends ChangeNotifier {
       'im_message_recall',
       params: {
         'target_client_msg_no': targetClientMsgNo,
-        'client_msg_no': _chat.nextClientMsgNo(),
+        'client_msg_no': _im.newClientMsgNo(),
       },
     );
   }
@@ -405,7 +397,7 @@ class SessionController extends ChangeNotifier {
       'im_message_read_receipt',
       params: {
         'target_client_msg_no': targetClientMsgNo,
-        'client_msg_no': _chat.nextClientMsgNo(),
+        'client_msg_no': _im.newClientMsgNo(),
         if (messageSeq > 0) 'message_seq': messageSeq.toString(),
       },
     );
@@ -423,7 +415,7 @@ class SessionController extends ChangeNotifier {
       'im_burn_after_read',
       params: {
         'target_client_msg_no': targetClientMsgNo,
-        'client_msg_no': _chat.nextClientMsgNo(),
+        'client_msg_no': _im.newClientMsgNo(),
       },
     );
   }
@@ -436,7 +428,7 @@ class SessionController extends ChangeNotifier {
       group ? 'im_group_red_packet_receive' : 'im_person_red_packet_receive',
       params: {
         'red_packet_id': redPacketId,
-        'client_msg_no': _chat.nextClientMsgNo(),
+        'client_msg_no': _im.newClientMsgNo(),
       },
     );
   }
@@ -446,7 +438,7 @@ class SessionController extends ChangeNotifier {
       'im_person_transfer_receive',
       params: {
         'transfer_id': transferId,
-        'client_msg_no': _chat.nextClientMsgNo(),
+        'client_msg_no': _im.newClientMsgNo(),
       },
     );
   }
@@ -458,21 +450,18 @@ class SessionController extends ChangeNotifier {
     String filePath = '',
     Map<String, Object?> params = const {},
   }) async {
-    final current = _requireSession();
-    final result = await _chat.sendPrivateMedia(
-      session: current,
-      device: _device,
-      receiverId: receiverId,
-      contentType: contentType,
-      url: url,
-      filePath: filePath,
-      params: params,
-    );
-    await _syncChannelAfterSend(
+    _requireSession();
+    await _sendSdkBusinessMessage(
       channelId: _uidFromUserId(receiverId),
       channelType: 1,
+      contentType: contentType,
+      payload: {
+        ...params,
+        if (url.isNotEmpty) 'url': url,
+        if (filePath.isNotEmpty) 'file_path': filePath,
+      },
     );
-    return result;
+    return const {'msg': '已发送'};
   }
 
   Future<Map<String, Object?>> sendGroupMedia({
@@ -483,40 +472,33 @@ class SessionController extends ChangeNotifier {
     String filePath = '',
     Map<String, Object?> params = const {},
   }) async {
-    final current = _requireSession();
-    final result = await _chat.sendGroupMedia(
-      session: current,
-      device: _device,
-      groupId: groupId,
-      contentType: contentType,
-      url: url,
-      filePath: filePath,
-      params: params,
-    );
-    await _syncChannelAfterSend(
+    _requireSession();
+    await _sendSdkBusinessMessage(
       channelId: channelId.isEmpty ? groupId : channelId,
       channelType: 2,
-      groupId: groupId,
+      contentType: contentType,
+      payload: {
+        ...params,
+        'group_id': groupId,
+        if (url.isNotEmpty) 'url': url,
+        if (filePath.isNotEmpty) 'file_path': filePath,
+      },
     );
-    return result;
+    return const {'msg': '已发送'};
   }
 
   Future<Map<String, Object?>> sendPrivateContactCard({
     required String receiverId,
     required String cardUserId,
   }) async {
-    final current = _requireSession();
-    final result = await _chat.sendPrivateContactCard(
-      session: current,
-      device: _device,
-      receiverId: receiverId,
-      cardUserId: cardUserId,
-    );
-    await _syncChannelAfterSend(
+    _requireSession();
+    await _sendSdkBusinessMessage(
       channelId: _uidFromUserId(receiverId),
       channelType: 1,
+      contentType: ChatContentTypes.contactCard,
+      payload: {'card_user_id': cardUserId},
     );
-    return result;
+    return const {'msg': '已发送'};
   }
 
   Future<Map<String, Object?>> sendGroupContactCard({
@@ -524,19 +506,14 @@ class SessionController extends ChangeNotifier {
     required String cardUserId,
     String channelId = '',
   }) async {
-    final current = _requireSession();
-    final result = await _chat.sendGroupContactCard(
-      session: current,
-      device: _device,
-      groupId: groupId,
-      cardUserId: cardUserId,
-    );
-    await _syncChannelAfterSend(
+    _requireSession();
+    await _sendSdkBusinessMessage(
       channelId: channelId.isEmpty ? groupId : channelId,
       channelType: 2,
-      groupId: groupId,
+      contentType: ChatContentTypes.contactCard,
+      payload: {'group_id': groupId, 'card_user_id': cardUserId},
     );
-    return result;
+    return const {'msg': '已发送'};
   }
 
   Future<Map<String, Object?>> sendPrivateTransfer({
@@ -544,19 +521,19 @@ class SessionController extends ChangeNotifier {
     required String money,
     required String assetType,
   }) async {
-    final current = _requireSession();
-    final result = await _chat.sendPrivateTransfer(
-      session: current,
-      device: _device,
-      receiverId: receiverId,
-      money: money,
-      assetType: assetType,
-    );
-    await _syncChannelAfterSend(
+    _requireSession();
+    await _sendSdkBusinessMessage(
       channelId: _uidFromUserId(receiverId),
       channelType: 1,
+      contentType: ChatContentTypes.transfer,
+      payload: {
+        'receiver_id': receiverId,
+        'money': money,
+        'asset_type': assetType,
+        'transfer_id': _tradeNo('tr'),
+      },
     );
-    return result;
+    return const {'msg': '已发送'};
   }
 
   Future<Map<String, Object?>> sendGroupTransfer({
@@ -566,21 +543,20 @@ class SessionController extends ChangeNotifier {
     required String assetType,
     String channelId = '',
   }) async {
-    final current = _requireSession();
-    final result = await _chat.sendGroupTransfer(
-      session: current,
-      device: _device,
-      groupId: groupId,
-      receiverId: receiverId,
-      money: money,
-      assetType: assetType,
-    );
-    await _syncChannelAfterSend(
+    _requireSession();
+    await _sendSdkBusinessMessage(
       channelId: channelId.isEmpty ? groupId : channelId,
       channelType: 2,
-      groupId: groupId,
+      contentType: ChatContentTypes.transfer,
+      payload: {
+        'group_id': groupId,
+        'receiver_id': receiverId,
+        'money': money,
+        'asset_type': assetType,
+        'transfer_id': _tradeNo('gtr'),
+      },
     );
-    return result;
+    return const {'msg': '已发送'};
   }
 
   Future<Map<String, Object?>> sendPrivateRedPacket({
@@ -589,20 +565,20 @@ class SessionController extends ChangeNotifier {
     required String assetType,
     String remark = '',
   }) async {
-    final current = _requireSession();
-    final result = await _chat.sendPrivateRedPacket(
-      session: current,
-      device: _device,
-      receiverId: receiverId,
-      money: money,
-      assetType: assetType,
-      remark: remark,
-    );
-    await _syncChannelAfterSend(
+    _requireSession();
+    await _sendSdkBusinessMessage(
       channelId: _uidFromUserId(receiverId),
       channelType: 1,
+      contentType: ChatContentTypes.redPacket,
+      payload: {
+        'receiver_id': receiverId,
+        'money': money,
+        'asset_type': assetType,
+        'red_packet_id': _tradeNo('rp'),
+        if (remark.isNotEmpty) 'remark': remark,
+      },
     );
-    return result;
+    return const {'msg': '已发送'};
   }
 
   Future<Map<String, Object?>> sendGroupRedPacket({
@@ -615,24 +591,23 @@ class SessionController extends ChangeNotifier {
     String remark = '',
     String channelId = '',
   }) async {
-    final current = _requireSession();
-    final result = await _chat.sendGroupRedPacket(
-      session: current,
-      device: _device,
-      groupId: groupId,
-      money: money,
-      assetType: assetType,
-      packetType: packetType,
-      quantity: quantity,
-      receiverId: receiverId,
-      remark: remark,
-    );
-    await _syncChannelAfterSend(
+    _requireSession();
+    await _sendSdkBusinessMessage(
       channelId: channelId.isEmpty ? groupId : channelId,
       channelType: 2,
-      groupId: groupId,
+      contentType: ChatContentTypes.redPacket,
+      payload: {
+        'group_id': groupId,
+        'money': money,
+        'asset_type': assetType,
+        'packet_type': packetType,
+        'quantity': quantity.toString(),
+        'red_packet_id': _tradeNo('grp'),
+        if (receiverId.isNotEmpty) 'receiver_id': receiverId,
+        if (remark.isNotEmpty) 'remark': remark,
+      },
     );
-    return result;
+    return const {'msg': '已发送'};
   }
 
   Future<Map<String, Object?>> applyFriend({
@@ -952,16 +927,40 @@ class SessionController extends ChangeNotifier {
     );
   }
 
-  Future<void> _syncChannelAfterSend({
+  Future<void> _sendSdkBusinessMessage({
     required String channelId,
     required int channelType,
-    String groupId = '',
+    required String contentType,
+    Map<String, Object?> payload = const {},
   }) {
-    return _im.syncChannelAfterSend(
+    return _im.sendBusinessMessage(
       channelID: channelId,
       channelType: channelType,
-      groupId: groupId,
+      contentType: _contentTypeCode(contentType),
+      payload: {'content_type': contentType, ...payload},
     );
+  }
+
+  int _contentTypeCode(String contentType) {
+    return switch (contentType) {
+      ChatContentTypes.image => ImMessageTypes.image,
+      ChatContentTypes.voice => ImMessageTypes.voice,
+      ChatContentTypes.video => ImMessageTypes.video,
+      ChatContentTypes.file => ImMessageTypes.file,
+      ChatContentTypes.transfer => ImMessageTypes.transfer,
+      ChatContentTypes.redPacket => ImMessageTypes.redPacket,
+      ChatContentTypes.emoji => ImMessageTypes.emoji,
+      ChatContentTypes.gif => ImMessageTypes.gif,
+      ChatContentTypes.sticker => ImMessageTypes.sticker,
+      ChatContentTypes.contactCard => ImMessageTypes.contactCard,
+      _ => ImMessageTypes.text,
+    };
+  }
+
+  String _tradeNo(String prefix) {
+    final millis = DateTime.now().millisecondsSinceEpoch;
+    final tail = millis.toRadixString(36);
+    return '${prefix}_${_session?.userId ?? '0'}_$tail';
   }
 
   bool _isCacheFresh(DateTime? time) {
@@ -1005,11 +1004,6 @@ class SessionController extends ChangeNotifier {
       _busy = false;
       notifyListeners();
     }
-  }
-
-  String _userIdFromUid(String uid) {
-    final match = RegExp(r'user(\d+)$').firstMatch(uid);
-    return match?.group(1) ?? uid;
   }
 
   String _uidFromUserId(String userId) {

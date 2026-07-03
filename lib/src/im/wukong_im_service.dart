@@ -5,6 +5,8 @@ import 'package:wukongimfluttersdk/common/options.dart';
 import 'package:wukongimfluttersdk/entity/channel.dart';
 import 'package:wukongimfluttersdk/entity/conversation.dart';
 import 'package:wukongimfluttersdk/entity/msg.dart';
+import 'package:wukongimfluttersdk/model/wk_text_content.dart';
+import 'package:wukongimfluttersdk/proto/proto.dart';
 import 'package:wukongimfluttersdk/type/const.dart';
 import 'package:wukongimfluttersdk/wkim.dart';
 
@@ -49,6 +51,7 @@ class WukongImService extends ChangeNotifier {
   final Map<String, String> _groupIdsByChannel = <String, String>{};
 
   bool get isConnected => _isConnectedStatus(_status);
+  bool get isStarted => _setupCompleted && _isStartedStatus(_status);
   String get statusText => _statusText;
   String? get lastError => _lastError;
   List<Map<String, Object?>> get latestConversations => _latestConversations;
@@ -193,6 +196,19 @@ class WukongImService extends ChangeNotifier {
     _ensureConnected(source: 'ensure', force: force);
   }
 
+  void resumeConnection() {
+    final seconds = DateTime.now().difference(_statusChangedAt).inSeconds;
+    if (_isConnectedStatus(_status)) {
+      ensureConnected();
+      return;
+    }
+    final force =
+        _status == WKConnectStatus.connecting ||
+        _status == WKConnectStatus.kicked ||
+        seconds >= 6;
+    _ensureConnected(source: 'resume', force: force);
+  }
+
   void onAppBackgrounded(String state) {
     _backgroundedAt = DateTime.now();
     _connectionWatchdog?.cancel();
@@ -271,6 +287,9 @@ class WukongImService extends ChangeNotifier {
         'background_seconds': _backgroundSeconds(),
       },
     );
+    if (force) {
+      WKIM.shared.connectionManager.disconnect(false);
+    }
     WKIM.shared.connectionManager.connect();
     _scheduleConnectionWatchdog(source);
     unawaited(
@@ -321,6 +340,134 @@ class WukongImService extends ChangeNotifier {
     messages.sort((a, b) => a.orderSeq.compareTo(b.orderSeq));
     final start = messages.length > limit ? messages.length - limit : 0;
     return messages.skip(start).map(_messageToMap).toList();
+  }
+
+  Future<Map<String, Object?>?> localMessageByClientMsgNo(
+    String clientMsgNo,
+  ) async {
+    if (clientMsgNo.isEmpty) {
+      return null;
+    }
+    final message = await WKIM.shared.messageManager.getWithClientMsgNo(
+      clientMsgNo,
+    );
+    return message == null ? null : _messageToMap(message);
+  }
+
+  Future<void> sendTextMessage({
+    required String channelID,
+    required int channelType,
+    required String content,
+    List<String> mentionUids = const [],
+    bool mentionAll = false,
+    String replyClientMsgNo = '',
+    bool burnAfterRead = false,
+    int burnAfterReadSeconds = 0,
+  }) async {
+    if (!_setupCompleted) {
+      throw ApiException('IM 未初始化');
+    }
+    if (!_isConnectedStatus(_status)) {
+      ensureConnected(force: true);
+      throw ApiException('IM 正在连接，请稍后重试');
+    }
+    final text = WKTextContent(content);
+    text.contentType = ImMessageTypes.text;
+    if (mentionAll || mentionUids.isNotEmpty) {
+      text.mentionInfo = WKMentionInfo()
+        ..mentionAll = mentionAll
+        ..uids = mentionUids;
+    }
+    if (replyClientMsgNo.isNotEmpty) {
+      final replyMessage = await WKIM.shared.messageManager
+          .getWithClientMsgNo(replyClientMsgNo)
+          .timeout(const Duration(seconds: 2), onTimeout: () => null);
+      text.reply = WKReply()
+        ..rootMid = replyMessage?.messageID ?? ''
+        ..messageId = replyMessage?.messageID ?? replyClientMsgNo
+        ..messageSeq = replyMessage?.messageSeq ?? 0
+        ..fromUID = replyMessage?.fromUID ?? ''
+        ..payload = replyMessage?.messageContent;
+    }
+    final options = WKSendOptions();
+    options.setting = Setting()..receipt = 1;
+    if (burnAfterRead && burnAfterReadSeconds > 0) {
+      options.expire = burnAfterReadSeconds;
+    }
+    AppLogger.info(
+      'im',
+      'sdk send text',
+      data: {
+        'channel_id': channelID,
+        'channel_type': channelType,
+        'mention_count': mentionUids.length,
+        'mention_all': mentionAll,
+        'reply': replyClientMsgNo.isNotEmpty,
+        'burn_after_read': burnAfterRead,
+      },
+    );
+    await WKIM.shared.messageManager.sendWithOption(
+      text,
+      WKChannel(channelID, channelType),
+      options,
+    );
+  }
+
+  Future<void> sendBusinessMessage({
+    required String channelID,
+    required int channelType,
+    required int contentType,
+    Map<String, Object?> payload = const {},
+    bool receipt = true,
+    bool burnAfterRead = false,
+    int burnAfterReadSeconds = 0,
+    String replyClientMsgNo = '',
+  }) async {
+    if (!_setupCompleted) {
+      throw ApiException('IM 未初始化');
+    }
+    if (!_isConnectedStatus(_status)) {
+      ensureConnected(force: true);
+      throw ApiException('IM 正在连接，请稍后重试');
+    }
+    final cleanPayload = <String, dynamic>{
+      for (final entry in payload.entries)
+        if (entry.value != null && entry.value.toString().isNotEmpty)
+          entry.key: entry.value,
+      'type': contentType,
+    };
+    final content = BimMessageContent(contentType, payload: cleanPayload);
+    if (replyClientMsgNo.isNotEmpty) {
+      final replyMessage = await WKIM.shared.messageManager
+          .getWithClientMsgNo(replyClientMsgNo)
+          .timeout(const Duration(seconds: 2), onTimeout: () => null);
+      content.reply = WKReply()
+        ..rootMid = replyMessage?.messageID ?? ''
+        ..messageId = replyMessage?.messageID ?? replyClientMsgNo
+        ..messageSeq = replyMessage?.messageSeq ?? 0
+        ..fromUID = replyMessage?.fromUID ?? ''
+        ..payload = replyMessage?.messageContent;
+    }
+    final options = WKSendOptions();
+    options.setting = Setting()..receipt = receipt ? 1 : 0;
+    if (burnAfterRead && burnAfterReadSeconds > 0) {
+      options.expire = burnAfterReadSeconds;
+    }
+    AppLogger.info(
+      'im',
+      'sdk send business message',
+      data: {
+        'channel_id': channelID,
+        'channel_type': channelType,
+        'content_type': contentType,
+        'payload_keys': cleanPayload.keys.toList(),
+      },
+    );
+    await WKIM.shared.messageManager.sendWithOption(
+      content,
+      WKChannel(channelID, channelType),
+      options,
+    );
   }
 
   Future<void> syncChannelAfterSend({
@@ -694,15 +841,24 @@ class WukongImService extends ChangeNotifier {
       );
       back(sync);
     } catch (error) {
-      _lastError = error.toString();
+      final message = error.toString();
+      if (!message.contains('client_msg_no已被其它消息内容占用')) {
+        _lastError = message;
+      }
       AppLogger.error(
         'im',
         'sync channel messages failed',
         error: error,
-        data: {'channel_id': channelID, 'channel_type': channelType},
+        data: {
+          'channel_id': channelID,
+          'channel_type': channelType,
+          'ignored': message.contains('client_msg_no已被其它消息内容占用'),
+        },
       );
       back(WKSyncChannelMsg());
-      notifyListeners();
+      if (!message.contains('client_msg_no已被其它消息内容占用')) {
+        notifyListeners();
+      }
     } finally {
       _channelSyncRequests.remove(requestKey);
     }
