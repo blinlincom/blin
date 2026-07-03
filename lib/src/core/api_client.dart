@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:dio/dio.dart';
 
 import 'app_logger.dart';
@@ -28,6 +30,7 @@ class ApiClient {
   final String baseUrl;
   final String appId;
   final ApiSigner _signer;
+  final Random _nonceRandom = Random.secure();
 
   Future<AppInfo> getAppInfo() async {
     final result = await post<Map<String, Object?>>('get_app_info', {
@@ -416,6 +419,7 @@ class ApiClient {
       'device_flag': AppConfig.imDeviceFlagApp.toString(),
       'device_level': AppConfig.imDeviceLevelMaster.toString(),
       'timestamp': _timestamp(),
+      'nonce': _nonce(),
     };
     payload['sign'] = _signer.sign({'appid': appId, ...payload});
     return post<T>(action, payload, filePath: filePath);
@@ -519,4 +523,10 @@ class ApiClient {
 
   String _timestamp() =>
       (DateTime.now().millisecondsSinceEpoch ~/ 1000).toString();
+
+  String _nonce() {
+    final micros = DateTime.now().microsecondsSinceEpoch.toRadixString(36);
+    final random = _nonceRandom.nextInt(1 << 32).toRadixString(36);
+    return '$micros$random';
+  }
 }

@@ -28,6 +28,7 @@ class BusinessImService extends ChangeNotifier {
   UserSession? _session;
   String _device = '';
   Socket? _socket;
+  WebSocket? _webSocket;
   int _socketEpoch = 0;
   TcpImCrypto _crypto = TcpImCrypto();
   TcpImProto _proto = TcpImProto();
@@ -76,7 +77,14 @@ class BusinessImService extends ChangeNotifier {
     AppLogger.info(
       'im',
       'business im start',
-      data: {'uid': chat.uid, 'device': device, 'tcp_addr': chat.route.tcpAddr},
+      data: {
+        'uid': chat.uid,
+        'device': device,
+        'tcp_addr': chat.route.tcpAddr,
+        'wss_addr': chat.route.wssAddr,
+        'ws_addr': chat.route.wsAddr,
+        'websocket_addr': chat.route.websocketAddr,
+      },
     );
     unawaited(syncConversationsFromServer());
     await _connectTcp();
@@ -90,7 +98,15 @@ class BusinessImService extends ChangeNotifier {
     _reconnectTimer = null;
     _stopTcpHeartbeat();
     final socket = _socket;
+    final webSocket = _webSocket;
     _socket = null;
+    _webSocket = null;
+    _socketEpoch++;
+    if (webSocket != null) {
+      await webSocket
+          .close(WebSocketStatus.normalClosure)
+          .catchError((Object _) => null);
+    }
     if (socket != null) {
       await socket.close().catchError((Object _) => socket);
       socket.destroy();
@@ -120,7 +136,7 @@ class BusinessImService extends ChangeNotifier {
       return;
     }
     _foreground = true;
-    if (_socket == null && !_connecting) {
+    if (_socket == null && _webSocket == null && !_connecting) {
       unawaited(_connectTcp());
     }
   }
@@ -472,27 +488,17 @@ class BusinessImService extends ChangeNotifier {
       channelType: channelType,
     );
     try {
-      final result = channelType == chat.channelTypeGroup
-          ? await _api.sendGroupMessage(
-              session: session,
-              device: _device,
-              groupId: groupId.isNotEmpty
-                  ? groupId
-                  : _groupIdForChannel(channelID),
-              clientMsgNo: clientMsgNo,
-              contentType: contentType,
-              params: cleanPayload,
-              filePath: filePath,
-            )
-          : await _api.sendPersonMessage(
-              session: session,
-              device: _device,
-              receiverId: _receiverIdFromChannel(channelID),
-              clientMsgNo: clientMsgNo,
-              contentType: contentType,
-              params: cleanPayload,
-              filePath: filePath,
-            );
+      final result = await _sendBusinessMessageWithRetry(
+        session: session,
+        chat: chat,
+        channelID: channelID,
+        channelType: channelType,
+        groupId: groupId,
+        clientMsgNo: clientMsgNo,
+        contentType: contentType,
+        params: cleanPayload,
+        filePath: filePath,
+      );
       final confirmed = _normalizeSendResult(
         result,
         fallback: optimistic,
@@ -555,16 +561,88 @@ class BusinessImService extends ChangeNotifier {
     }
   }
 
+  Future<Map<String, Object?>> _sendBusinessMessageWithRetry({
+    required UserSession session,
+    required ChatSession chat,
+    required String channelID,
+    required int channelType,
+    required String groupId,
+    required String clientMsgNo,
+    required String contentType,
+    required Map<String, Object?> params,
+    required String filePath,
+  }) async {
+    const maxAttempts = 3;
+    for (var attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        final result = channelType == chat.channelTypeGroup
+            ? await _api.sendGroupMessage(
+                session: session,
+                device: _device,
+                groupId: groupId.isNotEmpty
+                    ? groupId
+                    : _groupIdForChannel(channelID),
+                clientMsgNo: clientMsgNo,
+                contentType: contentType,
+                params: params,
+                filePath: filePath,
+              )
+            : await _api.sendPersonMessage(
+                session: session,
+                device: _device,
+                receiverId: _receiverIdFromChannel(channelID),
+                clientMsgNo: clientMsgNo,
+                contentType: contentType,
+                params: params,
+                filePath: filePath,
+              );
+        if (attempt > 1) {
+          AppLogger.info(
+            'im',
+            'business message retry succeeded',
+            data: {'client_msg_no': clientMsgNo, 'attempt': attempt},
+          );
+        }
+        return result;
+      } catch (error, stackTrace) {
+        if (attempt >= maxAttempts || !_isRetryableSendError(error)) {
+          Error.throwWithStackTrace(error, stackTrace);
+        }
+        AppLogger.warn(
+          'im',
+          'business message retry scheduled',
+          data: {
+            'client_msg_no': clientMsgNo,
+            'attempt': attempt,
+            'error': error.toString(),
+          },
+        );
+        await Future<void>.delayed(Duration(milliseconds: 350 * attempt));
+      }
+    }
+    throw ApiException('消息发送失败');
+  }
+
+  bool _isRetryableSendError(Object error) {
+    if (error is ApiException) {
+      final code = error.code;
+      return code == null || code == 408 || code == 429 || code >= 500;
+    }
+    return error is SocketException ||
+        error is TimeoutException ||
+        error is IOException;
+  }
+
   Future<void> _connectTcp() async {
     if (_manualStop || _connecting || !_foreground) {
       return;
     }
     final chat = _requireChat();
-    final endpoint = _parseTcpEndpoint(chat.route.tcpAddr);
+    final endpoint = _resolveRealtimeEndpoint(chat.route);
     if (endpoint == null) {
-      _lastError = 'IM TCP 地址为空';
+      _lastError = 'IM 实时连接地址为空';
       _setStatus('连接失败');
-      AppLogger.error('im', 'missing tcp address');
+      AppLogger.error('im', 'missing realtime address');
       return;
     }
     _connecting = true;
@@ -580,39 +658,102 @@ class BusinessImService extends ChangeNotifier {
     try {
       AppLogger.info(
         'im',
-        'tcp connect start',
-        data: {'host': endpoint.host, 'port': endpoint.port},
+        'realtime connect start',
+        data: {'transport': endpoint.transport, 'addr': endpoint.logAddress},
       );
-      final socket = await Socket.connect(
-        endpoint.host,
-        endpoint.port,
-        timeout: const Duration(seconds: 6),
-      );
-      final epoch = ++_socketEpoch;
-      _socket = socket;
+      if (endpoint.isWebSocket) {
+        final webSocket = await WebSocket.connect(
+          endpoint.uri.toString(),
+        ).timeout(const Duration(seconds: 6));
+        if (_manualStop || !_foreground) {
+          await webSocket
+              .close(WebSocketStatus.normalClosure)
+              .catchError((Object _) => null);
+          _connecting = false;
+          if (!_foreground) {
+            _setStatus('未连接');
+          }
+          return;
+        }
+        final epoch = ++_socketEpoch;
+        _webSocket = webSocket;
+        _connecting = false;
+        webSocket.listen(
+          (Object? event) {
+            if (epoch != _socketEpoch) {
+              return;
+            }
+            if (event is List<int>) {
+              _onTcpData(Uint8List.fromList(event));
+              return;
+            }
+            if (event is String) {
+              _onTcpData(Uint8List.fromList(utf8.encode(event)));
+            }
+          },
+          onError: (Object error, StackTrace stackTrace) {
+            if (epoch != _socketEpoch) {
+              return;
+            }
+            AppLogger.error(
+              'im',
+              'websocket error',
+              error: error,
+              stackTrace: stackTrace,
+              data: {'transport': endpoint.transport},
+            );
+            _handleTcpClosed('websocket_error', error.toString());
+          },
+          onDone: () {
+            if (epoch != _socketEpoch) {
+              return;
+            }
+            _handleTcpClosed('websocket_done', '');
+          },
+          cancelOnError: true,
+        );
+      } else {
+        final socket = await Socket.connect(
+          endpoint.uri.host,
+          endpoint.uri.port,
+          timeout: const Duration(seconds: 6),
+        );
+        if (_manualStop || !_foreground) {
+          await socket.close().catchError((Object _) => socket);
+          socket.destroy();
+          _connecting = false;
+          if (!_foreground) {
+            _setStatus('未连接');
+          }
+          return;
+        }
+        final epoch = ++_socketEpoch;
+        _socket = socket;
+        _connecting = false;
+        socket.listen(
+          _onTcpData,
+          onError: (Object error, StackTrace stackTrace) {
+            if (epoch != _socketEpoch) {
+              return;
+            }
+            AppLogger.error(
+              'im',
+              'tcp socket error',
+              error: error,
+              stackTrace: stackTrace,
+            );
+            _handleTcpClosed('socket_error', error.toString());
+          },
+          onDone: () {
+            if (epoch != _socketEpoch) {
+              return;
+            }
+            _handleTcpClosed('socket_done', '');
+          },
+          cancelOnError: true,
+        );
+      }
       _connecting = false;
-      socket.listen(
-        _onTcpData,
-        onError: (Object error, StackTrace stackTrace) {
-          if (epoch != _socketEpoch) {
-            return;
-          }
-          AppLogger.error(
-            'im',
-            'tcp socket error',
-            error: error,
-            stackTrace: stackTrace,
-          );
-          _handleTcpClosed('socket_error', error.toString());
-        },
-        onDone: () {
-          if (epoch != _socketEpoch) {
-            return;
-          }
-          _handleTcpClosed('socket_done', '');
-        },
-        cancelOnError: true,
-      );
       _sendConnectPacket(chat);
     } catch (error, stackTrace) {
       _connecting = false;
@@ -620,10 +761,10 @@ class BusinessImService extends ChangeNotifier {
       _setStatus('连接失败');
       AppLogger.error(
         'im',
-        'tcp connect failed',
+        'realtime connect failed',
         error: error,
         stackTrace: stackTrace,
-        data: {'host': endpoint.host, 'port': endpoint.port},
+        data: {'transport': endpoint.transport, 'addr': endpoint.logAddress},
       );
       _scheduleReconnect('connect_failed');
     }
@@ -839,11 +980,13 @@ class BusinessImService extends ChangeNotifier {
   }
 
   void _sendPacket(TcpPacket packet) {
-    final socket = _socket;
-    if (socket == null) {
+    final bytes = _proto.encode(packet);
+    final webSocket = _webSocket;
+    if (webSocket != null) {
+      webSocket.add(bytes);
       return;
     }
-    socket.add(_proto.encode(packet));
+    _socket?.add(bytes);
   }
 
   void _startTcpHeartbeat() {
@@ -908,13 +1051,19 @@ class BusinessImService extends ChangeNotifier {
 
   Future<void> _closeSocketOnly() async {
     final socket = _socket;
+    final webSocket = _webSocket;
     _socket = null;
+    _webSocket = null;
     _socketEpoch++;
-    if (socket == null) {
-      return;
+    if (webSocket != null) {
+      await webSocket
+          .close(WebSocketStatus.normalClosure)
+          .catchError((Object _) => null);
     }
-    await socket.close().catchError((Object _) => socket);
-    socket.destroy();
+    if (socket != null) {
+      await socket.close().catchError((Object _) => socket);
+      socket.destroy();
+    }
   }
 
   Map<String, Object?> _normalizeConversation(Map<String, Object?> item) {
@@ -1486,7 +1635,40 @@ class BusinessImService extends ChangeNotifier {
     return chat;
   }
 
-  _TcpEndpoint? _parseTcpEndpoint(String value) {
+  _RealtimeEndpoint? _resolveRealtimeEndpoint(ImRoute route) {
+    return _parseWebSocketEndpoint(route.wssAddr, preferSecure: true) ??
+        _parseWebSocketEndpoint(route.websocketAddr, preferSecure: route.tls) ??
+        _parseWebSocketEndpoint(route.wsAddr) ??
+        _parseTcpEndpoint(route.tcpAddr);
+  }
+
+  _RealtimeEndpoint? _parseWebSocketEndpoint(
+    String value, {
+    bool preferSecure = false,
+  }) {
+    var raw = value.trim();
+    if (raw.isEmpty) {
+      return null;
+    }
+    if (!raw.contains('://')) {
+      raw = '${preferSecure ? 'wss' : 'ws'}://$raw';
+    }
+    var uri = Uri.tryParse(raw);
+    if (uri == null || uri.host.isEmpty) {
+      return null;
+    }
+    final scheme = uri.scheme.toLowerCase();
+    if (scheme == 'http' || scheme == 'https') {
+      uri = uri.replace(scheme: scheme == 'https' ? 'wss' : 'ws');
+    } else if (preferSecure && scheme == 'ws') {
+      uri = uri.replace(scheme: 'wss');
+    } else if (scheme != 'ws' && scheme != 'wss') {
+      return null;
+    }
+    return _RealtimeEndpoint.websocket(uri);
+  }
+
+  _RealtimeEndpoint? _parseTcpEndpoint(String value) {
     final raw = value.trim();
     if (raw.isEmpty) {
       return null;
@@ -1499,12 +1681,12 @@ class BusinessImService extends ChangeNotifier {
       if (parts.length == 2) {
         final port = int.tryParse(parts[1]);
         if (port != null) {
-          return _TcpEndpoint(parts[0], port);
+          return _RealtimeEndpoint.tcp(parts[0], port);
         }
       }
       return null;
     }
-    return _TcpEndpoint(uri.host, uri.port);
+    return _RealtimeEndpoint.tcp(uri.host, uri.port);
   }
 
   Map<String, Object?> _cleanPayload(Map<String, Object?> payload) {
@@ -1873,9 +2055,33 @@ class BusinessImMessageEvent {
   final Map<String, Object?> conversation;
 }
 
-class _TcpEndpoint {
-  const _TcpEndpoint(this.host, this.port);
+class _RealtimeEndpoint {
+  const _RealtimeEndpoint._({
+    required this.uri,
+    required this.isWebSocket,
+    required this.transport,
+  });
 
-  final String host;
-  final int port;
+  factory _RealtimeEndpoint.websocket(Uri uri) {
+    return _RealtimeEndpoint._(
+      uri: uri,
+      isWebSocket: true,
+      transport: uri.scheme.toLowerCase() == 'wss' ? 'wss' : 'ws',
+    );
+  }
+
+  factory _RealtimeEndpoint.tcp(String host, int port) {
+    return _RealtimeEndpoint._(
+      uri: Uri(scheme: 'tcp', host: host, port: port),
+      isWebSocket: false,
+      transport: 'tcp',
+    );
+  }
+
+  final Uri uri;
+  final bool isWebSocket;
+  final String transport;
+
+  String get logAddress =>
+      isWebSocket ? uri.toString() : '${uri.host}:${uri.port}';
 }
