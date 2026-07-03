@@ -1,4 +1,8 @@
+import 'dart:math';
+
+import '../core/app_config.dart';
 import '../core/api_client.dart';
+import '../core/app_logger.dart';
 import '../core/models.dart';
 import 'im_cache_store.dart';
 import 'im_message_types.dart';
@@ -16,6 +20,7 @@ class ChatFeatureService {
   final ApiClient _api;
   final WukongImService _im;
   final ImCacheStore _cache;
+  final Random _random = Random.secure();
 
   // SDK 负责实时连接、本地消息库和 client_msg_no；业务端负责权限和资金类规则。
   String readDraft({required String channelId, required int channelType}) {
@@ -38,6 +43,8 @@ class ChatFeatureService {
     _cache.clearDraft(channelId: channelId, channelType: channelType);
   }
 
+  String nextClientMsgNo() => _messageNo('');
+
   Future<Map<String, Object?>> sendPrivate({
     required UserSession session,
     required String device,
@@ -47,11 +54,21 @@ class ChatFeatureService {
     String filePath = '',
     String clientMsgNo = '',
   }) {
+    final messageNo = _messageNo(clientMsgNo);
+    AppLogger.info(
+      'chat',
+      'send private request',
+      data: {
+        'receiver_id': receiverId,
+        'content_type': contentType,
+        'client_msg_no': messageNo,
+      },
+    );
     return _api.sendPersonMessage(
       session: session,
       device: device,
       receiverId: receiverId,
-      clientMsgNo: _messageNo(clientMsgNo),
+      clientMsgNo: messageNo,
       contentType: contentType,
       params: _clean(params),
       filePath: filePath,
@@ -67,11 +84,21 @@ class ChatFeatureService {
     String filePath = '',
     String clientMsgNo = '',
   }) {
+    final messageNo = _messageNo(clientMsgNo);
+    AppLogger.info(
+      'chat',
+      'send group request',
+      data: {
+        'group_id': groupId,
+        'content_type': contentType,
+        'client_msg_no': messageNo,
+      },
+    );
     return _api.sendGroupMessage(
       session: session,
       device: device,
       groupId: groupId,
-      clientMsgNo: _messageNo(clientMsgNo),
+      clientMsgNo: messageNo,
       contentType: contentType,
       params: _clean(params),
       filePath: filePath,
@@ -618,7 +645,14 @@ class ChatFeatureService {
   }
 
   String _messageNo(String clientMsgNo) {
-    return clientMsgNo.isEmpty ? _im.newClientMsgNo() : clientMsgNo;
+    if (clientMsgNo.isNotEmpty) {
+      return clientMsgNo;
+    }
+    final now = DateTime.now().microsecondsSinceEpoch;
+    final app = int.tryParse(AppConfig.appId)?.toRadixString(36) ?? 'app';
+    final random = _random.nextInt(0xffffffff).toRadixString(36);
+    final sdkTail = _im.newClientMsgNo();
+    return 'b${app}_${now.toRadixString(36)}_${random}_${sdkTail.substring(0, 12)}';
   }
 
   Map<String, Object?> _clean(Map<String, Object?> params) {

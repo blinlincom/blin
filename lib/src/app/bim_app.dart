@@ -30,9 +30,7 @@ class _BimAppState extends State<BimApp> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) {
-      widget.controller.hotResume();
-    }
+    widget.controller.appLifecycleChanged(state);
   }
 
   @override

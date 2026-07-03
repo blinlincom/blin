@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../app/session_controller.dart';
 import '../../core/app_config.dart';
@@ -308,16 +309,16 @@ class _ContactsTabState extends State<ContactsTab> {
               icon: Icons.person_add_alt,
               iconColor: _primaryColor,
               title: '添加朋友',
-              subtitle: '搜索用户 ID',
+              subtitle: '按用户名搜索用户',
               onTap: () =>
-                  _push(context, AddFriendPage(controller: widget.controller)),
+                  _push(context, SearchPage(controller: widget.controller)),
             ),
             const _SectionHeader(text: '好友'),
             if (friends.isEmpty) const _EmptyRow(text: '暂无好友'),
             for (final item in friends)
               _ContactTile(
                 title: _friendTitle(item),
-                subtitle: _value(item, ['signature', 'remark', 'username']),
+                subtitle: _friendSubtitle(item),
                 trailing: _friendUserId(item),
                 isGroup: false,
                 onTap: () => _openPrivateChat(context, widget.controller, item),
@@ -669,6 +670,7 @@ class _SearchPageState extends State<SearchPage> {
             final friends = (snapshot.data?[0] ?? []).where((item) {
               return keyword.isEmpty ||
                   _friendTitle(item).toLowerCase().contains(keyword) ||
+                  _friendUsername(item).toLowerCase().contains(keyword) ||
                   _friendUserId(item).contains(keyword);
             }).toList();
             final groups = (snapshot.data?[1] ?? []).where((item) {
@@ -728,7 +730,7 @@ class _SearchPageState extends State<SearchPage> {
                 for (final item in friends)
                   _ContactTile(
                     title: _friendTitle(item),
-                    subtitle: _value(item, ['signature', 'remark', 'username']),
+                    subtitle: _friendSubtitle(item),
                     trailing: _friendUserId(item),
                     isGroup: false,
                     onTap: () =>
@@ -799,6 +801,7 @@ class _SearchPageState extends State<SearchPage> {
     }
     _openPrivateChat(context, widget.controller, {
       ...user,
+      'friend': user,
       'friend_id': friendId,
       'userid': friendId,
       'channel_id': channelId,
@@ -827,7 +830,7 @@ class _RemoteFriendSearchBlock extends StatelessWidget {
   Widget build(BuildContext context) {
     final request = future;
     if (request == null) {
-      return const _EmptyRow(text: '输入用户 ID、用户名或昵称后搜索');
+      return const _EmptyRow(text: '输入用户名、昵称或用户 ID 后搜索');
     }
     return FutureBuilder<Map<String, Object?>>(
       future: request,
@@ -942,6 +945,11 @@ class DiagnosticsLogPage extends StatelessWidget {
         title: const Text('诊断日志'),
         actions: [
           IconButton(
+            tooltip: '复制',
+            onPressed: () => _copyLogs(context),
+            icon: const Icon(Icons.copy),
+          ),
+          IconButton(
             tooltip: '清空',
             onPressed: AppLogger.clear,
             icon: const Icon(Icons.delete_outline),
@@ -953,15 +961,37 @@ class DiagnosticsLogPage extends StatelessWidget {
           valueListenable: AppLogger.revision,
           builder: (context, _, _) {
             final logs = AppLogger.entries.reversed.toList();
-            if (logs.isEmpty) {
-              return const _EmptyState(text: '暂无日志');
-            }
             return ListView.separated(
               padding: const EdgeInsets.all(12),
-              itemCount: logs.length,
+              itemCount: logs.length + 1,
               separatorBuilder: (_, _) => const Divider(height: 12),
               itemBuilder: (context, index) {
-                final item = logs[index];
+                if (index == 0) {
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        '日志文件',
+                        style: TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                      const SizedBox(height: 6),
+                      SelectableText(
+                        AppLogger.filePath.isEmpty
+                            ? '日志文件尚未初始化'
+                            : AppLogger.filePath,
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: _mutedColor,
+                        ),
+                      ),
+                      if (logs.isEmpty) ...[
+                        const SizedBox(height: 12),
+                        const Text('暂无日志'),
+                      ],
+                    ],
+                  );
+                }
+                final item = logs[index - 1];
                 final isError = item.level == 'ERROR';
                 final isWarn = item.level == 'WARN';
                 return SelectableText(
@@ -981,6 +1011,16 @@ class DiagnosticsLogPage extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  Future<void> _copyLogs(BuildContext context) async {
+    final text = await AppLogger.exportText();
+    await Clipboard.setData(ClipboardData(text: text));
+    if (context.mounted) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('日志已复制')));
+    }
   }
 }
 
@@ -1944,6 +1984,7 @@ class _ChatPageState extends State<ChatPage> {
   String? _error;
   String _message = '';
   late int _conversationRevision;
+  late int _messageRevision;
   late Future<List<Map<String, Object?>>> _messagesFuture;
 
   bool get _isGroup => widget.channelType == _groupChannelType;
@@ -1955,6 +1996,7 @@ class _ChatPageState extends State<ChatPage> {
   void initState() {
     super.initState();
     _conversationRevision = widget.controller.conversationVersion;
+    _messageRevision = _currentMessageRevision();
     widget.controller.addListener(_onControllerChanged);
     _messagesFuture = _loadMessages();
     _textController.text = widget.controller.readDraft(
@@ -1976,7 +2018,13 @@ class _ChatPageState extends State<ChatPage> {
     if (oldWidget.controller != widget.controller) {
       oldWidget.controller.removeListener(_onControllerChanged);
       _conversationRevision = widget.controller.conversationVersion;
+      _messageRevision = _currentMessageRevision();
       widget.controller.addListener(_onControllerChanged);
+    } else if (oldWidget.channelId != widget.channelId ||
+        oldWidget.channelType != widget.channelType) {
+      _conversationRevision = widget.controller.conversationVersion;
+      _messageRevision = _currentMessageRevision();
+      _messagesFuture = _loadMessages();
     }
   }
 
@@ -1984,14 +2032,24 @@ class _ChatPageState extends State<ChatPage> {
     if (!mounted) {
       return;
     }
-    final next = widget.controller.conversationVersion;
-    if (next == _conversationRevision) {
+    final nextConversation = widget.controller.conversationVersion;
+    final nextMessage = _currentMessageRevision();
+    if (nextConversation == _conversationRevision &&
+        nextMessage == _messageRevision) {
       return;
     }
     setState(() {
-      _conversationRevision = next;
+      _conversationRevision = nextConversation;
+      _messageRevision = nextMessage;
       _messagesFuture = _loadMessages();
     });
+  }
+
+  int _currentMessageRevision() {
+    return widget.controller.messageVersion(
+      channelId: widget.channelId,
+      channelType: widget.channelType,
+    );
   }
 
   Future<List<Map<String, Object?>>> _loadMessages() {
@@ -2011,7 +2069,11 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   void _reloadMessages() {
-    setState(() => _messagesFuture = _loadMessages());
+    setState(() {
+      _conversationRevision = widget.controller.conversationVersion;
+      _messageRevision = _currentMessageRevision();
+      _messagesFuture = _loadMessages();
+    });
   }
 
   @override
@@ -2510,7 +2572,13 @@ class _ChatPageState extends State<ChatPage> {
     try {
       await task();
       await widget.controller.refreshLocalConversations();
-      _messagesFuture = _loadMessages();
+      if (mounted) {
+        setState(() {
+          _conversationRevision = widget.controller.conversationVersion;
+          _messageRevision = _currentMessageRevision();
+          _messagesFuture = _loadMessages();
+        });
+      }
     } catch (error) {
       _error = error.toString();
     } finally {
@@ -3921,20 +3989,61 @@ int _channelTypeFromConversation(Map<String, Object?> item) {
 }
 
 String _friendTitle(Map<String, Object?> item) {
-  return _value(item, [
+  final profile = _friendProfile(item);
+  final remark = _value(item, ['remark']);
+  if (remark.isNotEmpty) {
+    return remark;
+  }
+  return _value(profile, [
     'nickname',
-    'remark',
     'username',
     'name',
-  ], fallback: '好友');
+  ], fallback: _value(item, ['nickname', 'username', 'name'], fallback: '好友'));
 }
 
 String _friendUserId(Map<String, Object?> item) {
-  final raw = _value(item, ['userid', 'user_id', 'friend_id', 'id']);
+  final profile = _friendProfile(item);
+  final raw = _value(item, ['friend_id', 'userid', 'user_id']);
   if (raw.isNotEmpty) {
     return raw;
   }
+  final nested = _value(profile, ['userid', 'user_id', 'id']);
+  if (nested.isNotEmpty) {
+    return nested;
+  }
   return _privateReceiverIdFromChannel(_value(item, ['uid', 'channel_id']));
+}
+
+String _friendUsername(Map<String, Object?> item) {
+  final profile = _friendProfile(item);
+  return _value(profile, ['username'], fallback: _value(item, ['username']));
+}
+
+String _friendSubtitle(Map<String, Object?> item) {
+  final profile = _friendProfile(item);
+  final username = _friendUsername(item);
+  final signature = _value(profile, [
+    'signature',
+    'bio',
+  ], fallback: _value(item, ['signature']));
+  final id = _friendUserId(item);
+  return [
+    if (username.isNotEmpty) '用户名 $username',
+    if (id.isNotEmpty) 'ID $id',
+    if (signature.isNotEmpty) signature,
+  ].join(' · ');
+}
+
+Map<String, Object?> _friendProfile(Map<String, Object?> item) {
+  final friend = _asObjectMap(item['friend']);
+  if (friend.isNotEmpty) {
+    return friend;
+  }
+  final user = _asObjectMap(item['user']);
+  if (user.isNotEmpty) {
+    return user;
+  }
+  return item;
 }
 
 String _searchFriendId(Map<String, Object?> item) {
@@ -3983,7 +4092,12 @@ String _searchFriendActionText(Map<String, Object?> item) {
 }
 
 String _friendChannelId(Map<String, Object?> item) {
-  final channelId = _value(item, ['channel_id', 'uid', 'im_uid']);
+  final profile = _friendProfile(item);
+  final channelId = _value(item, [
+    'channel_id',
+    'uid',
+    'im_uid',
+  ], fallback: _value(profile, ['channel_id', 'uid', 'im_uid']));
   if (channelId.isNotEmpty) {
     return channelId;
   }

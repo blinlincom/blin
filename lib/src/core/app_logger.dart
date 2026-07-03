@@ -1,6 +1,9 @@
+import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:path_provider/path_provider.dart';
 
 class AppLogEntry {
   const AppLogEntry({
@@ -42,10 +45,31 @@ class AppLogger {
   AppLogger._();
 
   static const _maxEntries = 300;
+  static const _maxFileBytes = 2 * 1024 * 1024;
   static final ValueNotifier<int> revision = ValueNotifier<int>(0);
   static final List<AppLogEntry> _entries = <AppLogEntry>[];
+  static File? _file;
+  static String _filePath = '';
 
   static List<AppLogEntry> get entries => List.unmodifiable(_entries);
+  static String get filePath => _filePath;
+
+  static Future<void> initialize() async {
+    try {
+      final dir = await getApplicationDocumentsDirectory();
+      final logDir = Directory('${dir.path}/logs');
+      if (!await logDir.exists()) {
+        await logDir.create(recursive: true);
+      }
+      _file = File('${logDir.path}/bim.log');
+      _filePath = _file!.path;
+      await _rotateIfNeeded();
+      info('log', 'file logger ready', data: {'path': _filePath});
+    } catch (error, stackTrace) {
+      debugPrint('[BIM] logger init failed: $error');
+      debugPrint(stackTrace.toString());
+    }
+  }
 
   static void info(
     String scope,
@@ -140,8 +164,28 @@ class AppLogger {
 
   static String dump() => _entries.map((entry) => entry.line).join('\n');
 
+  static Future<String> readFile() async {
+    final file = _file;
+    if (file == null || !await file.exists()) {
+      return '';
+    }
+    return file.readAsString();
+  }
+
+  static Future<String> exportText() async {
+    final fileText = await readFile();
+    if (fileText.trim().isNotEmpty) {
+      return fileText;
+    }
+    return dump();
+  }
+
   static void clear() {
     _entries.clear();
+    final file = _file;
+    if (file != null) {
+      unawaited(file.writeAsString('', flush: true).catchError((_) => file));
+    }
     revision.value++;
   }
 
@@ -164,6 +208,35 @@ class AppLogger {
     }
     revision.value++;
     debugPrint('[BIM] ${entry.line}');
+    final file = _file;
+    if (file != null) {
+      unawaited(_appendLine(file, entry.line));
+    }
+  }
+
+  static Future<void> _appendLine(File file, String line) async {
+    try {
+      await file.writeAsString('$line\n', mode: FileMode.append);
+    } catch (error) {
+      debugPrint('[BIM] log write failed: $error');
+    }
+  }
+
+  static Future<void> _rotateIfNeeded() async {
+    final file = _file;
+    if (file == null || !await file.exists()) {
+      return;
+    }
+    final length = await file.length();
+    if (length <= _maxFileBytes) {
+      return;
+    }
+    final rotated = File('${file.path}.1');
+    if (await rotated.exists()) {
+      await rotated.delete();
+    }
+    await file.rename(rotated.path);
+    _file = File(_filePath);
   }
 
   static String _mask(Object? value) {

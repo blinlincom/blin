@@ -32,8 +32,14 @@ class WukongImService extends ChangeNotifier {
   String _statusText = '未连接';
   String? _lastError;
   Timer? _refreshDebounce;
+  Timer? _connectionWatchdog;
   List<Map<String, Object?>> _latestConversations = const [];
   int _conversationVersion = 0;
+  int _messageVersion = 0;
+  DateTime _statusChangedAt = DateTime.fromMillisecondsSinceEpoch(0);
+  DateTime? _lastReconnectAt;
+  DateTime? _backgroundedAt;
+  int _connectAttempt = 0;
   DateTime? _lastConversationSyncAt;
   String _lastConversationSyncKey = '';
   WKSyncConversation? _lastConversationSyncResult;
@@ -42,11 +48,14 @@ class WukongImService extends ChangeNotifier {
       <String, Future<WKSyncChannelMsg>>{};
   final Map<String, String> _groupIdsByChannel = <String, String>{};
 
-  bool get isConnected => _status == WKConnectStatus.success;
+  bool get isConnected => _isConnectedStatus(_status);
   String get statusText => _statusText;
   String? get lastError => _lastError;
   List<Map<String, Object?>> get latestConversations => _latestConversations;
   int get conversationVersion => _conversationVersion;
+  int messageVersion({required String channelID, required int channelType}) =>
+      _channelMessageVersions[_messageKey(channelID, channelType)] ?? 0;
+  final Map<String, int> _channelMessageVersions = <String, int>{};
 
   Future<void> start(UserSession session, {required String device}) async {
     final existingRequest = _startRequest;
@@ -97,6 +106,7 @@ class WukongImService extends ChangeNotifier {
         'start skipped same connection',
         data: {'status': _statusText, 'uid': chat.uid},
       );
+      ensureConnected();
       await refreshLocalConversations(notify: false);
       return;
     }
@@ -131,14 +141,14 @@ class WukongImService extends ChangeNotifier {
     _startedKey = startKey;
     AppLogger.info(
       'im',
-      'connect',
+      'connect prepared',
       data: {
         'uid': chat.uid,
         'tcp': chat.route.tcpAddr,
         'device_flag': chat.deviceFlag,
       },
     );
-    WKIM.shared.connectionManager.connect();
+    _connectViaManager(source: 'start', force: true);
     await refreshLocalConversations();
   }
 
@@ -146,6 +156,8 @@ class WukongImService extends ChangeNotifier {
     AppLogger.info('im', 'stop', data: {'logout': logout});
     _refreshDebounce?.cancel();
     _refreshDebounce = null;
+    _connectionWatchdog?.cancel();
+    _connectionWatchdog = null;
     if (_listenersAttached) {
       WKIM.shared.connectionManager.removeOnConnectionStatus(_listenerKey);
       WKIM.shared.conversationManager.removeOnRefreshMsgListListener(
@@ -164,6 +176,8 @@ class WukongImService extends ChangeNotifier {
     _startRequest = null;
     _latestConversations = const [];
     _conversationVersion++;
+    _messageVersion++;
+    _channelMessageVersions.clear();
     _lastConversationSyncAt = null;
     _lastConversationSyncKey = '';
     _lastConversationSyncResult = null;
@@ -174,6 +188,121 @@ class WukongImService extends ChangeNotifier {
   }
 
   String newClientMsgNo() => WKIM.shared.messageManager.generateClientMsgNo();
+
+  void ensureConnected({bool force = false}) {
+    _ensureConnected(source: 'ensure', force: force);
+  }
+
+  void onAppBackgrounded(String state) {
+    _backgroundedAt = DateTime.now();
+    _connectionWatchdog?.cancel();
+    _connectionWatchdog = null;
+    AppLogger.info(
+      'im',
+      'app backgrounded',
+      data: {'state': state, 'status': _statusText},
+    );
+  }
+
+  void _ensureConnected({required String source, bool force = false}) {
+    final current = _session;
+    if (!_setupCompleted || current?.chat == null) {
+      AppLogger.warn(
+        'im',
+        'ensure connected skipped',
+        data: {
+          'source': source,
+          'setup': _setupCompleted,
+          'has_session': current != null,
+        },
+      );
+      return;
+    }
+    final now = DateTime.now();
+    if (!force && _isConnectedStatus(_status)) {
+      AppLogger.info(
+        'im',
+        'ensure connected already connected',
+        data: {
+          'source': source,
+          'status': _statusText,
+          'background_seconds': _backgroundSeconds(),
+        },
+      );
+      unawaited(refreshLocalConversations(notify: false));
+      return;
+    }
+    if (!force &&
+        _status == WKConnectStatus.connecting &&
+        now.difference(_statusChangedAt) < const Duration(seconds: 8)) {
+      AppLogger.info(
+        'im',
+        'ensure connected wait current attempt',
+        data: {'source': source, 'status': _statusText},
+      );
+      _scheduleConnectionWatchdog(source);
+      return;
+    }
+    final lastReconnect = _lastReconnectAt;
+    if (!force &&
+        lastReconnect != null &&
+        now.difference(lastReconnect) < const Duration(seconds: 3)) {
+      AppLogger.info(
+        'im',
+        'ensure connected throttled',
+        data: {'source': source, 'status': _statusText},
+      );
+      return;
+    }
+    _connectViaManager(source: source, force: force);
+  }
+
+  void _connectViaManager({required String source, bool force = false}) {
+    _lastReconnectAt = DateTime.now();
+    _connectAttempt++;
+    AppLogger.warn(
+      'im',
+      'connection manager connect',
+      data: {
+        'source': source,
+        'attempt': _connectAttempt,
+        'status': _statusText,
+        'force': force,
+        'background_seconds': _backgroundSeconds(),
+      },
+    );
+    WKIM.shared.connectionManager.connect();
+    _scheduleConnectionWatchdog(source);
+    unawaited(
+      refreshLocalConversations(notify: false).catchError((Object error) {
+        AppLogger.warn(
+          'im',
+          'ensure connected conversation refresh failed',
+          data: {'error': error.toString()},
+        );
+        return <Map<String, Object?>>[];
+      }),
+    );
+  }
+
+  void _scheduleConnectionWatchdog(String source) {
+    _connectionWatchdog?.cancel();
+    _connectionWatchdog = Timer(const Duration(seconds: 12), () {
+      if (!_setupCompleted || _isConnectedStatus(_status)) {
+        return;
+      }
+      AppLogger.warn(
+        'im',
+        'connection watchdog reconnect',
+        data: {
+          'source': source,
+          'status': _statusText,
+          'seconds': DateTime.now().difference(_statusChangedAt).inSeconds,
+        },
+      );
+      _ensureConnected(source: 'watchdog:$source', force: true);
+    });
+  }
 
   Future<List<Map<String, Object?>>> localMessages({
     required String channelID,
@@ -218,11 +347,21 @@ class WukongImService extends ChangeNotifier {
     WKIM.shared.messageManager.setSyncChannelMsgListener(
       channelID,
       channelType,
-      maxSeq,
       0,
-      20,
       0,
-      (_) {
+      50,
+      0,
+      (sync) {
+        AppLogger.info(
+          'im',
+          'sync channel after send callback',
+          data: {
+            'channel_id': channelID,
+            'channel_type': channelType,
+            'count': sync?.messages?.length ?? 0,
+            'more': sync?.more ?? 0,
+          },
+        );
         if (!completer.isCompleted) {
           completer.complete();
         }
@@ -237,6 +376,11 @@ class WukongImService extends ChangeNotifier {
           data: {'channel_id': channelID, 'channel_type': channelType},
         );
       },
+    );
+    _markMessageChannel(
+      source: 'send_sync',
+      channelID: channelID,
+      channelType: channelType,
     );
     await refreshLocalConversations();
   }
@@ -260,7 +404,13 @@ class WukongImService extends ChangeNotifier {
           completer.complete(messages);
         }
       },
-      () {},
+      () {
+        AppLogger.info(
+          'im',
+          'history sync requested',
+          data: {'channel_id': channelID, 'channel_type': channelType},
+        );
+      },
     );
     return completer.future.timeout(
       const Duration(seconds: 8),
@@ -339,13 +489,28 @@ class WukongImService extends ChangeNotifier {
       AppLogger.info(
         'im',
         'connection status',
-        data: {'status': status, 'reason_code': reasonCode},
+        data: {
+          'status': status,
+          'reason_code': reasonCode,
+          'node_id': connectInfo?.nodeId ?? '',
+          'attempt': _connectAttempt,
+        },
       );
       _setStatus(status);
+      if (_isConnectedStatus(status)) {
+        _lastError = null;
+        _connectionWatchdog?.cancel();
+        _connectionWatchdog = null;
+        unawaited(refreshLocalConversations(notify: false));
+      } else if (status == WKConnectStatus.fail ||
+          status == WKConnectStatus.noNetwork) {
+        _scheduleConnectionWatchdog('status:$status');
+      }
     });
     WKIM.shared.conversationManager.addOnRefreshMsgListListener(_listenerKey, (
       messages,
     ) async {
+      _markMessageChannels(source: 'conversation_listener', messages: messages);
       _latestConversations = await _mapConversations(messages);
       _conversationVersion++;
       AppLogger.info(
@@ -355,17 +520,34 @@ class WukongImService extends ChangeNotifier {
       );
       notifyListeners();
     });
-    WKIM.shared.messageManager.addOnNewMsgListener(
-      _listenerKey,
-      (_) => _debouncedRefresh(),
-    );
-    WKIM.shared.messageManager.addOnRefreshMsgListener(
-      _listenerKey,
-      (_) => _debouncedRefresh(),
-    );
-    WKIM.shared.messageManager.addOnMsgInsertedListener(
-      (_) => _debouncedRefresh(),
-    );
+    WKIM.shared.messageManager.addOnNewMsgListener(_listenerKey, (messages) {
+      AppLogger.info(
+        'im',
+        'new message listener',
+        data: {
+          'count': messages.length,
+          'channels': _messageChannelList(messages),
+        },
+      );
+      _markMessageChannels(source: 'new_message', messages: messages);
+      _debouncedRefresh();
+    });
+    WKIM.shared.messageManager.addOnRefreshMsgListener(_listenerKey, (message) {
+      _markMessageChannel(
+        source: 'message_refresh',
+        channelID: message.channelID,
+        channelType: message.channelType,
+      );
+      _debouncedRefresh();
+    });
+    WKIM.shared.messageManager.addOnMsgInsertedListener((message) {
+      _markMessageChannel(
+        source: 'message_inserted',
+        channelID: message.channelID,
+        channelType: message.channelType,
+      );
+      _debouncedRefresh();
+    });
     WKIM.shared.cmdManager.addOnCmdListener(_listenerKey, (cmd) {
       // 回执、撤回、阅后即焚等命令消息由服务端生成；客户端收到后刷新本地列表。
       _debouncedRefresh();
@@ -552,23 +734,27 @@ class WukongImService extends ChangeNotifier {
       } else {
         final friends = await _api.friends(session: current, device: _device);
         final userId = _userIdFromUid(channelID);
-        final friend = friends.cast<Map<String, Object?>?>().firstWhere(
-          (item) =>
-              item?['uid']?.toString() == channelID ||
-              item?['userid']?.toString() == userId ||
-              item?['id']?.toString() == userId,
-          orElse: () => null,
-        );
-        channel.channelName =
-            friend?['nickname']?.toString() ??
-            friend?['username']?.toString() ??
-            '';
+        final friend = friends.cast<Map<String, Object?>?>().firstWhere((item) {
+          final profile = _friendProfile(item);
+          return item?['uid']?.toString() == channelID ||
+              profile['uid']?.toString() == channelID ||
+              item?['friend_id']?.toString() == userId ||
+              profile['userid']?.toString() == userId ||
+              profile['user_id']?.toString() == userId ||
+              profile['id']?.toString() == userId;
+        }, orElse: () => null);
+        final profile = _friendProfile(friend);
+        channel.channelName = friend?['remark']?.toString().isNotEmpty == true
+            ? friend!['remark'].toString()
+            : profile['nickname']?.toString().isNotEmpty == true
+            ? profile['nickname'].toString()
+            : profile['username']?.toString() ?? '';
         channel.channelRemark = friend?['remark']?.toString() ?? '';
         channel.avatar =
-            friend?['usertx']?.toString() ??
-            friend?['avatar']?.toString() ??
+            profile['usertx']?.toString() ??
+            profile['avatar']?.toString() ??
             '';
-        channel.username = friend?['username']?.toString() ?? '';
+        channel.username = profile['username']?.toString() ?? '';
         channel.follow = friend == null ? 0 : 1;
       }
     } catch (error) {
@@ -853,6 +1039,97 @@ class WukongImService extends ChangeNotifier {
     return 'app${AppConfig.appId}user$userId';
   }
 
+  Map<String, dynamic> _friendProfile(Map<String, Object?>? item) {
+    if (item == null) {
+      return <String, dynamic>{};
+    }
+    final friend = _asMap(item['friend']);
+    return friend.isEmpty ? _asMap(item) : friend;
+  }
+
+  void _markMessageChannels({
+    required String source,
+    required List<dynamic> messages,
+  }) {
+    final changed = <String>{};
+    for (final message in messages) {
+      final channelID = message.channelID?.toString() ?? '';
+      final channelType = message.channelType is int
+          ? message.channelType as int
+          : int.tryParse(message.channelType?.toString() ?? '') ?? 0;
+      if (channelID.isEmpty || channelType <= 0) {
+        continue;
+      }
+      changed.add(_messageKey(channelID, channelType));
+      _channelMessageVersions[_messageKey(channelID, channelType)] =
+          (_channelMessageVersions[_messageKey(channelID, channelType)] ?? 0) +
+          1;
+    }
+    if (changed.isEmpty) {
+      return;
+    }
+    _messageVersion++;
+    AppLogger.info(
+      'im',
+      'message channels changed',
+      data: {
+        'source': source,
+        'message_version': _messageVersion,
+        'channels': changed.toList(),
+      },
+    );
+    notifyListeners();
+  }
+
+  void _markMessageChannel({
+    required String source,
+    required String channelID,
+    required int channelType,
+  }) {
+    if (channelID.isEmpty || channelType <= 0) {
+      return;
+    }
+    final key = _messageKey(channelID, channelType);
+    _channelMessageVersions[key] = (_channelMessageVersions[key] ?? 0) + 1;
+    _messageVersion++;
+    AppLogger.info(
+      'im',
+      'message channel changed',
+      data: {
+        'source': source,
+        'channel_id': channelID,
+        'channel_type': channelType,
+        'message_version': _messageVersion,
+        'channel_version': _channelMessageVersions[key],
+      },
+    );
+    notifyListeners();
+  }
+
+  List<String> _messageChannelList(List<dynamic> messages) {
+    final channels = <String>{};
+    for (final message in messages) {
+      final channelID = message.channelID?.toString() ?? '';
+      final channelType = message.channelType?.toString() ?? '';
+      if (channelID.isNotEmpty && channelType.isNotEmpty) {
+        channels.add('$channelType:$channelID');
+      }
+    }
+    return channels.toList();
+  }
+
+  String _messageKey(String channelID, int channelType) {
+    return '$channelType:$channelID';
+  }
+
+  int _backgroundSeconds() {
+    final backgroundedAt = _backgroundedAt;
+    if (backgroundedAt == null) {
+      return 0;
+    }
+    return DateTime.now().difference(backgroundedAt).inSeconds;
+  }
+
   void _debouncedRefresh() {
     _refreshDebounce?.cancel();
     _refreshDebounce = Timer(
@@ -947,6 +1224,7 @@ class WukongImService extends ChangeNotifier {
 
   void _setStatus(int status) {
     _status = status;
+    _statusChangedAt = DateTime.now();
     _statusText = switch (status) {
       WKConnectStatus.success => '已连接',
       WKConnectStatus.connecting => '连接中',
@@ -956,6 +1234,9 @@ class WukongImService extends ChangeNotifier {
       WKConnectStatus.noNetwork => '网络不可用',
       _ => '未连接',
     };
+    if (status == WKConnectStatus.connecting) {
+      _scheduleConnectionWatchdog('status_connecting');
+    }
     notifyListeners();
   }
 
@@ -964,5 +1245,11 @@ class WukongImService extends ChangeNotifier {
         status == WKConnectStatus.syncMsg ||
         status == WKConnectStatus.syncCompleted ||
         status == WKConnectStatus.connecting;
+  }
+
+  bool _isConnectedStatus(int status) {
+    return status == WKConnectStatus.success ||
+        status == WKConnectStatus.syncMsg ||
+        status == WKConnectStatus.syncCompleted;
   }
 }

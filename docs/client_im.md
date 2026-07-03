@@ -22,7 +22,7 @@ flutter run \
 5. `WukongImService.start()` 使用 `uid`、`token`、`tcp_addr` 初始化 `wukongimfluttersdk` 并 `connect()`。
 6. SDK 负责长连接、断线重连、会话同步、频道消息同步、命令消息监听和本地消息库。
 
-热启动恢复时会再次刷新 `im_connect`，重新确认 token 和路由。
+热启动恢复时会再次刷新 `im_connect`，重新确认 token 和路由。客户端同时会调用 `WukongImService.ensureConnected()` 检查 SDK 连接状态，避免前后台切换后停在“连接中”。
 
 ## 签名规则
 
@@ -67,6 +67,19 @@ SDK 回调：
 - `addOnSyncChannelMsgListener`：SDK 拉频道历史时调用 `im_person_messages` 或 `im_group_messages`，转换为 `WKSyncChannelMsg` 入库。
 - `addOnGetChannelListener`：SDK 需要频道资料时从好友/群列表补全名称和头像。
 
+### ConnectionManager 管理
+
+客户端不修改 SDK 源码，而是在 `WukongImService` 封装连接守护层，所有连接动作最终都调用 `WKIM.shared.connectionManager.connect()`：
+
+- 冷启动/登录：`start()` 初始化 `Options(uid, token, tcp_addr)` 后调用连接管理器。
+- 热启动/前台恢复：`SessionController.appLifecycleChanged(resumed)` 调用 `hotResume()` 和 `ensureConnected()`。
+- 后台切走：记录状态并取消本次连接 watchdog，不清空 SDK 登录态。
+- 连接中超时：如果 12 秒仍未进入 `success/syncMsg/syncCompleted`，watchdog 重新触发连接管理器。
+- 失败/无网络：记录 `reason_code`，进入 watchdog 调度；最小重连间隔 3 秒，避免频繁断开重连。
+- 成功/同步完成：取消 watchdog，刷新 SDK 本地会话。
+
+日志字段包含 `source`、`attempt`、`status`、`reason_code`、`node_id`、`background_seconds`，用于排查真机卡在连接中的原因。
+
 ## 消息发送规则
 
 客户端不直接用 SDK 伪造业务消息。发送动作统一走业务端签名接口：
@@ -81,7 +94,7 @@ SDK 回调：
 - 群红包领取：`im_group_red_packet_receive`
 - 转账收款：`im_person_transfer_receive`
 
-原因：好友关系、非好友三句限制、禁言、红包扣款、转账入账、过期退回、队列重试和去重必须由服务端保证。客户端使用 SDK 生成唯一 `client_msg_no`，提交业务接口；服务端发送到 IM 后，客户端通过 SDK 长连接或同步回写本地库。
+原因：好友关系、非好友三句限制、禁言、红包扣款、转账入账、过期退回、队列重试和去重必须由服务端保证。客户端生成唯一 `client_msg_no`，格式短于服务端 `varchar(64)` 字段，提交业务接口；服务端发送到 IM 后，客户端通过 SDK 长连接或同步回写本地库。普通消息、撤回、回执、红包领取、转账收款都使用同一套编号规则，避免编号重复或同号不同内容。
 
 聊天页已经接入用户侧交互：文本、图片、语音、视频、文件、名片、表情、GIF、贴纸、红包、转账都从聊天工具面板进入；引用通过长按消息后点“引用”；群聊 @ 和阅后即焚通过“文本选项”设置；撤回、已读、领取红包、收转账通过长按消息进入。用户端不展示队列重试、在线连接、接口回执调试等运维入口。
 
@@ -89,11 +102,12 @@ SDK 回调：
 
 - 收消息：SDK TCP 长连接收到消息后写入 SDK 本地库，`addOnNewMsgListener` / `addOnRefreshMsgListener` / `addOnCmdListener` 刷新会话和聊天页。
 - 发消息：客户端先请求业务端 `im_person_send` / `im_group_send`，由业务端执行好友关系、非好友三句限制、禁言、红包/转账资金和消息去重，再投递到悟空。业务端成功后客户端调用 SDK 频道同步，把服务端消息拉入 SDK 本地库并刷新 UI，不在客户端伪造本地消息。
+- 聊天页刷新：聊天页监听当前 `channel_id + channel_type` 的 SDK 消息版本；当前频道收到新消息、发送后同步、回执/撤回等刷新消息时会重载当前频道消息，不再只依赖会话列表变化。
 - 会话同步：`im_conversations` 只允许由 SDK `addOnSyncConversationListener` 触发；页面不直接请求该接口，避免反复轮询业务端。
 
 ## 客户端功能封装
 
-`lib/src/im/chat_feature_service.dart` 已封装业务端当前 IM 功能，所有方法都会使用 SDK 生成或复用 `client_msg_no`：
+`lib/src/im/chat_feature_service.dart` 已封装业务端当前 IM 功能，所有发送和命令动作都会生成或复用短唯一 `client_msg_no`：
 
 - 私聊发送：文本、图片、表情、GIF、贴纸、语音、视频、文件、名片、转账、红包。
 - 群聊发送：文本、图片、表情、GIF、贴纸、语音、视频、文件、名片、指定转账、普通红包、拼手气红包、指定红包。
@@ -169,6 +183,28 @@ SDK 回调：
 - 已发申请：显示已申请，不重复发起。
 - 对方已申请：跳转好友申请页处理。
 - 未建立关系：调用 `im_friend_apply` 发起好友申请。
+
+好友列表展示规则：
+
+- 标题优先显示好友备注，其次显示 `friend.nickname`，再显示用户名。
+- 副标题显示用户名、用户 ID 和签名。
+- 本地搜索会匹配好友昵称、用户名和用户 ID；远程搜索调用 `im_friend_search`，入口文案以用户名搜索为主。
+
+## 本地日志
+
+客户端启动时初始化本地日志文件：
+
+- 文件路径在 App 内“我的 -> 消息连接 -> 诊断日志”页面展示。
+- 页面支持一键复制完整日志，便于直接提供排查。
+- 日志保留内存最近 300 条，同时写入 `bim.log`，超过 2MB 自动轮转为 `bim.log.1`。
+- 敏感字段会脱敏：`token`、`password`、`sign`、`secret`、`key`。
+
+重点日志范围：
+
+- API 请求/响应、耗时和错误码。
+- `client_msg_no`、频道、消息类型和发送结果。
+- SDK ConnectionManager 状态、连接重试、连接中 watchdog。
+- SDK 新消息、刷新消息、频道同步、会话同步。
 
 ## 校验
 

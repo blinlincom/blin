@@ -1,6 +1,6 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
 
 import '../core/api_client.dart';
 import '../core/app_logger.dart';
@@ -56,6 +56,8 @@ class SessionController extends ChangeNotifier {
   String get imStatusText => _im.statusText;
   String? get imError => _im.lastError;
   int get conversationVersion => _im.conversationVersion;
+  int messageVersion({required String channelId, required int channelType}) =>
+      _im.messageVersion(channelID: channelId, channelType: channelType);
 
   Future<void> coldStart() async {
     AppLogger.info('session', 'cold start');
@@ -111,10 +113,12 @@ class SessionController extends ChangeNotifier {
     if (lastRefresh != null &&
         DateTime.now().difference(lastRefresh) < const Duration(seconds: 20)) {
       AppLogger.info('session', 'skip hot resume refresh');
+      _im.ensureConnected();
       return;
     }
     try {
       await _refreshLoggedInSession();
+      _im.ensureConnected();
       _lastHotRefreshAt = DateTime.now();
       AppLogger.info('session', 'hot resume success');
     } on ApiException catch (error) {
@@ -134,6 +138,21 @@ class SessionController extends ChangeNotifier {
       _error = error.toString();
       AppLogger.error('session', 'hot resume failed', error: error);
       notifyListeners();
+    }
+  }
+
+  void appLifecycleChanged(AppLifecycleState state) {
+    AppLogger.info('session', 'app lifecycle', data: {'state': state.name});
+    switch (state) {
+      case AppLifecycleState.resumed:
+        hotResume();
+        break;
+      case AppLifecycleState.inactive:
+      case AppLifecycleState.hidden:
+      case AppLifecycleState.paused:
+      case AppLifecycleState.detached:
+        _im.onAppBackgrounded(state.name);
+        break;
     }
   }
 
@@ -296,6 +315,16 @@ class SessionController extends ChangeNotifier {
     if (content.isEmpty) {
       throw ApiException('消息内容不能为空');
     }
+    AppLogger.info(
+      'session',
+      'send text start',
+      data: {
+        'channel_id': channelId,
+        'channel_type': channelType,
+        'group_id': groupId,
+        'content_length': content.length,
+      },
+    );
     if (channelType == 2) {
       await _chat.sendGroupText(
         session: current,
@@ -363,7 +392,7 @@ class SessionController extends ChangeNotifier {
       'im_message_recall',
       params: {
         'target_client_msg_no': targetClientMsgNo,
-        'client_msg_no': _im.newClientMsgNo(),
+        'client_msg_no': _chat.nextClientMsgNo(),
       },
     );
   }
@@ -376,7 +405,7 @@ class SessionController extends ChangeNotifier {
       'im_message_read_receipt',
       params: {
         'target_client_msg_no': targetClientMsgNo,
-        'client_msg_no': _im.newClientMsgNo(),
+        'client_msg_no': _chat.nextClientMsgNo(),
         if (messageSeq > 0) 'message_seq': messageSeq.toString(),
       },
     );
@@ -394,7 +423,7 @@ class SessionController extends ChangeNotifier {
       'im_burn_after_read',
       params: {
         'target_client_msg_no': targetClientMsgNo,
-        'client_msg_no': _im.newClientMsgNo(),
+        'client_msg_no': _chat.nextClientMsgNo(),
       },
     );
   }
@@ -407,7 +436,7 @@ class SessionController extends ChangeNotifier {
       group ? 'im_group_red_packet_receive' : 'im_person_red_packet_receive',
       params: {
         'red_packet_id': redPacketId,
-        'client_msg_no': _im.newClientMsgNo(),
+        'client_msg_no': _chat.nextClientMsgNo(),
       },
     );
   }
@@ -417,7 +446,7 @@ class SessionController extends ChangeNotifier {
       'im_person_transfer_receive',
       params: {
         'transfer_id': transferId,
-        'client_msg_no': _im.newClientMsgNo(),
+        'client_msg_no': _chat.nextClientMsgNo(),
       },
     );
   }

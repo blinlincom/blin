@@ -35,6 +35,7 @@ dependencies:
   dio: ^5.10.0
   mmkv: ^2.4.0
   crypto: ^3.0.7
+  path_provider: ^2.1.5
   wukongimfluttersdk: ^1.7.9
 
 dev_dependencies:
