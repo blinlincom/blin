@@ -2156,6 +2156,7 @@ class ChatPage extends StatefulWidget {
 
 class _ChatPageState extends State<ChatPage> {
   final _textController = TextEditingController();
+  final _scrollController = ScrollController();
   bool _sending = false;
   bool _toolsOpen = false;
   bool _burnAfterRead = false;
@@ -2259,6 +2260,7 @@ class _ChatPageState extends State<ChatPage> {
       _messageRevision = _currentMessageRevision();
       _conversationRevision = widget.controller.conversationVersion;
     });
+    _scrollToBottom();
     unawaited(
       widget.controller.openConversation(
         channelId: widget.channelId,
@@ -2307,6 +2309,7 @@ class _ChatPageState extends State<ChatPage> {
         _messages = messages;
         _messagesLoading = false;
       });
+      _scrollToBottom();
     } catch (error) {
       if (!mounted || token != _messageLoadToken) {
         return;
@@ -2321,6 +2324,7 @@ class _ChatPageState extends State<ChatPage> {
   @override
   void dispose() {
     _messageSub?.cancel();
+    _scrollController.dispose();
     widget.controller.closeConversation(
       channelId: widget.channelId,
       channelType: widget.channelType,
@@ -2368,41 +2372,52 @@ class _ChatPageState extends State<ChatPage> {
     return next.sublist(next.length - limit);
   }
 
+  void _scrollToBottom() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_scrollController.hasClients) {
+        return;
+      }
+      _scrollController.animateTo(
+        _scrollController.position.maxScrollExtent,
+        duration: const Duration(milliseconds: 180),
+        curve: Curves.easeOut,
+      );
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xffeef1f5),
+      backgroundColor: const Color(0xfff1f2f4),
       appBar: AppBar(
+        backgroundColor: Colors.white,
+        surfaceTintColor: Colors.transparent,
+        foregroundColor: _textColor,
+        elevation: 0,
+        scrolledUnderElevation: 0,
         title: Text(widget.title),
+        centerTitle: true,
         actions: [
-          if (_isGroup)
-            IconButton(
-              tooltip: '群设置',
-              onPressed: () => _push(
-                context,
-                GroupDetailPage(
-                  controller: widget.controller,
-                  title: widget.title,
-                  groupId: _groupId,
-                  channelId: widget.channelId,
-                ),
-              ),
-              icon: const Icon(Icons.groups_outlined),
-            )
-          else
-            IconButton(
-              tooltip: '私聊设置',
-              onPressed: () => _push(
-                context,
-                PrivateChatActionsPage(
-                  controller: widget.controller,
-                  title: widget.title,
-                  receiverId: _receiverId,
-                  channelId: widget.channelId,
-                ),
-              ),
-              icon: const Icon(Icons.person_outline),
+          IconButton(
+            tooltip: _isGroup ? '群设置' : '聊天设置',
+            onPressed: () => _push(
+              context,
+              _isGroup
+                  ? GroupDetailPage(
+                      controller: widget.controller,
+                      title: widget.title,
+                      groupId: _groupId,
+                      channelId: widget.channelId,
+                    )
+                  : PrivateChatActionsPage(
+                      controller: widget.controller,
+                      title: widget.title,
+                      receiverId: _receiverId,
+                      channelId: widget.channelId,
+                    ),
             ),
+            icon: const Icon(Icons.more_horiz),
+          ),
         ],
       ),
       body: SafeArea(
@@ -2440,16 +2455,21 @@ class _ChatPageState extends State<ChatPage> {
                       : _messages.isEmpty
                       ? const _EmptyState(text: '暂无消息')
                       : ListView.builder(
-                          padding: const EdgeInsets.symmetric(
-                            vertical: 12,
-                            horizontal: 8,
-                          ),
+                          controller: _scrollController,
+                          padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
                           itemCount: _messages.length,
                           itemBuilder: (context, index) {
                             final item = _messages[index];
-                            return _MessageRow(
-                              item: item,
-                              onLongPress: () => _selectMessage(item),
+                            return Column(
+                              children: [
+                                if (_shouldShowTimeDivider(_messages, index))
+                                  _TimeDivider(text: _messageTimeLabel(item)),
+                                _MessageRow(
+                                  item: item,
+                                  showSenderName: _isGroup,
+                                  onLongPress: () => _selectMessage(item),
+                                ),
+                              ],
                             );
                           },
                         ),
@@ -2474,6 +2494,8 @@ class _ChatPageState extends State<ChatPage> {
                   controller: _textController,
                   sending: _sending,
                   toolsOpen: _toolsOpen,
+                  onVoice: () => _sendMedia(ChatContentTypes.voice),
+                  onEmoji: () => _sendMedia(ChatContentTypes.emoji),
                   onTools: () => setState(() => _toolsOpen = !_toolsOpen),
                   onSend: _sendText,
                 ),
@@ -2495,7 +2517,10 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   Future<void> _sendText() async {
-    final text = _textController.text;
+    final text = _textController.text.trim();
+    if (text.isEmpty) {
+      return;
+    }
     await _runSending(() async {
       await widget.controller.sendTextMessage(
         channelId: widget.channelId,
@@ -2512,7 +2537,6 @@ class _ChatPageState extends State<ChatPage> {
       _replyClientMsgNo = '';
       _mentionUserIds = const [];
       _mentionAll = false;
-      _message = '已发送';
     });
   }
 
@@ -2556,7 +2580,6 @@ class _ChatPageState extends State<ChatPage> {
           params: params,
         );
       }
-      _message = '已发送';
     });
   }
 
@@ -2587,7 +2610,6 @@ class _ChatPageState extends State<ChatPage> {
           cardUserId: cardUserId,
         );
       }
-      _message = '已发送';
     });
   }
 
@@ -2630,7 +2652,6 @@ class _ChatPageState extends State<ChatPage> {
           assetType: data['asset_type'] ?? 'money',
         );
       }
-      _message = '已发送';
     });
   }
 
@@ -2692,7 +2713,6 @@ class _ChatPageState extends State<ChatPage> {
           remark: data['remark'] ?? '',
         );
       }
-      _message = '已发送';
     });
   }
 
@@ -2838,7 +2858,6 @@ class _ChatPageState extends State<ChatPage> {
           _conversationRevision = widget.controller.conversationVersion;
           _messageRevision = _currentMessageRevision();
         });
-        unawaited(_loadMessagesIntoState(showLoading: false));
       }
     } catch (error) {
       _error = error.toString();
@@ -3506,81 +3525,498 @@ class _ActionCircle extends StatelessWidget {
 }
 
 class _MessageRow extends StatelessWidget {
-  const _MessageRow({required this.item, required this.onLongPress});
+  const _MessageRow({
+    required this.item,
+    required this.showSenderName,
+    required this.onLongPress,
+  });
 
   final Map<String, Object?> item;
+  final bool showSenderName;
   final VoidCallback onLongPress;
 
   @override
   Widget build(BuildContext context) {
     final isMe = item['is_me'] == true;
-    final text = item['content']?.toString() ?? '';
-    final time = item['timestamp']?.toString() ?? '';
-    return Align(
-      alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 5),
-        child: Row(
-          mainAxisAlignment: isMe
-              ? MainAxisAlignment.end
-              : MainAxisAlignment.start,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            if (!isMe) ...[
-              _Avatar(
-                label: _value(item, ['from_uid'], fallback: 'B'),
-                size: 34,
-              ),
-              const SizedBox(width: 8),
-            ],
-            GestureDetector(
-              onLongPress: onLongPress,
-              child: Container(
-                constraints: const BoxConstraints(maxWidth: 260),
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 9,
-                ),
-                decoration: BoxDecoration(
-                  color: isMe ? const Color(0xff8fee79) : Colors.white,
-                  borderRadius: BorderRadius.only(
-                    topLeft: const Radius.circular(12),
-                    topRight: const Radius.circular(12),
-                    bottomLeft: Radius.circular(isMe ? 12 : 4),
-                    bottomRight: Radius.circular(isMe ? 4 : 12),
-                  ),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      text.isEmpty ? '[消息]' : text,
-                      style: const TextStyle(
-                        color: _textColor,
-                        fontSize: 15,
-                        height: 1.35,
-                      ),
+    final sender = _messageSenderName(item);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 7),
+      child: Row(
+        mainAxisAlignment: isMe
+            ? MainAxisAlignment.end
+            : MainAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (!isMe) ...[
+            _Avatar(label: sender, size: 34),
+            const SizedBox(width: 8),
+          ],
+          Flexible(
+            child: Column(
+              crossAxisAlignment: isMe
+                  ? CrossAxisAlignment.end
+                  : CrossAxisAlignment.start,
+              children: [
+                if (!isMe && showSenderName && sender.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(left: 2, bottom: 4),
+                    child: Text(
+                      sender,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(color: _mutedColor, fontSize: 11),
                     ),
-                    if (time.isNotEmpty)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 5),
-                        child: Text(
-                          time,
-                          style: const TextStyle(
-                            color: _mutedColor,
-                            fontSize: 11,
-                          ),
-                        ),
-                      ),
+                  ),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    GestureDetector(
+                      onLongPress: onLongPress,
+                      child: _MessageBubble(item: item, isMe: isMe),
+                    ),
+                    if (isMe) ...[
+                      const SizedBox(width: 5),
+                      _MessageSendStatus(status: _messageStatus(item)),
+                    ],
                   ],
                 ),
+              ],
+            ),
+          ),
+          if (isMe) ...[
+            const SizedBox(width: 8),
+            const _Avatar(label: '我', size: 34, color: _primaryColor),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _MessageBubble extends StatelessWidget {
+  const _MessageBubble({required this.item, required this.isMe});
+
+  final Map<String, Object?> item;
+  final bool isMe;
+
+  @override
+  Widget build(BuildContext context) {
+    final contentType = _messageContentType(item);
+    final payload = _asObjectMap(item['payload']);
+    final content = _messageContentText(item, payload);
+    return Container(
+      constraints: BoxConstraints(
+        maxWidth: MediaQuery.sizeOf(context).width * 0.64,
+      ),
+      padding: _bubblePadding(contentType),
+      decoration: BoxDecoration(
+        color: isMe ? const Color(0xff95ec69) : Colors.white,
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: _MessageBubbleContent(
+        contentType: contentType,
+        content: content,
+        payload: payload,
+        isMe: isMe,
+      ),
+    );
+  }
+
+  EdgeInsets _bubblePadding(String contentType) {
+    return switch (contentType) {
+      ChatContentTypes.image ||
+      ChatContentTypes.gif ||
+      ChatContentTypes.sticker => const EdgeInsets.all(8),
+      ChatContentTypes.file ||
+      ChatContentTypes.voice ||
+      ChatContentTypes.video ||
+      ChatContentTypes.contactCard ||
+      ChatContentTypes.transfer ||
+      ChatContentTypes.redPacket => const EdgeInsets.symmetric(
+        horizontal: 12,
+        vertical: 10,
+      ),
+      _ => const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+    };
+  }
+}
+
+class _MessageBubbleContent extends StatelessWidget {
+  const _MessageBubbleContent({
+    required this.contentType,
+    required this.content,
+    required this.payload,
+    required this.isMe,
+  });
+
+  final String contentType;
+  final String content;
+  final Map<String, Object?> payload;
+  final bool isMe;
+
+  @override
+  Widget build(BuildContext context) {
+    return switch (contentType) {
+      ChatContentTypes.image => _MediaPreview(
+        icon: Icons.image_outlined,
+        title: content.isEmpty ? '图片' : content,
+        subtitle: _value(payload, ['url', 'file_path']),
+        isMe: isMe,
+      ),
+      ChatContentTypes.gif => _MediaPreview(
+        icon: Icons.gif_box_outlined,
+        title: content.isEmpty ? 'GIF' : content,
+        subtitle: _value(payload, ['url', 'file_path']),
+        isMe: isMe,
+      ),
+      ChatContentTypes.sticker => _StickerPreview(
+        text: _value(payload, ['sticker_id', 'emoji_code'], fallback: content),
+      ),
+      ChatContentTypes.emoji => Text(
+        _value(payload, [
+          'emoji_code',
+        ], fallback: content.isEmpty ? '[表情]' : content),
+        style: const TextStyle(fontSize: 24, height: 1.2),
+      ),
+      ChatContentTypes.voice => _VoicePreview(
+        seconds: _value(payload, ['duration'], fallback: '0'),
+        isMe: isMe,
+      ),
+      ChatContentTypes.video => _MediaPreview(
+        icon: Icons.play_circle_outline,
+        title: content.isEmpty ? '视频' : content,
+        subtitle: _durationLabel(payload),
+        isMe: isMe,
+      ),
+      ChatContentTypes.file => _FilePreview(payload: payload, content: content),
+      ChatContentTypes.contactCard => _ContactCardPreview(payload: payload),
+      ChatContentTypes.transfer => _PaymentPreview(
+        icon: Icons.payments_outlined,
+        title: '转账',
+        amount: _paymentAmount(payload),
+        isMe: isMe,
+      ),
+      ChatContentTypes.redPacket => _PaymentPreview(
+        icon: Icons.redeem_outlined,
+        title: '红包',
+        amount: _paymentAmount(payload),
+        isMe: isMe,
+      ),
+      _ => Text(
+        content.isEmpty ? '[消息]' : content,
+        style: const TextStyle(color: _textColor, fontSize: 15, height: 1.38),
+      ),
+    };
+  }
+}
+
+class _MediaPreview extends StatelessWidget {
+  const _MediaPreview({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.isMe,
+  });
+
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final bool isMe;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, color: _textColor, size: 24),
+        const SizedBox(width: 8),
+        Flexible(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: _textColor,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              if (subtitle.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 3),
+                  child: Text(
+                    subtitle,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: isMe
+                          ? const Color(0xff477a35)
+                          : const Color(0xff8b929e),
+                      fontSize: 12,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _StickerPreview extends StatelessWidget {
+  const _StickerPreview({required this.text});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      text.isEmpty ? '[贴纸]' : text,
+      style: const TextStyle(
+        color: _textColor,
+        fontSize: 22,
+        fontWeight: FontWeight.w700,
+        height: 1.25,
+      ),
+    );
+  }
+}
+
+class _VoicePreview extends StatelessWidget {
+  const _VoicePreview({required this.seconds, required this.isMe});
+
+  final String seconds;
+  final bool isMe;
+
+  @override
+  Widget build(BuildContext context) {
+    final label = seconds == '0' || seconds.isEmpty ? '' : '$seconds"';
+    return SizedBox(
+      width: 108,
+      child: Row(
+        mainAxisAlignment: isMe
+            ? MainAxisAlignment.end
+            : MainAxisAlignment.start,
+        children: [
+          if (!isMe) const Icon(Icons.graphic_eq, size: 20),
+          if (!isMe) const SizedBox(width: 8),
+          Text(
+            label,
+            style: const TextStyle(
+              color: _textColor,
+              fontSize: 15,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          if (isMe) const SizedBox(width: 8),
+          if (isMe) const Icon(Icons.graphic_eq, size: 20),
+        ],
+      ),
+    );
+  }
+}
+
+class _FilePreview extends StatelessWidget {
+  const _FilePreview({required this.payload, required this.content});
+
+  final Map<String, Object?> payload;
+  final String content;
+
+  @override
+  Widget build(BuildContext context) {
+    final name = _value(payload, ['name', 'filename'], fallback: content);
+    final size = _value(payload, ['size']);
+    return SizedBox(
+      width: 190,
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  name.isEmpty ? '文件' : name,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: _textColor,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                    height: 1.25,
+                  ),
+                ),
+                if (size.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 5),
+                    child: Text(
+                      _fileSizeLabel(size),
+                      style: const TextStyle(color: _mutedColor, fontSize: 12),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          Container(
+            width: 36,
+            height: 36,
+            alignment: Alignment.center,
+            color: const Color(0xffff4d4f),
+            child: const Icon(
+              Icons.picture_as_pdf_outlined,
+              color: Colors.white,
+              size: 22,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ContactCardPreview extends StatelessWidget {
+  const _ContactCardPreview({required this.payload});
+
+  final Map<String, Object?> payload;
+
+  @override
+  Widget build(BuildContext context) {
+    final name = _value(payload, [
+      'card_nickname',
+      'nickname',
+      'name',
+      'card_user_id',
+    ]);
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _Avatar(label: name, size: 32, color: const Color(0xff34c759)),
+        const SizedBox(width: 8),
+        Flexible(
+          child: Text(
+            name.isEmpty ? '名片' : name,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              color: _textColor,
+              fontSize: 15,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _PaymentPreview extends StatelessWidget {
+  const _PaymentPreview({
+    required this.icon,
+    required this.title,
+    required this.amount,
+    required this.isMe,
+  });
+
+  final IconData icon;
+  final String title;
+  final String amount;
+  final bool isMe;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, color: const Color(0xffd46b08), size: 24),
+        const SizedBox(width: 8),
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              title,
+              style: const TextStyle(
+                color: _textColor,
+                fontSize: 15,
+                fontWeight: FontWeight.w700,
               ),
             ),
-            if (isMe) ...[
-              const SizedBox(width: 8),
-              const _Avatar(label: '我', size: 34, color: _primaryColor),
-            ],
+            if (amount.isNotEmpty)
+              Text(
+                amount,
+                style: TextStyle(
+                  color: isMe
+                      ? const Color(0xff477a35)
+                      : const Color(0xff8b929e),
+                  fontSize: 12,
+                ),
+              ),
           ],
+        ),
+      ],
+    );
+  }
+}
+
+class _MessageSendStatus extends StatelessWidget {
+  const _MessageSendStatus({required this.status});
+
+  final String status;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 18,
+      height: 18,
+      child: Center(
+        child: switch (status) {
+          'sending' => const SizedBox(
+            width: 13,
+            height: 13,
+            child: CircularProgressIndicator(
+              strokeWidth: 1.6,
+              color: Color(0xff9aa0aa),
+            ),
+          ),
+          'failed' => const Icon(
+            Icons.error_outline,
+            size: 17,
+            color: _dangerColor,
+          ),
+          'queued' ||
+          'sent' => const Icon(Icons.check, size: 17, color: Color(0xff6f7785)),
+          _ => const SizedBox.shrink(),
+        },
+      ),
+    );
+  }
+}
+
+class _TimeDivider extends StatelessWidget {
+  const _TimeDivider({required this.text});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    if (text.isEmpty) {
+      return const SizedBox.shrink();
+    }
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Text(
+        text,
+        style: const TextStyle(
+          color: Color(0xffb0b4bc),
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
         ),
       ),
     );
@@ -3725,7 +4161,7 @@ class _ChatToolsPanel extends StatelessWidget {
     return Container(
       height: 224,
       decoration: const BoxDecoration(
-        color: Color(0xfff7f9fc),
+        color: Color(0xfff6f6f6),
         border: Border(top: BorderSide(color: _borderColor)),
       ),
       child: GridView.builder(
@@ -3741,7 +4177,6 @@ class _ChatToolsPanel extends StatelessWidget {
           final item = items[index];
           return InkWell(
             onTap: item.onTap,
-            borderRadius: BorderRadius.circular(16),
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
@@ -3751,14 +4186,7 @@ class _ChatToolsPanel extends StatelessWidget {
                   alignment: Alignment.center,
                   decoration: BoxDecoration(
                     color: Colors.white,
-                    borderRadius: BorderRadius.circular(16),
-                    boxShadow: const [
-                      BoxShadow(
-                        color: Color(0x0f000000),
-                        blurRadius: 14,
-                        offset: Offset(0, 6),
-                      ),
-                    ],
+                    border: Border.all(color: _lightBorderColor),
                   ),
                   child: Icon(item.icon, size: 22, color: _primaryColor),
                 ),
@@ -3791,6 +4219,8 @@ class _Composer extends StatelessWidget {
     required this.controller,
     required this.sending,
     required this.toolsOpen,
+    required this.onVoice,
+    required this.onEmoji,
     required this.onTools,
     required this.onSend,
   });
@@ -3798,6 +4228,8 @@ class _Composer extends StatelessWidget {
   final TextEditingController controller;
   final bool sending;
   final bool toolsOpen;
+  final VoidCallback onVoice;
+  final VoidCallback onEmoji;
   final VoidCallback onTools;
   final VoidCallback onSend;
 
@@ -3805,59 +4237,135 @@ class _Composer extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       decoration: const BoxDecoration(
-        color: Colors.white,
+        color: Color(0xfff6f6f6),
         border: Border(top: BorderSide(color: _borderColor)),
       ),
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(8, 8, 8, 10),
+        padding: const EdgeInsets.fromLTRB(8, 7, 8, 8),
         child: Row(
+          crossAxisAlignment: CrossAxisAlignment.end,
           children: [
-            IconButton(
-              tooltip: toolsOpen ? '收起' : '更多',
-              onPressed: onTools,
-              icon: Icon(toolsOpen ? Icons.close : Icons.add),
+            _ComposerIconButton(
+              tooltip: '语音',
+              icon: Icons.mic_none,
+              onPressed: sending ? null : onVoice,
             ),
+            const SizedBox(width: 6),
             Expanded(
-              child: TextField(
-                controller: controller,
-                minLines: 1,
-                maxLines: 4,
-                decoration: const InputDecoration(
-                  hintText: '输入消息',
-                  filled: true,
-                  fillColor: Color(0xfff2f5f9),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.all(Radius.circular(18)),
-                    borderSide: BorderSide.none,
-                  ),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.all(Radius.circular(18)),
-                    borderSide: BorderSide.none,
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.all(Radius.circular(18)),
-                    borderSide: BorderSide(color: _primaryColor),
-                  ),
-                  contentPadding: EdgeInsets.symmetric(
-                    horizontal: 14,
-                    vertical: 10,
+              child: Container(
+                constraints: const BoxConstraints(minHeight: 38),
+                color: Colors.white,
+                child: TextField(
+                  controller: controller,
+                  minLines: 1,
+                  maxLines: 4,
+                  textInputAction: TextInputAction.send,
+                  onSubmitted: (_) {
+                    if (!sending) {
+                      onSend();
+                    }
+                  },
+                  decoration: const InputDecoration(
+                    hintText: '',
+                    filled: true,
+                    fillColor: Colors.white,
+                    isDense: true,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.zero,
+                      borderSide: BorderSide.none,
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.zero,
+                      borderSide: BorderSide.none,
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.zero,
+                      borderSide: BorderSide.none,
+                    ),
+                    contentPadding: EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 10,
+                    ),
                   ),
                 ),
               ),
             ),
-            const SizedBox(width: 8),
-            IconButton(
-              tooltip: '发送',
-              onPressed: sending ? null : onSend,
-              icon: sending
-                  ? const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.send),
+            const SizedBox(width: 6),
+            _ComposerIconButton(
+              tooltip: '表情',
+              icon: Icons.sentiment_satisfied_alt,
+              onPressed: sending ? null : onEmoji,
+            ),
+            const SizedBox(width: 4),
+            _ComposerIconButton(
+              tooltip: toolsOpen ? '收起' : '更多',
+              icon: toolsOpen ? Icons.close : Icons.add_circle_outline,
+              onPressed: onTools,
+            ),
+            ValueListenableBuilder<TextEditingValue>(
+              valueListenable: controller,
+              builder: (context, value, _) {
+                if (value.text.trim().isEmpty) {
+                  return const SizedBox.shrink();
+                }
+                return Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const SizedBox(width: 4),
+                    SizedBox(
+                      height: 38,
+                      child: TextButton(
+                        onPressed: sending ? null : onSend,
+                        style: TextButton.styleFrom(
+                          foregroundColor: _primaryColor,
+                          padding: const EdgeInsets.symmetric(horizontal: 8),
+                          minimumSize: const Size(42, 38),
+                          shape: const RoundedRectangleBorder(),
+                        ),
+                        child: const Text(
+                          '发送',
+                          style: TextStyle(
+                            fontWeight: FontWeight.w700,
+                            fontSize: 14,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                );
+              },
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ComposerIconButton extends StatelessWidget {
+  const _ComposerIconButton({
+    required this.tooltip,
+    required this.icon,
+    required this.onPressed,
+  });
+
+  final String tooltip;
+  final IconData icon;
+  final VoidCallback? onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 34,
+      height: 38,
+      child: IconButton(
+        tooltip: tooltip,
+        onPressed: onPressed,
+        padding: EdgeInsets.zero,
+        icon: Icon(
+          icon,
+          size: 25,
+          color: onPressed == null ? _mutedColor : _textColor,
         ),
       ),
     );
@@ -4209,6 +4717,113 @@ String _formatTime(int millis) {
   final time = DateTime.fromMillisecondsSinceEpoch(millis);
   String two(int value) => value.toString().padLeft(2, '0');
   return '${time.year}-${two(time.month)}-${two(time.day)} ${two(time.hour)}:${two(time.minute)}:${two(time.second)}';
+}
+
+bool _shouldShowTimeDivider(List<Map<String, Object?>> messages, int index) {
+  if (index == 0) {
+    return true;
+  }
+  final current = _messageDateTime(messages[index]);
+  final previous = _messageDateTime(messages[index - 1]);
+  if (current == null || previous == null) {
+    return false;
+  }
+  return current.difference(previous).inMinutes.abs() >= 5;
+}
+
+String _messageTimeLabel(Map<String, Object?> item) {
+  final time = _messageDateTime(item);
+  if (time == null) {
+    return '';
+  }
+  String two(int value) => value.toString().padLeft(2, '0');
+  final now = DateTime.now();
+  final sameDay =
+      time.year == now.year && time.month == now.month && time.day == now.day;
+  final clock = '${two(time.hour)}:${two(time.minute)}';
+  if (sameDay) {
+    return clock;
+  }
+  return '${two(time.month)}-${two(time.day)} $clock';
+}
+
+DateTime? _messageDateTime(Map<String, Object?> item) {
+  final raw = _value(item, ['timestamp', 'create_time', 'msg_time']);
+  if (raw.isEmpty) {
+    return null;
+  }
+  final numeric = int.tryParse(raw);
+  if (numeric != null) {
+    final millis = numeric > 100000000000 ? numeric : numeric * 1000;
+    return DateTime.fromMillisecondsSinceEpoch(millis);
+  }
+  return DateTime.tryParse(raw.replaceFirst(' ', 'T'));
+}
+
+String _messageSenderName(Map<String, Object?> item) {
+  final fromUser = _asObjectMap(item['from_user']);
+  return _value(
+    fromUser,
+    ['nickname', 'username', 'name'],
+    fallback: _value(item, [
+      'from_nickname',
+      'from_username',
+      'from_uid',
+    ], fallback: 'B'),
+  );
+}
+
+String _messageStatus(Map<String, Object?> item) {
+  return _value(item, ['status']);
+}
+
+String _messageContentType(Map<String, Object?> item) {
+  final payload = _asObjectMap(item['payload']);
+  return _value(item, [
+    'content_type',
+  ], fallback: _value(payload, ['content_type']));
+}
+
+String _messageContentText(
+  Map<String, Object?> item,
+  Map<String, Object?> payload,
+) {
+  final content = _value(item, ['content']);
+  if (content.isNotEmpty && content != '[消息]') {
+    return content;
+  }
+  return _value(payload, ['content', 'text', 'remark'], fallback: content);
+}
+
+String _durationLabel(Map<String, Object?> payload) {
+  final seconds = _value(payload, ['duration']);
+  if (seconds.isEmpty) {
+    return '';
+  }
+  return '$seconds 秒';
+}
+
+String _paymentAmount(Map<String, Object?> payload) {
+  final money = _value(payload, ['money', 'amount']);
+  final asset = _value(payload, ['asset_type']);
+  if (money.isEmpty) {
+    return '';
+  }
+  return asset.isEmpty ? money : '$money $asset';
+}
+
+String _fileSizeLabel(String raw) {
+  final bytes = int.tryParse(raw);
+  if (bytes == null || bytes <= 0) {
+    return raw;
+  }
+  if (bytes < 1024) {
+    return '${bytes}B';
+  }
+  if (bytes < 1024 * 1024) {
+    return '${(bytes / 1024).toStringAsFixed(1)}KB';
+  }
+  return '${(bytes / 1024 / 1024).toStringAsFixed(1)}MB';
 }
 
 String _avatarInitial(String label) {
