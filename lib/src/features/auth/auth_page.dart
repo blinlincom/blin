@@ -46,18 +46,57 @@ class _AuthPageState extends State<AuthPage> {
       animation: widget.controller,
       builder: (context, _) {
         return Scaffold(
-          appBar: AppBar(title: const Text(AppConfig.appName)),
+          backgroundColor: const Color(0xfff7f9fc),
           body: SafeArea(
             child: ListView(
-              padding: const EdgeInsets.fromLTRB(20, 24, 20, 32),
+              padding: const EdgeInsets.fromLTRB(24, 30, 24, 32),
               children: [
+                Container(
+                  width: 58,
+                  height: 58,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: const Color(0xff2f80ed),
+                    borderRadius: BorderRadius.circular(16),
+                    boxShadow: const [
+                      BoxShadow(
+                        color: Color(0x242f80ed),
+                        blurRadius: 24,
+                        offset: Offset(0, 12),
+                      ),
+                    ],
+                  ),
+                  child: const Icon(
+                    Icons.chat_bubble,
+                    color: Colors.white,
+                    size: 28,
+                  ),
+                ),
+                const SizedBox(height: 26),
+                const Text(
+                  '连接世界\n从此刻开始',
+                  style: TextStyle(
+                    color: Color(0xff111827),
+                    fontSize: 31,
+                    height: 1.18,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                const Text(
+                  '安全 · 稳定 · 高效',
+                  style: TextStyle(color: Color(0xff8a93a3), fontSize: 15),
+                ),
+                const SizedBox(height: 28),
                 Text(
-                  _isLogin ? '登录' : '注册',
-                  style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                  AppConfig.appName,
+                  style: const TextStyle(
+                    color: Color(0xff111827),
+                    fontSize: 18,
                     fontWeight: FontWeight.w800,
                   ),
                 ),
-                const SizedBox(height: 22),
+                const SizedBox(height: 12),
                 _ModeSwitch(
                   isLogin: _isLogin,
                   onChanged: (value) {
@@ -65,12 +104,26 @@ class _AuthPageState extends State<AuthPage> {
                     widget.controller.clearError();
                   },
                 ),
-                const SizedBox(height: 22),
+                const SizedBox(height: 18),
                 if (widget.controller.error != null) ...[
                   _Notice(text: widget.controller.error!),
                   const SizedBox(height: 16),
                 ],
-                if (_isLogin) _loginForm() else _registerForm(),
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(22),
+                    boxShadow: const [
+                      BoxShadow(
+                        color: Color(0x12000000),
+                        blurRadius: 26,
+                        offset: Offset(0, 14),
+                      ),
+                    ],
+                  ),
+                  child: _isLogin ? _loginForm() : _registerForm(),
+                ),
               ],
             ),
           ),
@@ -267,8 +320,10 @@ class _ModeSwitch extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       decoration: BoxDecoration(
-        border: Border.all(color: const Color(0xffd7dce2)),
+        color: const Color(0xffeef2f7),
+        borderRadius: BorderRadius.circular(16),
       ),
+      padding: const EdgeInsets.all(4),
       child: Row(
         children: [
           Expanded(
@@ -308,12 +363,15 @@ class _ModeButton extends StatelessWidget {
       onTap: onTap,
       child: Container(
         height: 44,
-        color: selected ? const Color(0xff101114) : Colors.white,
+        decoration: BoxDecoration(
+          color: selected ? Colors.white : Colors.transparent,
+          borderRadius: BorderRadius.circular(13),
+        ),
         alignment: Alignment.center,
         child: Text(
           text,
           style: TextStyle(
-            color: selected ? Colors.white : const Color(0xff101114),
+            color: selected ? const Color(0xff2f80ed) : const Color(0xff8a93a3),
             fontWeight: FontWeight.w700,
           ),
         ),
@@ -367,7 +425,7 @@ class _Notice extends StatelessWidget {
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: const Color(0xfffff2f2),
-        border: Border.all(color: const Color(0xffffc9c9)),
+        borderRadius: BorderRadius.circular(14),
       ),
       child: Text(text, style: const TextStyle(color: Color(0xffa40000))),
     );

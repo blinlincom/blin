@@ -61,27 +61,28 @@ class _BimAppState extends State<BimApp> with WidgetsBindingObserver {
   }
 
   ThemeData _theme() {
-    const black = Color(0xff101114);
-    const border = Color(0xffd7dce2);
-    const fill = Color(0xfff6f7f9);
+    const black = Color(0xff111827);
+    const blue = Color(0xff2f80ed);
+    const border = Color(0xffe5eaf2);
+    const fill = Color(0xfff4f6fa);
     return ThemeData(
       useMaterial3: true,
       colorScheme: ColorScheme.fromSeed(
-        seedColor: black,
+        seedColor: blue,
         brightness: Brightness.light,
-        primary: black,
+        primary: blue,
         surface: Colors.white,
       ),
-      scaffoldBackgroundColor: Colors.white,
+      scaffoldBackgroundColor: const Color(0xfff7f9fc),
       appBarTheme: const AppBarTheme(
         elevation: 0,
         scrolledUnderElevation: 0,
-        backgroundColor: Colors.white,
+        backgroundColor: Color(0xfff7f9fc),
         foregroundColor: black,
-        centerTitle: false,
+        centerTitle: true,
         titleTextStyle: TextStyle(
           color: black,
-          fontSize: 18,
+          fontSize: 17,
           fontWeight: FontWeight.w700,
         ),
       ),
@@ -89,19 +90,19 @@ class _BimAppState extends State<BimApp> with WidgetsBindingObserver {
         filled: true,
         fillColor: fill,
         border: OutlineInputBorder(
-          borderRadius: BorderRadius.zero,
+          borderRadius: BorderRadius.all(Radius.circular(12)),
           borderSide: BorderSide(color: border),
         ),
         enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.zero,
+          borderRadius: BorderRadius.all(Radius.circular(12)),
           borderSide: BorderSide(color: border),
         ),
         focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.zero,
-          borderSide: BorderSide(color: black, width: 1.4),
+          borderRadius: BorderRadius.all(Radius.circular(12)),
+          borderSide: BorderSide(color: blue, width: 1.4),
         ),
         errorBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.zero,
+          borderRadius: BorderRadius.all(Radius.circular(12)),
           borderSide: BorderSide(color: Colors.red),
         ),
         contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 14),
@@ -109,7 +110,9 @@ class _BimAppState extends State<BimApp> with WidgetsBindingObserver {
       filledButtonTheme: FilledButtonThemeData(
         style: FilledButton.styleFrom(
           elevation: 0,
-          shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
+          shape: const RoundedRectangleBorder(
+            borderRadius: BorderRadius.all(Radius.circular(14)),
+          ),
           minimumSize: const Size.fromHeight(48),
           textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
         ),
@@ -117,15 +120,19 @@ class _BimAppState extends State<BimApp> with WidgetsBindingObserver {
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
           elevation: 0,
-          shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
+          shape: const RoundedRectangleBorder(
+            borderRadius: BorderRadius.all(Radius.circular(14)),
+          ),
           minimumSize: const Size.fromHeight(44),
           side: const BorderSide(color: border),
         ),
       ),
       textButtonTheme: TextButtonThemeData(
         style: TextButton.styleFrom(
-          shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
-          foregroundColor: black,
+          shape: const RoundedRectangleBorder(
+            borderRadius: BorderRadius.all(Radius.circular(12)),
+          ),
+          foregroundColor: blue,
         ),
       ),
       dividerTheme: const DividerThemeData(
@@ -137,13 +144,15 @@ class _BimAppState extends State<BimApp> with WidgetsBindingObserver {
         elevation: 0,
         type: BottomNavigationBarType.fixed,
         backgroundColor: Colors.white,
-        selectedItemColor: black,
-        unselectedItemColor: Color(0xff7b828c),
+        selectedItemColor: blue,
+        unselectedItemColor: Color(0xff8a93a3),
       ),
       snackBarTheme: const SnackBarThemeData(
         elevation: 0,
         behavior: SnackBarBehavior.fixed,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.zero),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.all(Radius.circular(12)),
+        ),
       ),
     );
   }

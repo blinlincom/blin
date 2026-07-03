@@ -5,10 +5,13 @@ import '../../core/app_config.dart';
 import '../../core/models.dart';
 import '../../im/im_message_types.dart';
 
-const _borderColor = Color(0xffd7dce2);
-const _lightBorderColor = Color(0xffedf0f3);
-const _fillColor = Color(0xfff6f7f9);
-const _mutedColor = Color(0xff69717d);
+const _primaryColor = Color(0xff2f80ed);
+const _pageColor = Color(0xfff7f9fc);
+const _borderColor = Color(0xffe5eaf2);
+const _lightBorderColor = Color(0xffeef2f7);
+const _fillColor = Color(0xfff2f5f9);
+const _mutedColor = Color(0xff8a93a3);
+const _textColor = Color(0xff111827);
 const _dangerColor = Color(0xffa40000);
 const _privateChannelType = 1;
 const _groupChannelType = 2;
@@ -35,10 +38,12 @@ class _HomePageState extends State<HomePage> {
     ];
     return Scaffold(
       appBar: AppBar(title: Text(_title), actions: _actions()),
+      backgroundColor: _pageColor,
       body: SafeArea(child: pages[_index]),
-      bottomNavigationBar: DecoratedBox(
+      bottomNavigationBar: Container(
         decoration: const BoxDecoration(
           border: Border(top: BorderSide(color: _borderColor)),
+          color: Colors.white,
         ),
         child: BottomNavigationBar(
           currentIndex: _index,
@@ -52,7 +57,7 @@ class _HomePageState extends State<HomePage> {
             BottomNavigationBarItem(
               icon: Icon(Icons.contacts_outlined),
               activeIcon: Icon(Icons.contacts),
-              label: '联系人',
+              label: '通讯录',
             ),
             BottomNavigationBarItem(
               icon: Icon(Icons.explore_outlined),
@@ -91,11 +96,19 @@ class _HomePageState extends State<HomePage> {
           icon: const Icon(Icons.group_add_outlined),
         ),
       ],
-      IconButton(
-        tooltip: '刷新',
-        onPressed: () => setState(() {}),
-        icon: const Icon(Icons.refresh),
-      ),
+      if (_index == 0)
+        IconButton(
+          tooltip: '更多',
+          onPressed: () =>
+              _open(QuickActionsPage(controller: widget.controller)),
+          icon: const Icon(Icons.add_circle_outline),
+        )
+      else
+        IconButton(
+          tooltip: '刷新',
+          onPressed: () => setState(() {}),
+          icon: const Icon(Icons.refresh),
+        ),
     ];
   }
 
@@ -111,7 +124,7 @@ class _HomePageState extends State<HomePage> {
   String get _title {
     return switch (_index) {
       0 => '消息',
-      1 => '联系人',
+      1 => '通讯录',
       2 => '发现',
       _ => '我的',
     };
@@ -131,10 +144,18 @@ class MessagesTab extends StatelessWidget {
         return _AsyncList(
           loader: controller.loadConversations,
           emptyText: '暂无会话',
-          header: _ConnectionHeader(
-            text: controller.imError == null
-                ? controller.imStatusText
-                : '${controller.imStatusText} · ${controller.imError}',
+          header: Column(
+            children: [
+              _SearchBar(
+                hintText: '搜索',
+                onTap: () => _push(context, SearchPage(controller: controller)),
+              ),
+              _ConnectionHeader(
+                text: controller.imError == null
+                    ? controller.imStatusText
+                    : '${controller.imStatusText} · ${controller.imError}',
+              ),
+            ],
           ),
           itemBuilder: (context, item) {
             final title = _conversationTitle(item);
@@ -143,13 +164,12 @@ class MessagesTab extends StatelessWidget {
             final unread = _intValue(item, ['unread_quantity']);
             final channelId = _value(item, ['channel_id']);
             final channelType = _intValue(item, ['channel_type']);
-            return _PlainListTile(
-              icon: channelType == _groupChannelType
-                  ? Icons.groups_outlined
-                  : Icons.person_outline,
+            return _ConversationTile(
               title: title,
               subtitle: content.isEmpty ? '暂无最新消息' : content,
-              trailing: unread > 0 ? '$unread' : time,
+              time: time,
+              unread: unread,
+              isGroup: channelType == _groupChannelType,
               onTap: () {
                 if (channelId.isEmpty) {
                   return;
@@ -198,40 +218,43 @@ class ContactsTab extends StatelessWidget {
         final friends = snapshot.data?[0] ?? [];
         final groups = snapshot.data?[1] ?? [];
         return ListView(
+          padding: const EdgeInsets.only(bottom: 16),
           children: [
-            const _SectionHeader(text: '操作'),
-            _PlainListTile(
-              icon: Icons.person_add_alt_1,
-              title: '添加好友',
-              subtitle: '发送好友申请或查询关系',
-              trailing: '',
-              onTap: () =>
-                  _push(context, AddFriendPage(controller: controller)),
+            _SearchBar(
+              hintText: '搜索',
+              onTap: () => _push(context, SearchPage(controller: controller)),
             ),
-            _PlainListTile(
-              icon: Icons.inbox_outlined,
-              title: '好友申请',
-              subtitle: '处理收到和发出的申请',
-              trailing: '',
+            _MenuTile(
+              icon: Icons.person_add_alt_1,
+              iconColor: const Color(0xffffa51f),
+              title: '新的朋友',
+              subtitle: '添加好友与处理申请',
               onTap: () =>
                   _push(context, FriendRequestsPage(controller: controller)),
             ),
-            _PlainListTile(
-              icon: Icons.group_add_outlined,
-              title: '创建群聊',
-              subtitle: '选择好友或填写用户 ID',
-              trailing: '',
+            _MenuTile(
+              icon: Icons.groups_outlined,
+              iconColor: const Color(0xff34c759),
+              title: '群聊',
+              subtitle: '我的群与发起群聊',
+              onTap: () => _push(context, MyGroupsPage(controller: controller)),
+            ),
+            _MenuTile(
+              icon: Icons.person_add_alt,
+              iconColor: _primaryColor,
+              title: '添加朋友',
+              subtitle: '搜索用户 ID',
               onTap: () =>
-                  _push(context, CreateGroupPage(controller: controller)),
+                  _push(context, AddFriendPage(controller: controller)),
             ),
             const _SectionHeader(text: '好友'),
             if (friends.isEmpty) const _EmptyRow(text: '暂无好友'),
             for (final item in friends)
-              _PlainListTile(
-                icon: Icons.person_outline,
+              _ContactTile(
                 title: _friendTitle(item),
                 subtitle: _value(item, ['signature', 'remark', 'username']),
                 trailing: _friendUserId(item),
+                isGroup: false,
                 onTap: () => _openPrivateChat(context, controller, item),
                 onLongPress: () => _push(
                   context,
@@ -246,11 +269,11 @@ class ContactsTab extends StatelessWidget {
             const _SectionHeader(text: '群聊'),
             if (groups.isEmpty) const _EmptyRow(text: '暂无群聊'),
             for (final item in groups)
-              _PlainListTile(
-                icon: Icons.groups_outlined,
+              _ContactTile(
                 title: _groupTitle(item),
                 subtitle: _value(item, ['notice', 'description']),
                 trailing: '${_intValue(item, ['member_count', 'members'])}人',
+                isGroup: true,
                 onTap: () => _openGroupChat(context, controller, item),
               ),
           ],
@@ -268,36 +291,42 @@ class DiscoverTab extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ListView(
+      padding: const EdgeInsets.only(bottom: 16),
       children: [
-        const _SectionHeader(text: '常用'),
-        _PlainListTile(
-          icon: Icons.person_add_alt_1,
-          title: '添加朋友',
-          subtitle: '搜索用户 ID 并发送好友申请',
-          trailing: '',
-          onTap: () => _push(context, AddFriendPage(controller: controller)),
+        _MenuTile(
+          icon: Icons.photo_camera_outlined,
+          iconColor: const Color(0xffff9f0a),
+          title: '朋友圈',
+          subtitle: '分享生活动态',
+          onTap: () => _showSoon(context),
         ),
-        _PlainListTile(
-          icon: Icons.inbox_outlined,
-          title: '新的朋友',
-          subtitle: '查看和处理好友申请',
-          trailing: '',
-          onTap: () =>
-              _push(context, FriendRequestsPage(controller: controller)),
+        _MenuTile(
+          icon: Icons.qr_code_scanner,
+          iconColor: _primaryColor,
+          title: '扫一扫',
+          subtitle: '扫码添加朋友',
+          onTap: () => _showSoon(context),
         ),
-        _PlainListTile(
-          icon: Icons.group_add_outlined,
-          title: '发起群聊',
-          subtitle: '选择好友创建群',
-          trailing: '',
-          onTap: () => _push(context, CreateGroupPage(controller: controller)),
+        _MenuTile(
+          icon: Icons.screen_search_desktop_outlined,
+          iconColor: const Color(0xff5e6ad2),
+          title: '搜一搜',
+          subtitle: '搜索联系人和群聊',
+          onTap: () => _push(context, SearchPage(controller: controller)),
         ),
-        _PlainListTile(
-          icon: Icons.groups_outlined,
-          title: '我的群聊',
-          subtitle: '查看已加入的群',
-          trailing: '',
-          onTap: () => _push(context, MyGroupsPage(controller: controller)),
+        _MenuTile(
+          icon: Icons.location_on_outlined,
+          iconColor: const Color(0xffffc043),
+          title: '附近的人',
+          subtitle: '发现身边的人',
+          onTap: () => _showSoon(context),
+        ),
+        _MenuTile(
+          icon: Icons.extension_outlined,
+          iconColor: const Color(0xff7c5cff),
+          title: '小程序',
+          subtitle: '常用工具入口',
+          onTap: () => _showSoon(context),
         ),
       ],
     );
@@ -316,27 +345,18 @@ class MineTab extends StatelessWidget {
       animation: controller,
       builder: (context, _) {
         return ListView(
+          padding: const EdgeInsets.only(bottom: 20),
           children: [
             Padding(
-              padding: const EdgeInsets.all(20),
+              padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
               child: Row(
                 children: [
-                  Container(
-                    width: 56,
-                    height: 56,
-                    alignment: Alignment.center,
-                    decoration: BoxDecoration(
-                      border: Border.all(color: _borderColor),
-                    ),
-                    child: Text(
-                      _avatarText(session),
-                      style: const TextStyle(
-                        fontSize: 22,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
+                  _Avatar(
+                    label: _avatarText(session),
+                    size: 64,
+                    color: _primaryColor,
                   ),
-                  const SizedBox(width: 14),
+                  const SizedBox(width: 16),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -352,53 +372,73 @@ class MineTab extends StatelessWidget {
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          'ID ${session?.userId ?? ''}',
+                          '账号：${session?.username ?? ''}',
                           style: const TextStyle(color: _mutedColor),
                         ),
                       ],
                     ),
                   ),
+                  IconButton(
+                    tooltip: '二维码',
+                    onPressed: () => _showSoon(context),
+                    icon: const Icon(Icons.qr_code_2),
+                  ),
                 ],
               ),
             ),
-            const Divider(height: 1),
-            _PlainListTile(
-              icon: Icons.phone_android_outlined,
-              title: '设备',
-              subtitle: controller.device,
-              trailing: 'App',
+            _MenuTile(
+              icon: Icons.security_outlined,
+              iconColor: const Color(0xff20c997),
+              title: '服务',
+              subtitle: '账号与安全服务',
+              onTap: () => _showSoon(context),
             ),
-            _PlainListTile(
-              icon: Icons.tag_outlined,
-              title: 'IM UID',
-              subtitle: session?.chat?.uid ?? '',
-              trailing: controller.imStatusText,
+            _MenuTile(
+              icon: Icons.bookmark_border,
+              iconColor: const Color(0xffff3b30),
+              title: '收藏',
+              subtitle: '保存重要内容',
+              onTap: () => _showSoon(context),
+            ),
+            _MenuTile(
+              icon: Icons.photo_library_outlined,
+              iconColor: const Color(0xff34c759),
+              title: '朋友圈',
+              subtitle: '我的动态',
+              onTap: () => _showSoon(context),
+            ),
+            _MenuTile(
+              icon: Icons.wallet_outlined,
+              iconColor: _primaryColor,
+              title: '卡包',
+              subtitle: '红包与转账记录',
+              onTap: () => _showSoon(context),
+            ),
+            _MenuTile(
+              icon: Icons.emoji_emotions_outlined,
+              iconColor: const Color(0xffffc043),
+              title: '表情',
+              subtitle: '管理表情和贴纸',
+              onTap: () => _showSoon(context),
+            ),
+            const _SectionHeader(text: '设置'),
+            _MenuTile(
+              icon: Icons.chat_bubble_outline,
+              iconColor: _primaryColor,
+              title: '消息连接',
+              subtitle:
+                  '${controller.imStatusText} · ${session?.chat?.uid ?? '未连接'}',
+              onTap: () =>
+                  _push(context, ConnectionInfoPage(controller: controller)),
             ),
             if (controller.imError != null)
-              _PlainListTile(
+              _MenuTile(
                 icon: Icons.error_outline,
-                title: '消息错误',
+                iconColor: _dangerColor,
+                title: '连接异常',
                 subtitle: controller.imError!,
-                trailing: '',
+                onTap: controller.clearError,
               ),
-            _PlainListTile(
-              icon: Icons.router_outlined,
-              title: '连接地址',
-              subtitle: session?.chat?.route.tcpAddr ?? '',
-              trailing: 'TCP',
-            ),
-            _PlainListTile(
-              icon: Icons.ac_unit_outlined,
-              title: '冷启动',
-              subtitle: _formatTime(controller.lastColdLaunchAt),
-              trailing: 'MMKV',
-            ),
-            _PlainListTile(
-              icon: Icons.replay_circle_filled_outlined,
-              title: '热启动',
-              subtitle: _formatTime(controller.lastHotResumeAt),
-              trailing: 'resume',
-            ),
             Padding(
               padding: const EdgeInsets.all(20),
               child: OutlinedButton(
@@ -421,6 +461,222 @@ class MineTab extends StatelessWidget {
     }
     return name.characters.first;
   }
+}
+
+class QuickActionsPage extends StatelessWidget {
+  const QuickActionsPage({required this.controller, super.key});
+
+  final SessionController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final actions = [
+      _ActionEntry(
+        Icons.groups_outlined,
+        '发起群聊',
+        () => _push(context, CreateGroupPage(controller: controller)),
+      ),
+      _ActionEntry(
+        Icons.person_add_alt_1,
+        '添加朋友',
+        () => _push(context, AddFriendPage(controller: controller)),
+      ),
+      _ActionEntry(Icons.qr_code_scanner, '扫一扫', () => _showSoon(context)),
+      _ActionEntry(Icons.payments_outlined, '收付款', () => _showSoon(context)),
+      _ActionEntry(Icons.note_add_outlined, '新建笔记', () => _showSoon(context)),
+      _ActionEntry(Icons.phone_outlined, '语音通话', () => _showSoon(context)),
+      _ActionEntry(Icons.videocam_outlined, '视频通话', () => _showSoon(context)),
+      _ActionEntry(
+        Icons.group_work_outlined,
+        '创建群聊',
+        () => _push(context, CreateGroupPage(controller: controller)),
+      ),
+      _ActionEntry(
+        Icons.contacts_outlined,
+        '通讯录',
+        () => Navigator.of(context).pop(),
+      ),
+    ];
+    return Scaffold(
+      appBar: AppBar(title: const Text('快捷操作')),
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(18, 8, 18, 24),
+          child: GridView.builder(
+            itemCount: actions.length,
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 3,
+              mainAxisSpacing: 18,
+              crossAxisSpacing: 18,
+              mainAxisExtent: 96,
+            ),
+            itemBuilder: (context, index) {
+              final item = actions[index];
+              return _ActionCircle(
+                icon: item.icon,
+                label: item.label,
+                onTap: item.onTap,
+              );
+            },
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class SearchPage extends StatefulWidget {
+  const SearchPage({required this.controller, super.key});
+
+  final SessionController controller;
+
+  @override
+  State<SearchPage> createState() => _SearchPageState();
+}
+
+class _SearchPageState extends State<SearchPage> {
+  final _keyword = TextEditingController();
+
+  @override
+  void dispose() {
+    _keyword.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('搜索')),
+      body: SafeArea(
+        child: FutureBuilder<List<List<Map<String, Object?>>>>(
+          future: Future.wait([
+            widget.controller.loadFriends(),
+            widget.controller.loadGroups(),
+          ]),
+          builder: (context, snapshot) {
+            if (snapshot.connectionState != ConnectionState.done) {
+              return const Center(child: CircularProgressIndicator());
+            }
+            if (snapshot.hasError) {
+              return _ErrorState(text: snapshot.error.toString());
+            }
+            final keyword = _keyword.text.trim().toLowerCase();
+            final friends = (snapshot.data?[0] ?? []).where((item) {
+              return keyword.isEmpty ||
+                  _friendTitle(item).toLowerCase().contains(keyword) ||
+                  _friendUserId(item).contains(keyword);
+            }).toList();
+            final groups = (snapshot.data?[1] ?? []).where((item) {
+              return keyword.isEmpty ||
+                  _groupTitle(item).toLowerCase().contains(keyword);
+            }).toList();
+            return ListView(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 6, 16, 10),
+                  child: TextField(
+                    controller: _keyword,
+                    autofocus: true,
+                    onChanged: (_) => setState(() {}),
+                    decoration: const InputDecoration(
+                      prefixIcon: Icon(Icons.search),
+                      hintText: '搜索联系人、群聊',
+                    ),
+                  ),
+                ),
+                const _SectionHeader(text: '好友'),
+                if (friends.isEmpty) const _EmptyRow(text: '没有匹配好友'),
+                for (final item in friends)
+                  _ContactTile(
+                    title: _friendTitle(item),
+                    subtitle: _value(item, ['signature', 'remark', 'username']),
+                    trailing: _friendUserId(item),
+                    isGroup: false,
+                    onTap: () =>
+                        _openPrivateChat(context, widget.controller, item),
+                  ),
+                const _SectionHeader(text: '群聊'),
+                if (groups.isEmpty) const _EmptyRow(text: '没有匹配群聊'),
+                for (final item in groups)
+                  _ContactTile(
+                    title: _groupTitle(item),
+                    subtitle: _value(item, ['notice', 'description']),
+                    trailing:
+                        '${_intValue(item, ['member_count', 'members'])}人',
+                    isGroup: true,
+                    onTap: () =>
+                        _openGroupChat(context, widget.controller, item),
+                  ),
+              ],
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
+class ConnectionInfoPage extends StatelessWidget {
+  const ConnectionInfoPage({required this.controller, super.key});
+
+  final SessionController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final session = controller.session;
+    return Scaffold(
+      appBar: AppBar(title: const Text('消息连接')),
+      body: SafeArea(
+        child: ListView(
+          children: [
+            _MenuTile(
+              icon: Icons.phone_android_outlined,
+              iconColor: _primaryColor,
+              title: '设备',
+              subtitle: controller.device,
+              onTap: () {},
+            ),
+            _MenuTile(
+              icon: Icons.tag_outlined,
+              iconColor: const Color(0xff7c5cff),
+              title: 'IM UID',
+              subtitle: session?.chat?.uid ?? '',
+              onTap: () {},
+            ),
+            _MenuTile(
+              icon: Icons.router_outlined,
+              iconColor: const Color(0xff20c997),
+              title: '连接地址',
+              subtitle: session?.chat?.route.tcpAddr ?? '',
+              onTap: () {},
+            ),
+            _MenuTile(
+              icon: Icons.ac_unit_outlined,
+              iconColor: const Color(0xff5ac8fa),
+              title: '冷启动',
+              subtitle: _formatTime(controller.lastColdLaunchAt),
+              onTap: () {},
+            ),
+            _MenuTile(
+              icon: Icons.replay_circle_filled_outlined,
+              iconColor: const Color(0xffff9f0a),
+              title: '热启动',
+              subtitle: _formatTime(controller.lastHotResumeAt),
+              onTap: () {},
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ActionEntry {
+  const _ActionEntry(this.icon, this.label, this.onTap);
+
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
 }
 
 class AddFriendPage extends StatefulWidget {
@@ -1368,6 +1624,7 @@ class _ChatPageState extends State<ChatPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: const Color(0xffeef1f5),
       appBar: AppBar(
         title: Text(widget.title),
         actions: [
@@ -1454,7 +1711,10 @@ class _ChatPageState extends State<ChatPage> {
                         return const _EmptyState(text: '暂无消息');
                       }
                       return ListView.builder(
-                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        padding: const EdgeInsets.symmetric(
+                          vertical: 12,
+                          horizontal: 8,
+                        ),
                         itemCount: messages.length,
                         itemBuilder: (context, index) {
                           final item = messages[index];
@@ -2107,6 +2367,379 @@ class _PlainListTile extends StatelessWidget {
   }
 }
 
+class _SearchBar extends StatelessWidget {
+  const _SearchBar({required this.hintText, required this.onTap});
+
+  final String hintText;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 6, 16, 10),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          height: 38,
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          decoration: BoxDecoration(
+            color: const Color(0xffeef2f7),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Row(
+            children: [
+              const Icon(Icons.search, color: _mutedColor, size: 18),
+              const SizedBox(width: 8),
+              Text(
+                hintText,
+                style: const TextStyle(color: _mutedColor, fontSize: 14),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ConversationTile extends StatelessWidget {
+  const _ConversationTile({
+    required this.title,
+    required this.subtitle,
+    required this.time,
+    required this.unread,
+    required this.isGroup,
+    required this.onTap,
+  });
+
+  final String title;
+  final String subtitle;
+  final String time;
+  final int unread;
+  final bool isGroup;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          border: Border(bottom: BorderSide(color: _lightBorderColor)),
+        ),
+        child: Row(
+          children: [
+            _Avatar(
+              label: title,
+              size: 48,
+              color: isGroup ? const Color(0xff34c759) : _primaryColor,
+              icon: isGroup ? Icons.groups : null,
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: _textColor,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    subtitle,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(color: _mutedColor, fontSize: 13),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Text(
+                  time,
+                  style: const TextStyle(color: _mutedColor, fontSize: 12),
+                ),
+                const SizedBox(height: 8),
+                if (unread > 0)
+                  Container(
+                    constraints: const BoxConstraints(minWidth: 18),
+                    height: 18,
+                    padding: const EdgeInsets.symmetric(horizontal: 5),
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: const Color(0xffff3b30),
+                      borderRadius: BorderRadius.circular(9),
+                    ),
+                    child: Text(
+                      unread > 99 ? '99+' : unread.toString(),
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ContactTile extends StatelessWidget {
+  const _ContactTile({
+    required this.title,
+    required this.subtitle,
+    required this.trailing,
+    required this.isGroup,
+    required this.onTap,
+    this.onLongPress,
+  });
+
+  final String title;
+  final String subtitle;
+  final String trailing;
+  final bool isGroup;
+  final VoidCallback onTap;
+  final VoidCallback? onLongPress;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      onLongPress: onLongPress,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          border: Border(bottom: BorderSide(color: _lightBorderColor)),
+        ),
+        child: Row(
+          children: [
+            _Avatar(
+              label: title,
+              size: 42,
+              color: isGroup ? const Color(0xff34c759) : _primaryColor,
+              icon: isGroup ? Icons.groups : null,
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: _textColor,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  if (subtitle.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 3),
+                      child: Text(
+                        subtitle,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: _mutedColor,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            if (trailing.isNotEmpty)
+              Text(
+                trailing,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(color: _mutedColor, fontSize: 12),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _MenuTile extends StatelessWidget {
+  const _MenuTile({
+    required this.icon,
+    required this.iconColor,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final Color iconColor;
+  final String title;
+  final String subtitle;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          border: Border(bottom: BorderSide(color: _lightBorderColor)),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 34,
+              height: 34,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: iconColor.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Icon(icon, color: iconColor, size: 20),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      color: _textColor,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  if (subtitle.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 3),
+                      child: Text(
+                        subtitle,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: _mutedColor,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            const Icon(Icons.chevron_right, color: _mutedColor, size: 20),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _Avatar extends StatelessWidget {
+  const _Avatar({
+    required this.label,
+    this.size = 44,
+    this.color = _primaryColor,
+    this.icon,
+  });
+
+  final String label;
+  final double size;
+  final Color color;
+  final IconData? icon;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: size,
+      height: size,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: color,
+        borderRadius: BorderRadius.circular(size * 0.28),
+      ),
+      child: icon == null
+          ? Text(
+              _avatarInitial(label),
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: size * 0.36,
+                fontWeight: FontWeight.w800,
+              ),
+            )
+          : Icon(icon, color: Colors.white, size: size * 0.5),
+    );
+  }
+}
+
+class _ActionCircle extends StatelessWidget {
+  const _ActionCircle({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(20),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Container(
+            width: 54,
+            height: 54,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(20),
+              boxShadow: const [
+                BoxShadow(
+                  color: Color(0x14000000),
+                  blurRadius: 18,
+                  offset: Offset(0, 8),
+                ),
+              ],
+            ),
+            child: Icon(icon, color: _primaryColor, size: 25),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(color: _textColor, fontSize: 13),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _MessageRow extends StatelessWidget {
   const _MessageRow({required this.item, required this.onLongPress});
 
@@ -2120,40 +2753,69 @@ class _MessageRow extends StatelessWidget {
     final time = item['timestamp']?.toString() ?? '';
     return Align(
       alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
-      child: GestureDetector(
-        onLongPress: onLongPress,
-        child: Container(
-          constraints: const BoxConstraints(maxWidth: 320),
-          margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-          padding: const EdgeInsets.all(10),
-          decoration: BoxDecoration(
-            border: Border.all(color: _borderColor),
-            color: isMe ? const Color(0xffeef5ff) : Colors.white,
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              if (!isMe && _value(item, ['from_uid']).isNotEmpty)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 4),
-                  child: Text(
-                    _value(item, ['from_uid']),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(color: _mutedColor, fontSize: 12),
-                  ),
-                ),
-              Text(text.isEmpty ? '[消息]' : text),
-              if (time.isNotEmpty)
-                Padding(
-                  padding: const EdgeInsets.only(top: 4),
-                  child: Text(
-                    time,
-                    style: const TextStyle(color: _mutedColor, fontSize: 12),
-                  ),
-                ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 5),
+        child: Row(
+          mainAxisAlignment: isMe
+              ? MainAxisAlignment.end
+              : MainAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (!isMe) ...[
+              _Avatar(
+                label: _value(item, ['from_uid'], fallback: 'B'),
+                size: 34,
+              ),
+              const SizedBox(width: 8),
             ],
-          ),
+            GestureDetector(
+              onLongPress: onLongPress,
+              child: Container(
+                constraints: const BoxConstraints(maxWidth: 260),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 9,
+                ),
+                decoration: BoxDecoration(
+                  color: isMe ? const Color(0xff8fee79) : Colors.white,
+                  borderRadius: BorderRadius.only(
+                    topLeft: const Radius.circular(12),
+                    topRight: const Radius.circular(12),
+                    bottomLeft: Radius.circular(isMe ? 12 : 4),
+                    bottomRight: Radius.circular(isMe ? 4 : 12),
+                  ),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      text.isEmpty ? '[消息]' : text,
+                      style: const TextStyle(
+                        color: _textColor,
+                        fontSize: 15,
+                        height: 1.35,
+                      ),
+                    ),
+                    if (time.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 5),
+                        child: Text(
+                          time,
+                          style: const TextStyle(
+                            color: _mutedColor,
+                            fontSize: 11,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+            if (isMe) ...[
+              const SizedBox(width: 8),
+              const _Avatar(label: '我', size: 34, color: _primaryColor),
+            ],
+          ],
         ),
       ),
     );
@@ -2296,39 +2958,53 @@ class _ChatToolsPanel extends StatelessWidget {
         _ToolItem(Icons.groups_outlined, '群成员', onGroupMembers!),
     ];
     return Container(
-      height: 210,
+      height: 224,
       decoration: const BoxDecoration(
-        color: _fillColor,
+        color: Color(0xfff7f9fc),
         border: Border(top: BorderSide(color: _borderColor)),
       ),
       child: GridView.builder(
-        padding: const EdgeInsets.all(8),
+        padding: const EdgeInsets.fromLTRB(14, 12, 14, 16),
         itemCount: items.length,
         gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
           crossAxisCount: 4,
-          mainAxisExtent: 64,
+          mainAxisExtent: 70,
+          crossAxisSpacing: 10,
+          mainAxisSpacing: 10,
         ),
         itemBuilder: (context, index) {
           final item = items[index];
           return InkWell(
             onTap: item.onTap,
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                border: Border.all(color: _borderColor),
-              ),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(item.icon, size: 22),
-                  const SizedBox(height: 4),
-                  Text(
-                    item.label,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 12),
+            borderRadius: BorderRadius.circular(16),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Container(
+                  width: 44,
+                  height: 44,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(16),
+                    boxShadow: const [
+                      BoxShadow(
+                        color: Color(0x0f000000),
+                        blurRadius: 14,
+                        offset: Offset(0, 6),
+                      ),
+                    ],
                   ),
-                ],
-              ),
+                  child: Icon(item.icon, size: 22, color: _primaryColor),
+                ),
+                const SizedBox(height: 5),
+                Text(
+                  item.label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 12, color: _textColor),
+                ),
+              ],
             ),
           );
         },
@@ -2362,12 +3038,13 @@ class _Composer extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return DecoratedBox(
+    return Container(
       decoration: const BoxDecoration(
+        color: Colors.white,
         border: Border(top: BorderSide(color: _borderColor)),
       ),
       child: Padding(
-        padding: const EdgeInsets.all(10),
+        padding: const EdgeInsets.fromLTRB(8, 8, 8, 10),
         child: Row(
           children: [
             IconButton(
@@ -2380,7 +3057,27 @@ class _Composer extends StatelessWidget {
                 controller: controller,
                 minLines: 1,
                 maxLines: 4,
-                decoration: const InputDecoration(hintText: '输入消息'),
+                decoration: const InputDecoration(
+                  hintText: '输入消息',
+                  filled: true,
+                  fillColor: Color(0xfff2f5f9),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.all(Radius.circular(18)),
+                    borderSide: BorderSide.none,
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.all(Radius.circular(18)),
+                    borderSide: BorderSide.none,
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.all(Radius.circular(18)),
+                    borderSide: BorderSide(color: _primaryColor),
+                  ),
+                  contentPadding: EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 10,
+                  ),
+                ),
               ),
             ),
             const SizedBox(width: 8),
@@ -2654,6 +3351,12 @@ void _openGroupChat(
   );
 }
 
+void _showSoon(BuildContext context) {
+  ScaffoldMessenger.of(
+    context,
+  ).showSnackBar(const SnackBar(content: Text('功能建设中')));
+}
+
 String _formatTime(int millis) {
   if (millis <= 0) {
     return '暂无';
@@ -2661,6 +3364,14 @@ String _formatTime(int millis) {
   final time = DateTime.fromMillisecondsSinceEpoch(millis);
   String two(int value) => value.toString().padLeft(2, '0');
   return '${time.year}-${two(time.month)}-${two(time.day)} ${two(time.hour)}:${two(time.minute)}:${two(time.second)}';
+}
+
+String _avatarInitial(String label) {
+  final text = label.trim();
+  if (text.isEmpty) {
+    return 'B';
+  }
+  return text.characters.first.toUpperCase();
 }
 
 String _friendlyResult(
