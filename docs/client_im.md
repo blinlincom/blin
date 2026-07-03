@@ -108,6 +108,8 @@ MMKV 存储：
 - 聊天草稿。
 - 最近访问频道索引。
 
+客户端不会使用默认 `mmkv` 目录和 `mmkv.default` 文件名。启动时在应用私有目录下初始化 `.bim_data` 缓存目录，实际存储实例名为 `bim_store_v1`，并通过 Android Keystore 保护随机加密 key 后以 MMKV `cryptKey` 打开。Android 侧关闭应用数据备份，避免缓存文件被系统备份导出。当前仍处于开发调试阶段，新版本不会读取旧 `app_flutter/mmkv` 调试缓存，也不会主动迁移或删除旧缓存文件。
+
 历史消息接口只在本次启动首次打开某个聊天且本地没有消息时补偿同步一次：
 
 - 私聊：`im_person_messages`

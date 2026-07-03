@@ -176,9 +176,11 @@ class _MessagesTabState extends State<MessagesTab> {
   void initState() {
     super.initState();
     _conversationRevision = widget.controller.conversationVersion;
+    _conversations = widget.controller.cachedConversations();
+    _loading = _conversations.isEmpty;
     widget.controller.addListener(_onControllerChanged);
     _messageSub = widget.controller.messageEvents.listen(_onMessageEvent);
-    _loadConversations(showLoading: true);
+    _loadConversations(showLoading: _conversations.isEmpty);
   }
 
   @override
@@ -187,8 +189,12 @@ class _MessagesTabState extends State<MessagesTab> {
     if (oldWidget.controller != widget.controller) {
       oldWidget.controller.removeListener(_onControllerChanged);
       _messageSub?.cancel();
+      _conversations = widget.controller.cachedConversations();
+      _loading = _conversations.isEmpty;
+      _error = null;
       widget.controller.addListener(_onControllerChanged);
       _messageSub = widget.controller.messageEvents.listen(_onMessageEvent);
+      _loadConversations(showLoading: _conversations.isEmpty);
     }
   }
 
@@ -259,43 +265,55 @@ class _MessagesTabState extends State<MessagesTab> {
       onTap: () => _push(context, SearchPage(controller: widget.controller)),
     );
     if (_loading && _conversations.isEmpty) {
-      return Column(
-        children: [
-          header,
-          const Expanded(child: Center(child: CircularProgressIndicator())),
-        ],
+      return ColoredBox(
+        color: Colors.white,
+        child: Column(
+          children: [
+            header,
+            const Expanded(child: Center(child: CircularProgressIndicator())),
+          ],
+        ),
       );
     }
     if (_error != null && _conversations.isEmpty) {
-      return Column(
-        children: [
-          header,
-          Expanded(
-            child: _ErrorState(
-              text: _error!,
-              onRetry: () => _loadConversations(showLoading: true),
+      return ColoredBox(
+        color: Colors.white,
+        child: Column(
+          children: [
+            header,
+            Expanded(
+              child: _ErrorState(
+                text: _error!,
+                onRetry: () => _loadConversations(showLoading: true),
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       );
     }
     if (_conversations.isEmpty) {
-      return Column(
-        children: [
-          header,
-          const Expanded(child: _EmptyState(text: '暂无会话')),
-        ],
+      return ColoredBox(
+        color: Colors.white,
+        child: Column(
+          children: [
+            header,
+            const Expanded(child: _EmptyState(text: '暂无会话')),
+          ],
+        ),
       );
     }
-    return ListView.builder(
-      physics: const ClampingScrollPhysics(),
-      itemCount: _conversations.length + 1,
-      itemBuilder: (context, index) {
-        if (index == 0) {
-          return header;
-        }
-        return _conversationTile(context, _conversations[index - 1]);
-      },
+    return ColoredBox(
+      color: Colors.white,
+      child: ListView.builder(
+        physics: const ClampingScrollPhysics(),
+        itemCount: _conversations.length + 1,
+        itemBuilder: (context, index) {
+          if (index == 0) {
+            return header;
+          }
+          return _conversationTile(context, _conversations[index - 1]);
+        },
+      ),
     );
   }
 
@@ -3159,27 +3177,30 @@ class _SearchBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(6),
-        child: Container(
-          height: 36,
-          padding: const EdgeInsets.symmetric(horizontal: 12),
-          decoration: BoxDecoration(
-            color: const Color(0xffeeeeef),
-            borderRadius: BorderRadius.circular(6),
-          ),
-          child: Row(
-            children: [
-              const Icon(Icons.search, color: _mutedColor, size: 18),
-              const SizedBox(width: 8),
-              Text(
-                hintText,
-                style: const TextStyle(color: _mutedColor, fontSize: 14),
-              ),
-            ],
+    return ColoredBox(
+      color: Colors.white,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(4),
+          child: Container(
+            height: 36,
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            decoration: BoxDecoration(
+              color: const Color(0xfff0f1f3),
+              borderRadius: BorderRadius.circular(4),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.search, color: _mutedColor, size: 18),
+                const SizedBox(width: 8),
+                Text(
+                  hintText,
+                  style: const TextStyle(color: _mutedColor, fontSize: 14),
+                ),
+              ],
+            ),
           ),
         ),
       ),

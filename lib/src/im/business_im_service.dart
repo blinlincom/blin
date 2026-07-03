@@ -58,6 +58,22 @@ class BusinessImService extends ChangeNotifier {
   String? get lastError => _lastError;
   int get conversationVersion => _conversationVersion;
 
+  List<Map<String, Object?>> cachedConversations() {
+    final chat = _session?.chat;
+    if (chat == null) {
+      return const [];
+    }
+    if (_latestConversations.isEmpty) {
+      _latestConversations = _cache
+          .readConversations(chat.uid)
+          .map(_normalizeConversation)
+          .toList();
+    }
+    return _latestConversations
+        .map((item) => Map<String, Object?>.from(item))
+        .toList(growable: false);
+  }
+
   int messageVersion({required String channelID, required int channelType}) {
     return _channelMessageVersions[_messageKey(channelID, channelType)] ?? 0;
   }
