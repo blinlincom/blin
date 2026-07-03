@@ -1,11 +1,13 @@
 allprojects {
     repositories {
+        google()
+        mavenCentral()
+        // GitHub Actions can hit intermittent 502s on regional mirrors, so they
+        // stay behind the official repositories and act only as local fallbacks.
         maven("https://maven.aliyun.com/repository/google")
         maven("https://maven.aliyun.com/repository/central")
         maven("https://maven.aliyun.com/repository/public")
         maven("https://repo.huaweicloud.com/repository/maven/")
-        google()
-        mavenCentral()
     }
 }
 
