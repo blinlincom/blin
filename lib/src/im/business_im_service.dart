@@ -152,6 +152,7 @@ class BusinessImService extends ChangeNotifier {
     required String channelID,
     required int channelType,
   }) async {
+    channelID = _canonicalChannelId(channelID, channelType);
     _openMessageChannels.add(_messageKey(channelID, channelType));
     await markConversationRead(channelID: channelID, channelType: channelType);
   }
@@ -160,6 +161,7 @@ class BusinessImService extends ChangeNotifier {
     required String channelID,
     required int channelType,
   }) {
+    channelID = _canonicalChannelId(channelID, channelType);
     _openMessageChannels.remove(_messageKey(channelID, channelType));
   }
 
@@ -167,6 +169,7 @@ class BusinessImService extends ChangeNotifier {
     required String channelID,
     required int channelType,
   }) async {
+    channelID = _canonicalChannelId(channelID, channelType);
     final chat = _requireChat();
     final messages = _cache.readMessages(
       uid: chat.uid,
@@ -237,11 +240,18 @@ class BusinessImService extends ChangeNotifier {
     String groupId = '',
     int limit = 50,
   }) async {
-    final chat = _requireChat();
-    var cached = _cache.readMessages(
-      uid: chat.uid,
-      channelId: channelID,
-      channelType: channelType,
+    final rawChannelId = channelID;
+    channelID = _canonicalChannelId(channelID, channelType);
+    var cached = _readMessagesForChannel(channelID, channelType);
+    AppLogger.info(
+      'im',
+      'local messages cache read',
+      data: {
+        'raw_channel_id': rawChannelId,
+        'channel_id': channelID,
+        'channel_type': channelType,
+        'count': cached.length,
+      },
     );
     final key = _messageKey(channelID, channelType);
     if (cached.isEmpty && !_historySyncedChannels.contains(key)) {
@@ -261,6 +271,7 @@ class BusinessImService extends ChangeNotifier {
     String groupId = '',
     int limit = 50,
   }) async {
+    channelID = _canonicalChannelId(channelID, channelType);
     final key = _messageKey(channelID, channelType);
     final running = _syncingChannels[key];
     if (running != null) {
@@ -322,11 +333,7 @@ class BusinessImService extends ChangeNotifier {
           .where((item) => item.isNotEmpty)
           .toList();
       final merged = _mergeMessages(
-        _cache.readMessages(
-          uid: chat.uid,
-          channelId: channelID,
-          channelType: channelType,
-        ),
+        _readMessagesForChannel(channelID, channelType),
         messages,
       );
       _writeMessages(channelID, channelType, _sortAndLimit(merged, 200));
@@ -346,11 +353,7 @@ class BusinessImService extends ChangeNotifier {
         stackTrace: stackTrace,
         data: {'channel_id': channelID, 'channel_type': channelType},
       );
-      return _cache.readMessages(
-        uid: chat.uid,
-        channelId: channelID,
-        channelType: channelType,
-      );
+      return _readMessagesForChannel(channelID, channelType);
     }
   }
 
@@ -429,6 +432,7 @@ class BusinessImService extends ChangeNotifier {
     Map<String, Object?> payload = const {},
     String filePath = '',
   }) async {
+    channelID = _canonicalChannelId(channelID, channelType);
     final session = _requireSession();
     final chat = _requireChat();
     final clientMsgNo = newClientMsgNo();
@@ -734,6 +738,7 @@ class BusinessImService extends ChangeNotifier {
         packet.fromUid.isNotEmpty) {
       channelId = packet.fromUid;
     }
+    channelId = _canonicalChannelId(channelId, packet.channelType);
     final message = _messageFromTcp(packet, channelId);
     _upsertMessage(channelId, packet.channelType, message);
     _upsertConversationFromMessage(message);
@@ -913,9 +918,12 @@ class BusinessImService extends ChangeNotifier {
               ? _requireChat().channelTypeGroup
               : _requireChat().channelTypePerson)
         : channelType;
-    final channelId = resolvedType == _requireChat().channelTypePerson
-        ? _privateChannelIdFromConversation(item, payload)
-        : _value(item, ['channel_id', 'uid', 'group_id', 'id']);
+    final channelId = _canonicalChannelId(
+      resolvedType == _requireChat().channelTypePerson
+          ? _privateChannelIdFromConversation(item, payload)
+          : _value(item, ['channel_id', 'uid', 'group_id', 'id']),
+      resolvedType,
+    );
     final receiverId = resolvedType == _requireChat().channelTypePerson
         ? _privateReceiverIdFromConversation(item, payload, channelId)
         : '';
@@ -960,6 +968,7 @@ class BusinessImService extends ChangeNotifier {
       ], fallback: _uidFromUser(fromUser)),
     );
     final currentUid = _requireChat().uid;
+    final canonicalChannelId = _canonicalChannelId(channelId, channelType);
     return <String, Object?>{
       'message_id': _value(raw, [
         'message_id',
@@ -971,7 +980,7 @@ class BusinessImService extends ChangeNotifier {
       'message_seq': _intValue(message, [
         'message_seq',
       ], fallback: _intValue(raw, ['message_seq'])),
-      'channel_id': channelId,
+      'channel_id': canonicalChannelId,
       'channel_type': channelType,
       'from_uid': fromUid,
       'is_me': fromUid == currentUid,
@@ -1019,14 +1028,18 @@ class BusinessImService extends ChangeNotifier {
 
   Map<String, Object?> _messageFromTcp(TcpRecvPacket packet, String channelId) {
     final payload = _decodeBusinessPayload(packet.payload);
+    final canonicalChannelId = _canonicalChannelId(
+      channelId,
+      packet.channelType,
+    );
     final receiverId = packet.channelType == _requireChat().channelTypePerson
-        ? _receiverIdFromChannel(channelId)
+        ? _receiverIdFromChannel(canonicalChannelId)
         : '';
     return <String, Object?>{
       'message_id': packet.messageId.toString(),
       'client_msg_no': packet.clientMsgNo,
       'message_seq': packet.messageSeq,
-      'channel_id': channelId,
+      'channel_id': canonicalChannelId,
       'channel_type': packet.channelType,
       if (receiverId.isNotEmpty) 'receiver_id': receiverId,
       'from_uid': packet.fromUid,
@@ -1110,14 +1123,7 @@ class BusinessImService extends ChangeNotifier {
     int channelType,
     Map<String, Object?> message,
   ) {
-    final chat = _requireChat();
-    final messages = _cache
-        .readMessages(
-          uid: chat.uid,
-          channelId: channelId,
-          channelType: channelType,
-        )
-        .toList();
+    final messages = _readMessagesForChannel(channelId, channelType).toList();
     final clientMsgNo = message['client_msg_no']?.toString() ?? '';
     final index = clientMsgNo.isEmpty
         ? -1
@@ -1130,6 +1136,73 @@ class BusinessImService extends ChangeNotifier {
       messages.add(message);
     }
     _writeMessages(channelId, channelType, _sortAndLimit(messages, 200));
+  }
+
+  List<Map<String, Object?>> _readMessagesForChannel(
+    String channelId,
+    int channelType,
+  ) {
+    final chat = _requireChat();
+    final primary = _cache
+        .readMessages(
+          uid: chat.uid,
+          channelId: channelId,
+          channelType: channelType,
+        )
+        .toList();
+    if (channelType != chat.channelTypePerson) {
+      return primary;
+    }
+
+    final merged = primary
+        .map((item) => Map<String, Object?>.from(item))
+        .toList();
+    var migrated = false;
+    for (final recent in _cache.readRecentChannels(chat.uid)) {
+      final parts = recent.split(':');
+      if (parts.length != 2 || parts[0] != channelType.toString()) {
+        continue;
+      }
+      final aliasChannelId = parts[1];
+      if (aliasChannelId == channelId) {
+        continue;
+      }
+      final aliasMessages = _cache.readMessages(
+        uid: chat.uid,
+        channelId: aliasChannelId,
+        channelType: channelType,
+      );
+      for (final raw in aliasMessages) {
+        final message = Map<String, Object?>.from(raw);
+        if (!_messageBelongsToPrivatePeer(message, channelId)) {
+          continue;
+        }
+        migrated = true;
+        message['channel_id'] = channelId;
+        final clientMsgNo = message['client_msg_no']?.toString() ?? '';
+        final index = clientMsgNo.isEmpty
+            ? -1
+            : merged.indexWhere(
+                (item) => item['client_msg_no']?.toString() == clientMsgNo,
+              );
+        if (index >= 0) {
+          merged[index] = {...merged[index], ...message};
+        } else {
+          merged.add(message);
+        }
+      }
+    }
+    if (migrated) {
+      final sorted = _sortAndLimit(merged, 200);
+      _writeMessages(channelId, channelType, sorted);
+      AppLogger.info(
+        'im',
+        'private message cache migrated',
+        data: {'channel_id': channelId, 'count': sorted.length},
+      );
+      return sorted;
+    }
+    return primary;
   }
 
   void _publishMessageEvent({
@@ -1482,6 +1555,41 @@ class BusinessImService extends ChangeNotifier {
     return match?.group(1) ?? channelId;
   }
 
+  String _canonicalChannelId(String channelId, int channelType) {
+    if (channelId.isEmpty) {
+      return channelId;
+    }
+    final chat = _requireChat();
+    if (channelType != chat.channelTypePerson) {
+      return channelId;
+    }
+    if (_isCurrentUserChannel(channelId)) {
+      final fromConversation = _privatePeerChannelFromConversations(channelId);
+      return fromConversation.isNotEmpty ? fromConversation : channelId;
+    }
+    return _uidFromUserId(_receiverIdFromChannel(channelId));
+  }
+
+  String _privatePeerChannelFromConversations(String channelId) {
+    final chat = _requireChat();
+    for (final item in _cache.readConversations(chat.uid)) {
+      final itemChannelId = _value(item, ['channel_id', 'uid']);
+      if (itemChannelId != channelId) {
+        continue;
+      }
+      final receiverId = _privateReceiverIdFromConversation(
+        item,
+        _asMap(item['payload']),
+        channelId,
+      );
+      if (receiverId.isNotEmpty &&
+          receiverId != _requireSession().userId.toString()) {
+        return _uidFromUserId(receiverId);
+      }
+    }
+    return '';
+  }
+
   String _privateChannelIdFromConversation(
     Map<String, Object?> item,
     Map<String, Object?> payload,
@@ -1551,6 +1659,37 @@ class BusinessImService extends ChangeNotifier {
       'receiver_id',
     ], fallback: _value(payload, ['receiver_id', 'peer_id', 'friend_id']));
     return value.isNotEmpty ? value : _receiverIdFromChannel(channelId);
+  }
+
+  bool _messageBelongsToPrivatePeer(
+    Map<String, Object?> message,
+    String channelId,
+  ) {
+    final peerId = _receiverIdFromChannel(channelId);
+    if (peerId.isEmpty) {
+      return false;
+    }
+    final currentUid = _requireChat().uid;
+    final fromUid = _value(message, ['from_uid']);
+    if (fromUid.isNotEmpty &&
+        fromUid != currentUid &&
+        _receiverIdFromChannel(fromUid) == peerId) {
+      return true;
+    }
+    final payload = _asMap(message['payload']);
+    final candidates = [
+      _value(message, ['channel_id']),
+      _value(message, ['receiver_id', 'peer_id', 'friend_id']),
+      _value(payload, ['receiver_id', 'peer_id', 'friend_id']),
+      _value(payload, ['from_uid', 'sender_uid']),
+      _value(payload, ['to_uid', 'target_uid']),
+    ];
+    for (final candidate in candidates) {
+      if (candidate.isNotEmpty && _receiverIdFromChannel(candidate) == peerId) {
+        return true;
+      }
+    }
+    return false;
   }
 
   bool _isConversationRead({

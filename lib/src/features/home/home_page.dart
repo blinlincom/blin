@@ -273,8 +273,8 @@ class _MessagesTabState extends State<MessagesTab> {
     final content = item['content']?.toString() ?? '';
     final time = item['msg_time']?.toString() ?? '';
     final unread = _intValue(item, ['unread_quantity']);
-    final channelId = _value(item, ['channel_id']);
     final channelType = _channelTypeFromConversation(item);
+    final channelId = _conversationChannelId(item, channelType);
     return _ConversationTile(
       title: title,
       subtitle: content.isEmpty ? '暂无最新消息' : content,
@@ -4913,6 +4913,26 @@ String _conversationTitle(Map<String, Object?> item) {
     return _value(item, ['name', 'group_name'], fallback: '群聊');
   }
   return _value(item, ['nickname', 'username', 'name'], fallback: '私聊');
+}
+
+String _conversationChannelId(Map<String, Object?> item, int channelType) {
+  if (channelType == _privateChannelType) {
+    final receiverId = _value(item, [
+      'receiver_id',
+      'peer_id',
+      'friend_id',
+      'user_id',
+      'userid',
+    ]);
+    if (receiverId.isNotEmpty) {
+      return _uidFromUserId(receiverId);
+    }
+  }
+  final raw = _value(item, ['channel_id', 'uid']);
+  if (channelType != _privateChannelType || raw.isEmpty) {
+    return raw;
+  }
+  return _uidFromUserId(_privateReceiverIdFromChannel(raw));
 }
 
 int _channelTypeFromConversation(Map<String, Object?> item) {
