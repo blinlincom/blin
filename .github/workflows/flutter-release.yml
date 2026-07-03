@@ -1,0 +1,213 @@
+name: Flutter Release
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      build_android:
+        description: "Build Android APK and AAB"
+        required: true
+        default: "true"
+        type: choice
+        options:
+          - "true"
+          - "false"
+      build_web:
+        description: "Build Web archive"
+        required: true
+        default: "true"
+        type: choice
+        options:
+          - "true"
+          - "false"
+      build_ios:
+        description: "Build unsigned iOS archive"
+        required: true
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+
+permissions:
+  contents: read
+
+env:
+  BIM_API_BASE_URL: ${{ vars.BIM_API_BASE_URL || 'https://blcold.cn/api/' }}
+  BIM_APP_ID: ${{ vars.BIM_APP_ID || '900000002' }}
+  BIM_APP_KEY: ${{ secrets.BIM_APP_KEY }}
+
+jobs:
+  analyze:
+    name: Analyze
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Analyze
+        run: flutter analyze
+
+  android:
+    name: Build Android
+    needs: analyze
+    runs-on: ubuntu-latest
+    if: ${{ startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.build_android == 'true') }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Restore Android signing key
+        run: |
+          if [ -z "${ANDROID_KEYSTORE_BASE64}" ]; then
+            echo "ANDROID_KEYSTORE_BASE64 is not configured. Android artifacts will use debug signing."
+            exit 0
+          fi
+          printf '%s' "${ANDROID_KEYSTORE_BASE64}" | base64 --decode > android/app/release.keystore
+          cat > android/key.properties <<EOF
+          storeFile=release.keystore
+          storePassword=${ANDROID_KEYSTORE_PASSWORD}
+          keyAlias=${ANDROID_KEY_ALIAS}
+          keyPassword=${ANDROID_KEY_PASSWORD}
+          EOF
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+
+      - name: Build APK
+        run: |
+          BUILD_ARGS=(
+            "--dart-define=BIM_API_BASE_URL=${BIM_API_BASE_URL}"
+            "--dart-define=BIM_APP_ID=${BIM_APP_ID}"
+          )
+          if [ -n "${BIM_APP_KEY}" ]; then
+            BUILD_ARGS+=("--dart-define=BIM_APP_KEY=${BIM_APP_KEY}")
+          fi
+          flutter build apk --release "${BUILD_ARGS[@]}"
+
+      - name: Build App Bundle
+        run: |
+          BUILD_ARGS=(
+            "--dart-define=BIM_API_BASE_URL=${BIM_API_BASE_URL}"
+            "--dart-define=BIM_APP_ID=${BIM_APP_ID}"
+          )
+          if [ -n "${BIM_APP_KEY}" ]; then
+            BUILD_ARGS+=("--dart-define=BIM_APP_KEY=${BIM_APP_KEY}")
+          fi
+          flutter build appbundle --release "${BUILD_ARGS[@]}"
+
+      - name: Upload Android artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: bim-android
+          path: |
+            build/app/outputs/flutter-apk/*.apk
+            build/app/outputs/bundle/release/*.aab
+          if-no-files-found: error
+
+  web:
+    name: Build Web
+    needs: analyze
+    runs-on: ubuntu-latest
+    if: ${{ startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.build_web == 'true') }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build Web
+        run: |
+          BUILD_ARGS=(
+            "--dart-define=BIM_API_BASE_URL=${BIM_API_BASE_URL}"
+            "--dart-define=BIM_APP_ID=${BIM_APP_ID}"
+          )
+          if [ -n "${BIM_APP_KEY}" ]; then
+            BUILD_ARGS+=("--dart-define=BIM_APP_KEY=${BIM_APP_KEY}")
+          fi
+          flutter build web --release "${BUILD_ARGS[@]}"
+
+      - name: Upload Web artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bim-web
+          path: build/web
+          if-no-files-found: error
+
+  ios:
+    name: Build iOS Unsigned
+    needs: analyze
+    runs-on: macos-latest
+    if: ${{ startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.build_ios == 'true') }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build iOS without codesign
+        run: |
+          BUILD_ARGS=(
+            "--dart-define=BIM_API_BASE_URL=${BIM_API_BASE_URL}"
+            "--dart-define=BIM_APP_ID=${BIM_APP_ID}"
+          )
+          if [ -n "${BIM_APP_KEY}" ]; then
+            BUILD_ARGS+=("--dart-define=BIM_APP_KEY=${BIM_APP_KEY}")
+          fi
+          flutter build ios --release --no-codesign "${BUILD_ARGS[@]}"
+
+      - name: Archive iOS app
+        run: |
+          mkdir -p build/ios/unsigned
+          tar -czf build/ios/unsigned/bim-ios-unsigned.tar.gz -C build/ios/iphoneos Runner.app
+
+      - name: Upload iOS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bim-ios-unsigned
+          path: build/ios/unsigned/bim-ios-unsigned.tar.gz
+          if-no-files-found: error
