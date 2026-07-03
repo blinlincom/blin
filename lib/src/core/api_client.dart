@@ -271,6 +271,52 @@ class ApiClient {
     return result.data;
   }
 
+  Future<Map<String, Object?>> sendPersonMessage({
+    required UserSession session,
+    required String device,
+    required String receiverId,
+    required String clientMsgNo,
+    required String contentType,
+    Map<String, Object?> params = const {},
+    String filePath = '',
+  }) {
+    return imBusinessAction(
+      action: 'im_person_send',
+      session: session,
+      device: device,
+      params: {
+        ...params,
+        'receiver_id': receiverId,
+        'client_msg_no': clientMsgNo,
+        'content_type': contentType,
+      },
+      filePath: filePath,
+    );
+  }
+
+  Future<Map<String, Object?>> sendGroupMessage({
+    required UserSession session,
+    required String device,
+    required String groupId,
+    required String clientMsgNo,
+    required String contentType,
+    Map<String, Object?> params = const {},
+    String filePath = '',
+  }) {
+    return imBusinessAction(
+      action: 'im_group_send',
+      session: session,
+      device: device,
+      params: {
+        ...params,
+        'group_id': groupId,
+        'client_msg_no': clientMsgNo,
+        'content_type': contentType,
+      },
+      filePath: filePath,
+    );
+  }
+
   Future<List<Map<String, Object?>>> friends({
     required UserSession session,
     required String device,
@@ -339,6 +385,21 @@ class ApiClient {
       throw ApiException(result.message, code: result.code);
     }
     return result.data;
+  }
+
+  Future<void> userHeartbeat({
+    required UserSession session,
+    required String device,
+  }) async {
+    final result = await signedImPost<Object?>(
+      'user_heartbeat',
+      session: session,
+      device: device,
+      params: const {},
+    );
+    if (!result.isSuccess) {
+      throw ApiException(result.message, code: result.code);
+    }
   }
 
   Future<void> logout({

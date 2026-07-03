@@ -18,9 +18,9 @@ flutter run --dart-define=BIM_API_BASE_URL=https://your-domain/api/ --dart-defin
 
 ## IM 对接
 
-客户端使用 `wukongimfluttersdk` 作为实时层。登录后先调用业务端 `im_connect` 获取 `uid`、`token` 和 `tcp_addr`，再由 SDK 建立长连接、同步会话、同步频道消息并写入 SDK 本地库。
+客户端不再接入 Flutter IM SDK。登录后先调用业务端 `im_connect` 获取 `uid`、`token` 和 `tcp_addr`，再由客户端本地 TCP 长连接实现握手、ping/pong、收包、ACK 和 MMKV 缓存刷新。
 
-发送、红包、转账、撤回、回执、好友三句限制、禁言等业务规则不在客户端绕过，统一调用业务端签名 `im_*` 接口，由服务端发送到 IM，客户端通过 SDK 实时收到结果。
+发送、红包、转账、撤回、回执、好友三句限制、禁言等业务规则不在客户端绕过，统一调用业务端签名 `im_*` 接口，由服务端发送到 IM，客户端通过 TCP 长连接实时收到结果。客户端不会轮询消息列表。
 
 详细接口和客户端规则见 [docs/client_im.md](docs/client_im.md)。
 

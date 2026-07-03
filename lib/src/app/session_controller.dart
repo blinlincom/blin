@@ -6,15 +6,15 @@ import '../core/api_client.dart';
 import '../core/app_logger.dart';
 import '../core/models.dart';
 import '../core/session_store.dart';
+import '../im/business_im_service.dart';
 import '../im/chat_feature_service.dart';
 import '../im/im_message_types.dart';
-import '../im/wukong_im_service.dart';
 
 class SessionController extends ChangeNotifier {
   SessionController({
     required ApiClient api,
     required SessionStore store,
-    required WukongImService im,
+    required BusinessImService im,
     required ChatFeatureService chat,
   }) : _api = api,
        _store = store,
@@ -25,7 +25,7 @@ class SessionController extends ChangeNotifier {
 
   final ApiClient _api;
   final SessionStore _store;
-  final WukongImService _im;
+  final BusinessImService _im;
   final ChatFeatureService _chat;
 
   UserSession? _session;
@@ -223,7 +223,7 @@ class SessionController extends ChangeNotifier {
         );
     AppLogger.info(
       'session',
-      'load conversations sdk local success',
+      'load conversations local success',
       data: {'count': local.length},
     );
     return local;
@@ -339,7 +339,8 @@ class SessionController extends ChangeNotifier {
       channelID: channelId,
       channelType: channelType,
       content: content,
-      mentionUids: mentionUserIds.map(_uidFromUserId).toList(),
+      groupId: groupId,
+      mentionUserIds: mentionUserIds,
       mentionAll: mentionAll,
       replyClientMsgNo: replyClientMsgNo,
       burnAfterRead: burnAfterRead,
@@ -451,15 +452,12 @@ class SessionController extends ChangeNotifier {
     Map<String, Object?> params = const {},
   }) async {
     _requireSession();
-    await _sendSdkBusinessMessage(
+    await _sendBusinessMessage(
       channelId: _uidFromUserId(receiverId),
       channelType: 1,
       contentType: contentType,
-      payload: {
-        ...params,
-        if (url.isNotEmpty) 'url': url,
-        if (filePath.isNotEmpty) 'file_path': filePath,
-      },
+      filePath: filePath,
+      payload: {...params, if (url.isNotEmpty) 'url': url},
     );
     return const {'msg': '已发送'};
   }
@@ -473,16 +471,13 @@ class SessionController extends ChangeNotifier {
     Map<String, Object?> params = const {},
   }) async {
     _requireSession();
-    await _sendSdkBusinessMessage(
+    await _sendBusinessMessage(
       channelId: channelId.isEmpty ? groupId : channelId,
       channelType: 2,
       contentType: contentType,
-      payload: {
-        ...params,
-        'group_id': groupId,
-        if (url.isNotEmpty) 'url': url,
-        if (filePath.isNotEmpty) 'file_path': filePath,
-      },
+      groupId: groupId,
+      filePath: filePath,
+      payload: {...params, 'group_id': groupId, if (url.isNotEmpty) 'url': url},
     );
     return const {'msg': '已发送'};
   }
@@ -492,7 +487,7 @@ class SessionController extends ChangeNotifier {
     required String cardUserId,
   }) async {
     _requireSession();
-    await _sendSdkBusinessMessage(
+    await _sendBusinessMessage(
       channelId: _uidFromUserId(receiverId),
       channelType: 1,
       contentType: ChatContentTypes.contactCard,
@@ -507,10 +502,11 @@ class SessionController extends ChangeNotifier {
     String channelId = '',
   }) async {
     _requireSession();
-    await _sendSdkBusinessMessage(
+    await _sendBusinessMessage(
       channelId: channelId.isEmpty ? groupId : channelId,
       channelType: 2,
       contentType: ChatContentTypes.contactCard,
+      groupId: groupId,
       payload: {'group_id': groupId, 'card_user_id': cardUserId},
     );
     return const {'msg': '已发送'};
@@ -522,7 +518,7 @@ class SessionController extends ChangeNotifier {
     required String assetType,
   }) async {
     _requireSession();
-    await _sendSdkBusinessMessage(
+    await _sendBusinessMessage(
       channelId: _uidFromUserId(receiverId),
       channelType: 1,
       contentType: ChatContentTypes.transfer,
@@ -544,10 +540,11 @@ class SessionController extends ChangeNotifier {
     String channelId = '',
   }) async {
     _requireSession();
-    await _sendSdkBusinessMessage(
+    await _sendBusinessMessage(
       channelId: channelId.isEmpty ? groupId : channelId,
       channelType: 2,
       contentType: ChatContentTypes.transfer,
+      groupId: groupId,
       payload: {
         'group_id': groupId,
         'receiver_id': receiverId,
@@ -566,7 +563,7 @@ class SessionController extends ChangeNotifier {
     String remark = '',
   }) async {
     _requireSession();
-    await _sendSdkBusinessMessage(
+    await _sendBusinessMessage(
       channelId: _uidFromUserId(receiverId),
       channelType: 1,
       contentType: ChatContentTypes.redPacket,
@@ -592,10 +589,11 @@ class SessionController extends ChangeNotifier {
     String channelId = '',
   }) async {
     _requireSession();
-    await _sendSdkBusinessMessage(
+    await _sendBusinessMessage(
       channelId: channelId.isEmpty ? groupId : channelId,
       channelType: 2,
       contentType: ChatContentTypes.redPacket,
+      groupId: groupId,
       payload: {
         'group_id': groupId,
         'money': money,
@@ -927,34 +925,22 @@ class SessionController extends ChangeNotifier {
     );
   }
 
-  Future<void> _sendSdkBusinessMessage({
+  Future<void> _sendBusinessMessage({
     required String channelId,
     required int channelType,
     required String contentType,
+    String groupId = '',
+    String filePath = '',
     Map<String, Object?> payload = const {},
   }) {
     return _im.sendBusinessMessage(
       channelID: channelId,
       channelType: channelType,
-      contentType: _contentTypeCode(contentType),
-      payload: {'content_type': contentType, ...payload},
+      contentType: contentType,
+      groupId: groupId,
+      payload: payload,
+      filePath: filePath,
     );
-  }
-
-  int _contentTypeCode(String contentType) {
-    return switch (contentType) {
-      ChatContentTypes.image => ImMessageTypes.image,
-      ChatContentTypes.voice => ImMessageTypes.voice,
-      ChatContentTypes.video => ImMessageTypes.video,
-      ChatContentTypes.file => ImMessageTypes.file,
-      ChatContentTypes.transfer => ImMessageTypes.transfer,
-      ChatContentTypes.redPacket => ImMessageTypes.redPacket,
-      ChatContentTypes.emoji => ImMessageTypes.emoji,
-      ChatContentTypes.gif => ImMessageTypes.gif,
-      ChatContentTypes.sticker => ImMessageTypes.sticker,
-      ChatContentTypes.contactCard => ImMessageTypes.contactCard,
-      _ => ImMessageTypes.text,
-    };
   }
 
   String _tradeNo(String prefix) {

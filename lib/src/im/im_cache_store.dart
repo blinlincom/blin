@@ -9,6 +9,8 @@ class ImCacheStore {
 
   static const _draftPrefix = 'im_draft';
   static const _recentPrefix = 'im_recent_channels';
+  static const _conversationPrefix = 'im_conversations';
+  static const _messagePrefix = 'im_messages';
 
   String readDraft({required String channelId, required int channelType}) {
     return _kv.decodeString(_draftKey(channelId, channelType)) ?? '';
@@ -57,7 +59,62 @@ class ImCacheStore {
     _kv.encodeString('$_recentPrefix:$uid', jsonEncode(list));
   }
 
+  List<Map<String, Object?>> readConversations(String uid) {
+    return _readMapList('$_conversationPrefix:$uid');
+  }
+
+  void writeConversations({
+    required String uid,
+    required List<Map<String, Object?>> conversations,
+  }) {
+    _kv.encodeString('$_conversationPrefix:$uid', jsonEncode(conversations));
+  }
+
+  List<Map<String, Object?>> readMessages({
+    required String uid,
+    required String channelId,
+    required int channelType,
+  }) {
+    return _readMapList(_messageKey(uid, channelId, channelType));
+  }
+
+  void writeMessages({
+    required String uid,
+    required String channelId,
+    required int channelType,
+    required List<Map<String, Object?>> messages,
+  }) {
+    _kv.encodeString(
+      _messageKey(uid, channelId, channelType),
+      jsonEncode(messages),
+    );
+    rememberRecentChannel(uid: uid, channelId: '$channelType:$channelId');
+  }
+
   String _draftKey(String channelId, int channelType) {
     return '$_draftPrefix:$channelType:$channelId';
+  }
+
+  String _messageKey(String uid, String channelId, int channelType) {
+    return '$_messagePrefix:$uid:$channelType:$channelId';
+  }
+
+  List<Map<String, Object?>> _readMapList(String key) {
+    final raw = _kv.decodeString(key);
+    if (raw == null || raw.isEmpty) {
+      return const [];
+    }
+    final decoded = jsonDecode(raw);
+    if (decoded is! List) {
+      return const [];
+    }
+    return decoded
+        .whereType<Map>()
+        .map((item) => _normalizeMap(item))
+        .toList(growable: false);
+  }
+
+  Map<String, Object?> _normalizeMap(Map<dynamic, dynamic> map) {
+    return map.map((key, value) => MapEntry(key.toString(), value));
   }
 }

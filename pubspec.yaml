@@ -35,8 +35,9 @@ dependencies:
   dio: ^5.10.0
   mmkv: ^2.4.0
   crypto: ^3.0.7
+  encrypt: ^5.0.3
   path_provider: ^2.1.5
-  wukongimfluttersdk: ^1.7.9
+  x25519: ^0.1.1
 
 dev_dependencies:
   flutter_test:

@@ -10,7 +10,7 @@ class ChatFeatureService {
   final ApiClient _api;
   final ImCacheStore _cache;
 
-  // SDK 负责实时连接、本地消息库和 client_msg_no；业务端负责权限和资金类规则。
+  // 实时收包由 TCP 长连接负责，草稿等轻量状态写入 MMKV。
   String readDraft({required String channelId, required int channelType}) {
     return _cache.readDraft(channelId: channelId, channelType: channelType);
   }
