@@ -2403,6 +2403,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   late int _messageRevision;
   StreamSubscription<BusinessImMessageEvent>? _messageSub;
   bool _didInitialScroll = false;
+  final Set<String> _burnTriggeredClientMsgNos = <String>{};
 
   bool get _isGroup => widget.channelType == _groupChannelType;
   String get _groupId =>
@@ -2480,6 +2481,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       _messageRevision = _currentMessageRevision();
       _messages = const [];
       _didInitialScroll = false;
+      _burnTriggeredClientMsgNos.clear();
       _groupMuteState = const {};
       unawaited(
         widget.controller.openConversation(
@@ -2561,7 +2563,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     }
     final shouldStickToBottom = _shouldAutoScrollForMessage(event);
     setState(() {
-      if (event.source == 'burn_after_read_cmd') {
+      if (_isMessageDeleteEvent(event.source)) {
         final target = _value(event.message, ['client_msg_no']);
         _messages = _messages
             .where((item) => _value(item, ['client_msg_no']) != target)
@@ -2576,6 +2578,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     if (shouldStickToBottom) {
       _scrollToBottom(animated: event.source != 'send_local');
     }
+    _scheduleBurnAfterReadForMessages(_messages);
     unawaited(
       widget.controller.openConversation(
         channelId: widget.channelId,
@@ -2630,6 +2633,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         _messages = messages;
         _messagesLoading = false;
       });
+      _scheduleBurnAfterReadForMessages(messages);
       if (showLoading && !_didInitialScroll) {
         _didInitialScroll = true;
         _scrollToBottom(animated: false);
@@ -3237,6 +3241,18 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       final result = await widget.controller.recallMessage(
         targetClientMsgNo: _selectedClientMsgNo,
       );
+      final target = _selectedClientMsgNo;
+      await widget.controller.deleteLocalMessageOnly(
+        targetClientMsgNo: target,
+        channelId: widget.channelId,
+        channelType: widget.channelType,
+      );
+      _messages = _messages
+          .where((item) => _value(item, ['client_msg_no']) != target)
+          .toList(growable: false);
+      _selectedClientMsgNo = '';
+      _selectedMessageSeq = 0;
+      _selectedPayload = const {};
       _message = _friendlyResult(result, successText: '消息已撤回');
     });
   }
@@ -3279,6 +3295,18 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       final result = await widget.controller.burnAfterRead(
         _selectedClientMsgNo,
       );
+      final target = _selectedClientMsgNo;
+      await widget.controller.deleteLocalMessageOnly(
+        targetClientMsgNo: target,
+        channelId: widget.channelId,
+        channelType: widget.channelType,
+      );
+      _messages = _messages
+          .where((item) => _value(item, ['client_msg_no']) != target)
+          .toList(growable: false);
+      _selectedClientMsgNo = '';
+      _selectedMessageSeq = 0;
+      _selectedPayload = const {};
       _message = _friendlyResult(result, successText: '已触发阅后即焚');
     });
   }
@@ -3390,6 +3418,76 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       _burnAfterRead = false;
       _burnSeconds = 0;
     });
+  }
+
+  bool _isMessageDeleteEvent(String source) {
+    return source == 'burn_after_read_cmd' || source == 'recall_cmd';
+  }
+
+  void _scheduleBurnAfterReadForMessages(List<Map<String, Object?>> messages) {
+    for (final item in messages) {
+      if (_isSelfMessage(item)) {
+        continue;
+      }
+      final clientMsgNo = _value(item, ['client_msg_no']);
+      if (clientMsgNo.isEmpty ||
+          _burnTriggeredClientMsgNos.contains(clientMsgNo)) {
+        continue;
+      }
+      final burn = _asObjectMap(
+        _asObjectMap(item['payload'])['burn_after_read'],
+      );
+      if (!_boolValue(burn['enabled'])) {
+        continue;
+      }
+      _burnTriggeredClientMsgNos.add(clientMsgNo);
+      final seconds = _intValue(burn, ['seconds']);
+      Future<void>.delayed(Duration(seconds: seconds > 0 ? seconds : 1), () {
+        return _triggerBurnAfterRead(clientMsgNo);
+      });
+    }
+  }
+
+  Future<void> _triggerBurnAfterRead(String clientMsgNo) async {
+    if (!mounted ||
+        !_messages.any(
+          (item) => _value(item, ['client_msg_no']) == clientMsgNo,
+        )) {
+      return;
+    }
+    try {
+      await widget.controller.burnAfterRead(clientMsgNo);
+      await widget.controller.deleteLocalMessageOnly(
+        targetClientMsgNo: clientMsgNo,
+        channelId: widget.channelId,
+        channelType: widget.channelType,
+      );
+      if (mounted) {
+        setState(() {
+          _messages = _messages
+              .where((item) => _value(item, ['client_msg_no']) != clientMsgNo)
+              .toList(growable: false);
+        });
+      }
+    } catch (error, stackTrace) {
+      _burnTriggeredClientMsgNos.remove(clientMsgNo);
+      AppLogger.warn(
+        'ui',
+        'burn after read trigger failed',
+        data: {
+          'client_msg_no': clientMsgNo,
+          'error': error.toString(),
+          'stack': stackTrace.toString(),
+        },
+      );
+    }
+  }
+
+  bool _isSelfMessage(Map<String, Object?> item) {
+    final value = item['is_me'];
+    return value == true ||
+        value?.toString() == '1' ||
+        value?.toString() == 'true';
   }
 
   String _optionText() {

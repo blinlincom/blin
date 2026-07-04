@@ -478,6 +478,19 @@ class SessionController extends ChangeNotifier {
     return result;
   }
 
+  Future<void> deleteLocalMessageOnly({
+    required String targetClientMsgNo,
+    required String channelId,
+    required int channelType,
+  }) async {
+    await _im.deleteLocalMessage(
+      channelID: channelId,
+      channelType: channelType,
+      clientMsgNo: targetClientMsgNo,
+    );
+    notifyListeners();
+  }
+
   Future<Map<String, Object?>> readReceipt({
     required String targetClientMsgNo,
     int messageSeq = 0,

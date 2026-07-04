@@ -1354,6 +1354,19 @@ class BusinessImService extends ChangeNotifier {
       );
       return;
     }
+    if (_handleRecallPayload(payload, channelId, channelType)) {
+      unawaited(_ackGatewayFrame(frame));
+      AppLogger.info(
+        'im',
+        'gateway recall message handled',
+        data: {
+          'client_msg_no': frame.clientMsgNo,
+          'channel_id': channelId,
+          'channel_type': channelType,
+        },
+      );
+      return;
+    }
     if (_handleCommandPayload(payload, channelId, channelType)) {
       unawaited(_ackGatewayFrame(frame));
       AppLogger.info(
@@ -1976,6 +1989,43 @@ class BusinessImService extends ChangeNotifier {
       return false;
     }
     return ChatContentTypes.displayable.contains(type);
+  }
+
+  bool _handleRecallPayload(
+    Map<String, Object?> payload,
+    String channelId,
+    int channelType,
+  ) {
+    if (payload['protocol']?.toString() != 'blin.chat.v1' ||
+        payload['content_type']?.toString() != 'recall') {
+      return false;
+    }
+    final chat = _requireChat();
+    final target = _value(payload, ['target_client_msg_no', 'client_msg_no']);
+    if (target.isNotEmpty) {
+      _cache.deleteMessage(
+        uid: chat.uid,
+        channelId: channelId,
+        channelType: channelType,
+        clientMsgNo: target,
+      );
+      _markMessageChannel(
+        source: 'recall_cmd',
+        channelId: channelId,
+        channelType: channelType,
+      );
+      _publishMessageEvent(
+        source: 'recall_cmd',
+        channelId: channelId,
+        channelType: channelType,
+        message: <String, Object?>{
+          'client_msg_no': target,
+          'content_type': 'recall',
+          'cmd': 'recall',
+        },
+      );
+    }
+    return true;
   }
 
   bool _handleCommandPayload(
