@@ -1,18 +1,19 @@
 import 'dart:async';
+import 'dart:collection';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
+import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 
 import '../core/api_client.dart';
 import '../core/app_config.dart';
 import '../core/app_logger.dart';
 import '../core/models.dart';
+import 'gateway_stream_client.dart';
 import 'im_cache_store.dart';
 import 'im_message_types.dart';
-import 'tcp_im_crypto.dart';
-import 'tcp_im_proto.dart';
 
 class BusinessImService extends ChangeNotifier {
   BusinessImService({required ApiClient api, required ImCacheStore cache})
@@ -27,20 +28,19 @@ class BusinessImService extends ChangeNotifier {
 
   UserSession? _session;
   String _device = '';
-  Socket? _socket;
-  WebSocket? _webSocket;
-  int _socketEpoch = 0;
-  TcpImCrypto _crypto = TcpImCrypto();
-  TcpImProto _proto = TcpImProto();
-  Uint8List _frameBuffer = Uint8List(0);
-  Timer? _tcpHeartbeatTimer;
+  GatewayStreamClient? _gatewayStream;
+  int _gatewayEpoch = 0;
+  String _gatewayTicket = '';
+  String _gatewayAckUrl = '';
+  DateTime? _gatewayTicketExpiresAt;
+  final Queue<GatewayFrame> _gatewayAckQueue = Queue<GatewayFrame>();
   Timer? _reconnectTimer;
   bool _started = false;
   bool _manualStop = false;
   bool _connecting = false;
   bool _foreground = true;
   bool _closingForBackground = false;
-  int _missedPongCount = 0;
+  bool _gatewayAckDraining = false;
   int _reconnectAttempt = 0;
   int _conversationVersion = 0;
   String _statusText = '未连接';
@@ -166,14 +166,13 @@ class BusinessImService extends ChangeNotifier {
       data: {
         'uid': chat.uid,
         'device': device,
-        'tcp_addr': chat.route.tcpAddr,
-        'wss_addr': chat.route.wssAddr,
-        'ws_addr': chat.route.wsAddr,
-        'websocket_addr': chat.route.websocketAddr,
+        'gateway_stream_addr': chat.stream?.httpsStreamAddr.isNotEmpty == true
+            ? chat.stream?.httpsStreamAddr
+            : chat.route.httpsStreamAddr,
       },
     );
     unawaited(syncConversationsFromServer());
-    await _connectTcp();
+    await _connectRealtime();
   }
 
   Future<void> stop({bool logout = false}) async {
@@ -182,21 +181,15 @@ class BusinessImService extends ChangeNotifier {
     _connecting = false;
     _reconnectTimer?.cancel();
     _reconnectTimer = null;
-    _stopTcpHeartbeat();
-    final socket = _socket;
-    final webSocket = _webSocket;
-    _socket = null;
-    _webSocket = null;
-    _socketEpoch++;
-    if (webSocket != null) {
-      await webSocket
-          .close(WebSocketStatus.normalClosure)
-          .catchError((Object _) => null);
-    }
-    if (socket != null) {
-      await socket.close().catchError((Object _) => socket);
-      socket.destroy();
-    }
+    final gatewayStream = _gatewayStream;
+    _gatewayStream = null;
+    _gatewayTicket = '';
+    _gatewayAckUrl = '';
+    _gatewayTicketExpiresAt = null;
+    _gatewayAckQueue.clear();
+    _gatewayAckDraining = false;
+    _gatewayEpoch++;
+    await gatewayStream?.close().catchError((Object _) => null);
     if (logout) {
       _session = null;
       _latestConversations = const [];
@@ -213,9 +206,8 @@ class BusinessImService extends ChangeNotifier {
     _foreground = false;
     _reconnectTimer?.cancel();
     _reconnectTimer = null;
-    _stopTcpHeartbeat();
     _closingForBackground = true;
-    unawaited(_closeSocketOnly());
+    unawaited(_closeRealtimeOnly());
   }
 
   void resumeConnection() {
@@ -223,8 +215,8 @@ class BusinessImService extends ChangeNotifier {
       return;
     }
     _foreground = true;
-    if (_socket == null && _webSocket == null && !_connecting) {
-      unawaited(_connectTcp());
+    if (_gatewayStream == null && !_connecting) {
+      unawaited(_connectRealtime());
     }
   }
 
@@ -1091,411 +1083,363 @@ class BusinessImService extends ChangeNotifier {
         error is IOException;
   }
 
-  Future<void> _connectTcp() async {
+  Future<void> _connectRealtime() async {
     if (_manualStop || _connecting || !_foreground) {
       return;
     }
-    final chat = _requireChat();
-    final endpoint = _resolveRealtimeEndpoint(chat.route);
-    if (endpoint == null) {
-      _lastError = 'IM 实时连接地址为空';
-      _setStatus('连接失败');
-      AppLogger.error('im', 'missing realtime address');
-      return;
-    }
     _connecting = true;
-    _setStatus('连接中');
+    _setStatus(_reconnectAttempt > 0 ? '重连中' : '连接中');
     _reconnectTimer?.cancel();
     _reconnectTimer = null;
-    _stopTcpHeartbeat();
     _closingForBackground = false;
-    await _closeSocketOnly();
-    _crypto = TcpImCrypto();
-    _proto = TcpImProto();
-    _frameBuffer = Uint8List(0);
+    await _closeRealtimeOnly();
     try {
+      final chat = await _refreshGatewayChat();
+      final stream = chat.stream;
+      final openUrl = _gatewayOpenUrl(chat);
+      if (stream == null || stream.ticket.isEmpty || openUrl.isEmpty) {
+        throw ApiException('Gateway 实时连接材料缺失');
+      }
+      final uri = Uri.parse(openUrl);
+      final client = GatewayStreamClient();
+      final epoch = ++_gatewayEpoch;
+      final lastCursor = _initialGatewayCursor(chat, stream);
+      _gatewayStream = client;
+      _gatewayTicket = stream.ticket;
+      _gatewayTicketExpiresAt = DateTime.now().add(
+        Duration(seconds: max(30, stream.expireIn)),
+      );
+      _gatewayAckUrl = _gatewayAckUrlFor(openUrl);
       AppLogger.info(
         'im',
-        'realtime connect start',
-        data: {'transport': endpoint.transport, 'addr': endpoint.logAddress},
+        'gateway stream connect start',
+        data: {'addr': openUrl, 'cursor': lastCursor},
       );
-      if (endpoint.isWebSocket) {
-        final webSocket = await WebSocket.connect(
-          endpoint.uri.toString(),
-        ).timeout(const Duration(seconds: 6));
-        if (_manualStop || !_foreground) {
-          await webSocket
-              .close(WebSocketStatus.normalClosure)
-              .catchError((Object _) => null);
-          _connecting = false;
-          if (!_foreground) {
-            _setStatus('未连接');
+      await client.connect(
+        uri: uri,
+        ticket: stream.ticket,
+        lastCursor: lastCursor,
+        onFrame: (frame) {
+          if (epoch != _gatewayEpoch) {
+            return;
           }
-          return;
-        }
-        final epoch = ++_socketEpoch;
-        _webSocket = webSocket;
-        _connecting = false;
-        webSocket.listen(
-          (Object? event) {
-            if (epoch != _socketEpoch) {
-              return;
-            }
-            if (event is List<int>) {
-              _onTcpData(Uint8List.fromList(event));
-              return;
-            }
-            if (event is String) {
-              _onTcpData(Uint8List.fromList(utf8.encode(event)));
-            }
-          },
-          onError: (Object error, StackTrace stackTrace) {
-            if (epoch != _socketEpoch) {
-              return;
-            }
-            AppLogger.error(
-              'im',
-              'websocket error',
-              error: error,
-              stackTrace: stackTrace,
-              data: {'transport': endpoint.transport},
-            );
-            _handleTcpClosed('websocket_error', error.toString());
-          },
-          onDone: () {
-            if (epoch != _socketEpoch) {
-              return;
-            }
-            _handleTcpClosed('websocket_done', '');
-          },
-          cancelOnError: true,
-        );
-      } else {
-        final socket = await Socket.connect(
-          endpoint.uri.host,
-          endpoint.uri.port,
-          timeout: const Duration(seconds: 6),
-        );
-        if (_manualStop || !_foreground) {
-          await socket.close().catchError((Object _) => socket);
-          socket.destroy();
-          _connecting = false;
-          if (!_foreground) {
-            _setStatus('未连接');
+          _handleGatewayFrame(frame);
+        },
+        onClosed: (reason, error) {
+          if (epoch != _gatewayEpoch) {
+            return;
           }
-          return;
-        }
-        final epoch = ++_socketEpoch;
-        _socket = socket;
+          _handleRealtimeClosed(reason, error?.toString());
+        },
+      );
+      if (_manualStop || !_foreground) {
+        await client.close().catchError((Object _) => null);
         _connecting = false;
-        socket.listen(
-          _onTcpData,
-          onError: (Object error, StackTrace stackTrace) {
-            if (epoch != _socketEpoch) {
-              return;
-            }
-            AppLogger.error(
-              'im',
-              'tcp socket error',
-              error: error,
-              stackTrace: stackTrace,
-            );
-            _handleTcpClosed('socket_error', error.toString());
-          },
-          onDone: () {
-            if (epoch != _socketEpoch) {
-              return;
-            }
-            _handleTcpClosed('socket_done', '');
-          },
-          cancelOnError: true,
-        );
+        if (!_foreground) {
+          _setStatus('未连接');
+        }
+        return;
       }
       _connecting = false;
-      _sendConnectPacket(chat);
+      _reconnectAttempt = 0;
+      _lastError = null;
+      _setStatus('已连接');
+      unawaited(syncConversationsFromServer());
+      AppLogger.info(
+        'im',
+        'gateway stream connected',
+        data: {'addr': openUrl, 'cursor': lastCursor},
+      );
     } catch (error, stackTrace) {
       _connecting = false;
+      await _closeRealtimeOnly();
       _lastError = error.toString();
       _setStatus('连接失败');
       AppLogger.error(
         'im',
-        'realtime connect failed',
+        'gateway stream connect failed',
         error: error,
         stackTrace: stackTrace,
-        data: {'transport': endpoint.transport, 'addr': endpoint.logAddress},
       );
+      if (error is ApiException && (error.code == 401 || error.code == 403)) {
+        _started = false;
+        return;
+      }
       _scheduleReconnect('connect_failed');
     }
   }
 
-  void _sendConnectPacket(ChatSession chat) {
-    final publicKey = _crypto.initClientKey();
-    final packet = TcpConnectPacket(
-      version: _proto.protoVersion,
-      deviceFlag: chat.deviceFlag,
-      deviceId: chat.device.isNotEmpty ? chat.device : _device,
-      uid: chat.uid,
-      token: chat.token,
-      clientTimestamp: DateTime.now().millisecondsSinceEpoch,
-      clientKey: base64Encode(publicKey),
-    );
-    _sendPacket(packet);
-    AppLogger.info(
-      'im',
-      'tcp connect packet sent',
-      data: {'uid': chat.uid, 'device_flag': chat.deviceFlag},
-    );
+  Future<ChatSession> _refreshGatewayChat() async {
+    final session = _requireSession();
+    final chat = await _api.connectIm(session: session, device: _device);
+    _session = session.copyWith(chat: chat);
+    return chat;
   }
 
-  void _onTcpData(Uint8List data) {
-    _missedPongCount = 0;
-    AppLogger.info('im', 'tcp data received', data: {'bytes': data.length});
-    _frameBuffer = Uint8List.fromList([..._frameBuffer, ...data]);
-    while (_frameBuffer.isNotEmpty) {
-      final length = TcpImProto.frameLength(_frameBuffer);
-      if (length == 0 || _frameBuffer.length < length) {
-        return;
-      }
-      final frame = _frameBuffer.sublist(0, length);
-      _frameBuffer = _frameBuffer.sublist(length);
-      AppLogger.info(
-        'im',
-        'tcp frame ready',
-        data: {
-          'bytes': frame.length,
-          'packet_type': TcpPacketType.values[frame[0] >> 4].name,
-        },
-      );
-      _decodePacket(frame);
+  String _gatewayOpenUrl(ChatSession chat) {
+    return (chat.stream?.httpsStreamAddr.isNotEmpty == true
+            ? chat.stream!.httpsStreamAddr
+            : chat.route.httpsStreamAddr)
+        .trim();
+  }
+
+  String _initialGatewayCursor(ChatSession chat, GatewayStreamSession stream) {
+    final local = _cache.readGatewayCursor(uid: chat.uid, device: _device);
+    if (_isValidGatewayCursor(local)) {
+      return local;
     }
+    if (_isValidGatewayCursor(stream.lastCursor)) {
+      return stream.lastCursor;
+    }
+    return '0-0';
   }
 
-  void _decodePacket(Uint8List data) {
-    try {
-      final packet = _proto.decode(data);
-      switch (packet.packetType) {
-        case TcpPacketType.connack:
-          _handleConnack(packet as TcpConnackPacket);
-          break;
-        case TcpPacketType.recv:
-          _handleRecv(packet as TcpRecvPacket);
-          break;
-        case TcpPacketType.sendack:
-          _handleSendAck(packet as TcpSendAckPacket);
-          break;
-        case TcpPacketType.disconnect:
-          final disconnect = packet as TcpDisconnectPacket;
-          _lastError = disconnect.reason.isEmpty
-              ? '服务端断开连接(${disconnect.reasonCode})'
-              : disconnect.reason;
-          _setStatus('已断开');
-          _handleTcpClosed('disconnect', _lastError);
-          break;
-        case TcpPacketType.pong:
-          _missedPongCount = 0;
-          AppLogger.info('im', 'tcp pong');
-          break;
-        case TcpPacketType.ping:
-          _sendPacket(TcpPongPacket());
-          break;
-        case TcpPacketType.reserved:
-        case TcpPacketType.connect:
-        case TcpPacketType.send:
-        case TcpPacketType.recvack:
-          break;
+  bool _isValidGatewayCursor(String value) {
+    return RegExp(r'^(\d+-\d+|0-0)$').hasMatch(value.trim());
+  }
+
+  String _gatewayAckUrlFor(String openUrl) {
+    final uri = Uri.parse(openUrl);
+    var path = uri.path;
+    while (path.length > 1 && path.endsWith('/')) {
+      path = path.substring(0, path.length - 1);
+    }
+    path = path.endsWith('/open')
+        ? '${path.substring(0, path.length - 5)}/ack'
+        : '$path/ack';
+    return uri.replace(path: path).toString();
+  }
+
+  void _handleGatewayFrame(GatewayFrame frame) {
+    if (frame.isHeartbeat) {
+      if (_statusText != '已连接') {
+        _setStatus('已连接');
       }
-    } catch (error, stackTrace) {
+      return;
+    }
+    if (frame.isKick) {
+      _lastError = frame.reason.isEmpty ? 'Gateway 已断开' : frame.reason;
+      _handleRealtimeClosed('gateway_kick', _lastError);
+      return;
+    }
+    if (frame.isError) {
+      _lastError = frame.reason.isEmpty ? 'Gateway 返回错误' : frame.reason;
+      _handleRealtimeClosed('gateway_error', _lastError);
+      return;
+    }
+    if (!frame.isMessage) {
+      AppLogger.info('im', 'gateway frame ignored', data: {'type': frame.type});
+      return;
+    }
+    _handleGatewayMessage(frame);
+  }
+
+  void _handleGatewayMessage(GatewayFrame frame) {
+    final chat = _requireChat();
+    final payload = frame.payload;
+    var channelType = frame.channelType > 0
+        ? frame.channelType
+        : _intValue(payload, [
+            'channel_type',
+          ], fallback: chat.channelTypePerson);
+    var channelId = frame.channelId.isNotEmpty
+        ? frame.channelId
+        : _value(payload, ['channel_id', 'group_id', 'to_uid', 'receiver_uid']);
+    if (channelType == chat.channelTypePerson) {
+      channelId = _gatewayPrivateChannelId(channelId, payload);
+    }
+    channelId = _canonicalChannelId(channelId, channelType);
+    if (channelId.isEmpty || channelType <= 0) {
       AppLogger.error(
         'im',
-        'tcp packet decode failed',
-        error: error,
-        stackTrace: stackTrace,
+        'gateway message missing channel',
+        data: {
+          'client_msg_no': frame.clientMsgNo,
+          'channel_id': frame.channelId,
+          'channel_type': frame.channelType,
+          'cursor': frame.cursor,
+        },
       );
-    }
-  }
-
-  void _handleConnack(TcpConnackPacket packet) {
-    if (packet.reasonCode != 1) {
-      _lastError = 'IM 握手失败(${packet.reasonCode})';
-      _setStatus('连接失败');
-      _scheduleReconnect('connack_failed');
       return;
     }
-    _crypto.setServerKeyAndSalt(packet.serverKey, packet.salt);
-    _reconnectAttempt = 0;
-    _lastError = null;
-    _setStatus('已连接');
-    _startTcpHeartbeat();
-    unawaited(syncConversationsFromServer());
-    AppLogger.info(
-      'im',
-      'tcp connected',
-      data: {'node_id': packet.nodeId, 'proto': packet.serviceProtoVersion},
-    );
-  }
-
-  void _handleRecv(TcpRecvPacket packet) {
-    final decrypted = _decryptRecvPayload(packet);
-    if (decrypted == null) {
-      return;
-    }
-    packet.payload = decrypted;
-    final chat = _requireChat();
-    var channelId = packet.channelId;
-    if (packet.channelType == chat.channelTypePerson &&
-        _isCurrentUserChannel(packet.channelId) &&
-        packet.fromUid.isNotEmpty) {
-      channelId = packet.fromUid;
-    }
-    channelId = _canonicalChannelId(channelId, packet.channelType);
-    final payload = _decodeBusinessPayload(packet.payload);
-    if (_handleCommandPayload(payload, channelId, packet.channelType)) {
-      _sendRecvAck(packet);
+    if (_handleCommandPayload(payload, channelId, channelType)) {
+      unawaited(_ackGatewayFrame(frame));
       AppLogger.info(
         'im',
-        'tcp command message handled',
+        'gateway command message handled',
         data: {
-          'client_msg_no': packet.clientMsgNo,
+          'client_msg_no': frame.clientMsgNo,
           'channel_id': channelId,
-          'channel_type': packet.channelType,
+          'channel_type': channelType,
           'cmd': payload['cmd']?.toString() ?? '',
         },
       );
       return;
     }
-    final message = _messageFromTcp(packet, channelId, decodedPayload: payload);
+    final message = _messageFromGatewayFrame(
+      frame,
+      channelId,
+      channelType,
+      payload,
+    );
     if (message.isEmpty) {
-      _sendRecvAck(packet);
+      unawaited(_ackGatewayFrame(frame));
       AppLogger.info(
         'im',
-        'tcp non-chat message ignored',
+        'gateway non-chat message ignored',
         data: {
-          'client_msg_no': packet.clientMsgNo,
+          'client_msg_no': frame.clientMsgNo,
           'channel_id': channelId,
-          'channel_type': packet.channelType,
+          'channel_type': channelType,
         },
       );
       return;
     }
-    _upsertMessage(channelId, packet.channelType, message);
+    _upsertMessage(channelId, channelType, message);
     _upsertConversationFromMessage(message);
     _publishMessageEvent(
-      source: 'tcp_recv',
+      source: 'gateway_recv',
       channelId: channelId,
-      channelType: packet.channelType,
+      channelType: channelType,
       message: message,
     );
     _markMessageChannel(
-      source: 'tcp_recv',
+      source: 'gateway_recv',
       channelId: channelId,
-      channelType: packet.channelType,
+      channelType: channelType,
     );
-    _sendRecvAck(packet);
+    unawaited(_ackGatewayFrame(frame));
     AppLogger.info(
       'im',
-      'tcp message received',
+      'gateway message received',
       data: {
-        'client_msg_no': packet.clientMsgNo,
+        'client_msg_no': frame.clientMsgNo,
         'channel_id': channelId,
-        'channel_type': packet.channelType,
-        'from_uid': packet.fromUid,
+        'channel_type': channelType,
+        'cursor': frame.cursor,
       },
     );
   }
 
-  String? _decryptRecvPayload(TcpRecvPacket packet) {
-    final verifySource = StringBuffer()
-      ..write(packet.messageId)
-      ..write(packet.messageSeq)
-      ..write(packet.clientMsgNo)
-      ..write(packet.messageTime)
-      ..write(packet.fromUid)
-      ..write(packet.channelId)
-      ..write(packet.channelType)
-      ..write(packet.payload);
-    final localMsgKey = _crypto.md5Text(
-      _crypto.aesEncrypt(verifySource.toString()),
+  String _gatewayPrivateChannelId(
+    String channelId,
+    Map<String, Object?> payload,
+  ) {
+    final fromUid = _value(payload, ['from_uid', 'sender_uid']);
+    final toUid = _value(payload, ['to_uid', 'receiver_uid', 'target_uid']);
+    final senderId = _value(payload, [
+      'sender_id',
+      'from_id',
+      'user_id',
+      'userid',
+    ]);
+    final receiverId = _value(payload, ['receiver_id', 'peer_id', 'friend_id']);
+    final fromSelf = _isCurrentUserMessage(
+      senderId: senderId,
+      senderUid: fromUid,
     );
-    if (packet.msgKey.isNotEmpty && packet.msgKey != localMsgKey) {
-      AppLogger.warn(
-        'im',
-        'tcp message key mismatch',
-        data: {'client_msg_no': packet.clientMsgNo},
-      );
-      return null;
+    if (fromSelf && toUid.isNotEmpty) {
+      return toUid;
     }
+    if (fromSelf && receiverId.isNotEmpty) {
+      return _uidFromUserId(receiverId);
+    }
+    if ((channelId.isEmpty || _isCurrentUserChannel(channelId)) &&
+        fromUid.isNotEmpty) {
+      return fromUid;
+    }
+    return channelId;
+  }
+
+  Future<void> _ackGatewayFrame(GatewayFrame frame) async {
+    if (!_isValidGatewayCursor(frame.cursor)) {
+      return;
+    }
+    _gatewayAckQueue.add(frame);
+    if (_gatewayAckDraining) {
+      return;
+    }
+    _gatewayAckDraining = true;
     try {
-      return _crypto.aesDecrypt(packet.payload);
+      while (_gatewayAckQueue.isNotEmpty) {
+        final current = _gatewayAckQueue.first;
+        final success = await _ackGatewayFrameOnce(current);
+        if (!success) {
+          _handleRealtimeClosed('gateway_ack_failed', 'Gateway ACK 失败');
+          return;
+        }
+        _gatewayAckQueue.removeFirst();
+      }
+    } finally {
+      _gatewayAckDraining = false;
+    }
+  }
+
+  Future<bool> _ackGatewayFrameOnce(GatewayFrame frame) async {
+    final chat = _requireChat();
+    try {
+      var ticket = await _ensureGatewayAckTicket();
+      try {
+        await _api.ackGatewayCursor(
+          ackUrl: _gatewayAckUrl,
+          ticket: ticket,
+          lastCursor: frame.cursor,
+          clientMsgNos: [if (frame.clientMsgNo.isNotEmpty) frame.clientMsgNo],
+        );
+      } on ApiException catch (error) {
+        if (error.code != 401) {
+          rethrow;
+        }
+        ticket = await _ensureGatewayAckTicket(force: true);
+        await _api.ackGatewayCursor(
+          ackUrl: _gatewayAckUrl,
+          ticket: ticket,
+          lastCursor: frame.cursor,
+          clientMsgNos: [if (frame.clientMsgNo.isNotEmpty) frame.clientMsgNo],
+        );
+      }
+      _cache.writeGatewayCursor(
+        uid: chat.uid,
+        device: _device,
+        cursor: frame.cursor,
+      );
+      return true;
     } catch (error, stackTrace) {
       AppLogger.error(
         'im',
-        'tcp payload decrypt failed',
+        'gateway ack failed',
         error: error,
         stackTrace: stackTrace,
-        data: {'client_msg_no': packet.clientMsgNo},
+        data: {'cursor': frame.cursor, 'client_msg_no': frame.clientMsgNo},
       );
-      return null;
+      return false;
     }
   }
 
-  void _handleSendAck(TcpSendAckPacket packet) {
-    AppLogger.info(
-      'im',
-      'tcp sendack received',
-      data: {
-        'client_seq': packet.clientSeq,
-        'message_seq': packet.messageSeq,
-        'reason_code': packet.reasonCode,
-      },
+  Future<String> _ensureGatewayAckTicket({bool force = false}) async {
+    final expiresAt = _gatewayTicketExpiresAt;
+    if (!force &&
+        _gatewayTicket.isNotEmpty &&
+        _gatewayAckUrl.isNotEmpty &&
+        expiresAt != null &&
+        expiresAt.isAfter(DateTime.now().add(const Duration(seconds: 15)))) {
+      return _gatewayTicket;
+    }
+    final chat = await _refreshGatewayChat();
+    final stream = chat.stream;
+    final openUrl = _gatewayOpenUrl(chat);
+    if (stream == null || stream.ticket.isEmpty || openUrl.isEmpty) {
+      throw ApiException('Gateway ACK ticket 缺失');
+    }
+    _gatewayTicket = stream.ticket;
+    _gatewayTicketExpiresAt = DateTime.now().add(
+      Duration(seconds: max(30, stream.expireIn)),
     );
+    _gatewayAckUrl = _gatewayAckUrlFor(openUrl);
+    return _gatewayTicket;
   }
 
-  void _sendRecvAck(TcpRecvPacket packet) {
-    if (packet.header.noPersist) {
-      return;
-    }
-    final ack =
-        TcpRecvAckPacket(
-            messageId: packet.messageId,
-            messageSeq: packet.messageSeq,
-          )
-          ..header.noPersist = packet.header.noPersist
-          ..header.showUnread = packet.header.showUnread
-          ..header.syncOnce = packet.header.syncOnce;
-    _sendPacket(ack);
-  }
-
-  void _sendPacket(TcpPacket packet) {
-    final bytes = _proto.encode(packet);
-    final webSocket = _webSocket;
-    if (webSocket != null) {
-      webSocket.add(bytes);
-      return;
-    }
-    _socket?.add(bytes);
-  }
-
-  void _startTcpHeartbeat() {
-    _stopTcpHeartbeat();
-    _tcpHeartbeatTimer = Timer.periodic(const Duration(seconds: 30), (_) {
-      if (_missedPongCount >= 2) {
-        AppLogger.warn('im', 'tcp heartbeat timeout');
-        _handleTcpClosed('heartbeat_timeout', 'TCP 心跳超时');
-        return;
-      }
-      _missedPongCount++;
-      _sendPacket(TcpPingPacket());
-      AppLogger.info('im', 'tcp ping');
-    });
-  }
-
-  void _stopTcpHeartbeat() {
-    _tcpHeartbeatTimer?.cancel();
-    _tcpHeartbeatTimer = null;
-    _missedPongCount = 0;
-  }
-
-  void _handleTcpClosed(String source, String? reason) {
+  void _handleRealtimeClosed(String source, String? reason) {
     if (_manualStop) {
       return;
     }
@@ -1504,8 +1448,7 @@ class BusinessImService extends ChangeNotifier {
       _setStatus('未连接');
       return;
     }
-    _stopTcpHeartbeat();
-    unawaited(_closeSocketOnly());
+    unawaited(_closeRealtimeOnly());
     _lastError = reason?.isEmpty == false ? reason : _lastError;
     _setStatus('重连中');
     _scheduleReconnect(source);
@@ -1515,41 +1458,39 @@ class BusinessImService extends ChangeNotifier {
     if (!_started || _manualStop || !_foreground) {
       AppLogger.info(
         'im',
-        'skip tcp reconnect while backgrounded',
+        'skip gateway reconnect while backgrounded',
         data: {'source': source},
       );
       return;
     }
     _reconnectTimer?.cancel();
-    final seconds = min(20, 2 + _reconnectAttempt * 2);
+    final exponent = min(_reconnectAttempt, 6);
+    final baseMs = min<int>(60000, 1000 * (1 << exponent));
+    final jitterMs = _random.nextInt(max(1, (baseMs * 0.3).round()));
+    final delayMs = baseMs + jitterMs;
     _reconnectAttempt++;
     AppLogger.warn(
       'im',
-      'tcp reconnect scheduled',
+      'gateway reconnect scheduled',
       data: {
         'source': source,
-        'seconds': seconds,
+        'delay_ms': delayMs,
         'attempt': _reconnectAttempt,
       },
     );
-    _reconnectTimer = Timer(Duration(seconds: seconds), _connectTcp);
+    _reconnectTimer = Timer(Duration(milliseconds: delayMs), _connectRealtime);
   }
 
-  Future<void> _closeSocketOnly() async {
-    final socket = _socket;
-    final webSocket = _webSocket;
-    _socket = null;
-    _webSocket = null;
-    _socketEpoch++;
-    if (webSocket != null) {
-      await webSocket
-          .close(WebSocketStatus.normalClosure)
-          .catchError((Object _) => null);
-    }
-    if (socket != null) {
-      await socket.close().catchError((Object _) => socket);
-      socket.destroy();
-    }
+  Future<void> _closeRealtimeOnly() async {
+    final gatewayStream = _gatewayStream;
+    _gatewayStream = null;
+    _gatewayTicket = '';
+    _gatewayAckUrl = '';
+    _gatewayTicketExpiresAt = null;
+    _gatewayAckQueue.clear();
+    _gatewayAckDraining = false;
+    _gatewayEpoch++;
+    await gatewayStream?.close().catchError((Object _) => null);
   }
 
   Map<String, Object?> _normalizeConversation(Map<String, Object?> item) {
@@ -1709,31 +1650,41 @@ class BusinessImService extends ChangeNotifier {
     };
   }
 
-  Map<String, Object?> _messageFromTcp(
-    TcpRecvPacket packet,
-    String channelId, {
-    Map<String, Object?>? decodedPayload,
-  }) {
-    final payload = decodedPayload ?? _decodeBusinessPayload(packet.payload);
+  Map<String, Object?> _messageFromGatewayFrame(
+    GatewayFrame frame,
+    String channelId,
+    int channelType,
+    Map<String, Object?> payload,
+  ) {
     if (!_isDisplayableChatPayload(payload)) {
       return const <String, Object?>{};
     }
-    final canonicalChannelId = _canonicalChannelId(
-      channelId,
-      packet.channelType,
-    );
-    final receiverId = packet.channelType == _requireChat().channelTypePerson
+    final canonicalChannelId = _canonicalChannelId(channelId, channelType);
+    final receiverId = channelType == _requireChat().channelTypePerson
         ? _receiverIdFromChannel(canonicalChannelId)
         : '';
     final fromUser = _userFromPayload(payload);
+    final fromUid = _value(payload, ['from_uid', 'sender_uid']);
+    final clientMsgNo = frame.clientMsgNo.isNotEmpty
+        ? frame.clientMsgNo
+        : _value(
+            payload,
+            ['client_msg_no'],
+            fallback: frame.cursor.isNotEmpty ? 'gateway_${frame.cursor}' : '',
+          );
+    final messageTime = frame.timestamp > 0
+        ? frame.timestamp
+        : _intValue(payload, ['timestamp', 'create_time', 'client_timestamp']);
     return <String, Object?>{
-      'message_id': packet.messageId.toString(),
-      'client_msg_no': packet.clientMsgNo,
-      'message_seq': packet.messageSeq,
+      'message_id': frame.messageId,
+      'client_msg_no': clientMsgNo,
+      'message_seq': frame.messageSeq > 0
+          ? frame.messageSeq
+          : _intValue(payload, ['message_seq']),
       'channel_id': canonicalChannelId,
-      'channel_type': packet.channelType,
+      'channel_type': channelType,
       if (receiverId.isNotEmpty) 'receiver_id': receiverId,
-      'from_uid': packet.fromUid,
+      'from_uid': fromUid,
       'is_me': _isCurrentUserMessage(
         senderId: _value(payload, [
           'sender_id',
@@ -1744,19 +1695,15 @@ class BusinessImService extends ChangeNotifier {
         senderUid: _value(payload, [
           'sender_uid',
           'from_uid',
-        ], fallback: packet.fromUid),
+        ], fallback: fromUid),
       ),
       'content': _payloadContent(payload),
       'content_type': payload['content_type']?.toString() ?? '',
       'payload': payload,
-      'timestamp': _formatTimestamp(packet.messageTime),
+      'timestamp': _formatTimestamp(messageTime),
       'status': 'sent',
       if (fromUser.isNotEmpty) 'from_user': fromUser,
-      'header': {
-        'no_persist': packet.header.noPersist,
-        'show_unread': packet.header.showUnread,
-        'sync_once': packet.header.syncOnce,
-      },
+      if (frame.cursor.isNotEmpty) 'gateway_cursor': frame.cursor,
     };
   }
 
@@ -1886,7 +1833,7 @@ class BusinessImService extends ChangeNotifier {
     required String timestamp,
   }) {
     final source = '$channelType|$channelId|$messageSeq|$timestamp|$content';
-    return 'conversation_tail_${_crypto.md5Text(source)}';
+    return 'conversation_tail_${_md5Text(source)}';
   }
 
   Map<String, Object?> _localOutgoingMessage({
@@ -1912,27 +1859,6 @@ class BusinessImService extends ChangeNotifier {
       ),
       'status': 'sending',
     };
-  }
-
-  Map<String, Object?> _decodeBusinessPayload(String raw) {
-    final text = raw.trim();
-    if (text.isEmpty) {
-      return const <String, Object?>{};
-    }
-    final direct = _tryJsonMap(text);
-    if (direct.isNotEmpty) {
-      return direct;
-    }
-    try {
-      final decoded = utf8.decode(base64Decode(text));
-      final base64Json = _tryJsonMap(decoded);
-      if (base64Json.isNotEmpty) {
-        return base64Json;
-      }
-      return {'content': decoded};
-    } catch (_) {
-      return {'content': text};
-    }
   }
 
   bool _isDisplayableChatPayload(
@@ -2073,21 +1999,6 @@ class BusinessImService extends ChangeNotifier {
       return DateTime.fromMillisecondsSinceEpoch(millis);
     }
     return DateTime.tryParse(value.replaceFirst(' ', 'T'));
-  }
-
-  Map<String, Object?> _tryJsonMap(String text) {
-    try {
-      final decoded = jsonDecode(text);
-      if (decoded is Map<String, Object?>) {
-        return decoded;
-      }
-      if (decoded is Map) {
-        return decoded.map((key, value) => MapEntry(key.toString(), value));
-      }
-    } catch (_) {
-      return const <String, Object?>{};
-    }
-    return const <String, Object?>{};
   }
 
   void _upsertMessage(
@@ -2688,60 +2599,6 @@ class BusinessImService extends ChangeNotifier {
     return chat;
   }
 
-  _RealtimeEndpoint? _resolveRealtimeEndpoint(ImRoute route) {
-    return _parseWebSocketEndpoint(route.wssAddr, preferSecure: true) ??
-        _parseWebSocketEndpoint(route.websocketAddr, preferSecure: route.tls) ??
-        _parseWebSocketEndpoint(route.wsAddr) ??
-        _parseTcpEndpoint(route.tcpAddr);
-  }
-
-  _RealtimeEndpoint? _parseWebSocketEndpoint(
-    String value, {
-    bool preferSecure = false,
-  }) {
-    var raw = value.trim();
-    if (raw.isEmpty) {
-      return null;
-    }
-    if (!raw.contains('://')) {
-      raw = '${preferSecure ? 'wss' : 'ws'}://$raw';
-    }
-    var uri = Uri.tryParse(raw);
-    if (uri == null || uri.host.isEmpty) {
-      return null;
-    }
-    final scheme = uri.scheme.toLowerCase();
-    if (scheme == 'http' || scheme == 'https') {
-      uri = uri.replace(scheme: scheme == 'https' ? 'wss' : 'ws');
-    } else if (preferSecure && scheme == 'ws') {
-      uri = uri.replace(scheme: 'wss');
-    } else if (scheme != 'ws' && scheme != 'wss') {
-      return null;
-    }
-    return _RealtimeEndpoint.websocket(uri);
-  }
-
-  _RealtimeEndpoint? _parseTcpEndpoint(String value) {
-    final raw = value.trim();
-    if (raw.isEmpty) {
-      return null;
-    }
-    final uri = raw.contains('://')
-        ? Uri.tryParse(raw)
-        : Uri.tryParse('tcp://$raw');
-    if (uri == null || uri.host.isEmpty || uri.port <= 0) {
-      final parts = raw.split(':');
-      if (parts.length == 2) {
-        final port = int.tryParse(parts[1]);
-        if (port != null) {
-          return _RealtimeEndpoint.tcp(parts[0], port);
-        }
-      }
-      return null;
-    }
-    return _RealtimeEndpoint.tcp(uri.host, uri.port);
-  }
-
   Map<String, Object?> _cleanPayload(Map<String, Object?> payload) {
     return Map<String, Object?>.fromEntries(
       payload.entries.where(
@@ -3228,6 +3085,10 @@ class BusinessImService extends ChangeNotifier {
     return '$channelType:$channelID';
   }
 
+  String _md5Text(String content) {
+    return md5.convert(utf8.encode(content)).toString();
+  }
+
   @override
   void dispose() {
     unawaited(stop());
@@ -3250,35 +3111,4 @@ class BusinessImMessageEvent {
   final int channelType;
   final Map<String, Object?> message;
   final Map<String, Object?> conversation;
-}
-
-class _RealtimeEndpoint {
-  const _RealtimeEndpoint._({
-    required this.uri,
-    required this.isWebSocket,
-    required this.transport,
-  });
-
-  factory _RealtimeEndpoint.websocket(Uri uri) {
-    return _RealtimeEndpoint._(
-      uri: uri,
-      isWebSocket: true,
-      transport: uri.scheme.toLowerCase() == 'wss' ? 'wss' : 'ws',
-    );
-  }
-
-  factory _RealtimeEndpoint.tcp(String host, int port) {
-    return _RealtimeEndpoint._(
-      uri: Uri(scheme: 'tcp', host: host, port: port),
-      isWebSocket: false,
-      transport: 'tcp',
-    );
-  }
-
-  final Uri uri;
-  final bool isWebSocket;
-  final String transport;
-
-  String get logAddress =>
-      isWebSocket ? uri.toString() : '${uri.host}:${uri.port}';
 }

@@ -14,6 +14,7 @@ class ImCacheStore {
   static const _friendListPrefix = 'im_friend_list';
   static const _groupListPrefix = 'im_group_list';
   static const _readPrefix = 'im_read_marker';
+  static const _gatewayCursorPrefix = 'im_gateway_cursor';
   static const _clearPrefix = 'im_chat_clear_marker';
   static const _deletedPrefix = 'im_deleted_messages';
 
@@ -324,6 +325,21 @@ class ImCacheStore {
     );
   }
 
+  String readGatewayCursor({required String uid, required String device}) {
+    return _kv.decodeString(_gatewayCursorKey(uid, device)) ?? '';
+  }
+
+  void writeGatewayCursor({
+    required String uid,
+    required String device,
+    required String cursor,
+  }) {
+    if (cursor.isEmpty) {
+      return;
+    }
+    _kv.encodeString(_gatewayCursorKey(uid, device), cursor);
+  }
+
   String _draftKey(String channelId, int channelType) {
     return '$_draftPrefix:$channelType:$channelId';
   }
@@ -334,6 +350,10 @@ class ImCacheStore {
 
   String _readMarkerKey(String uid, String channelId, int channelType) {
     return '$_readPrefix:$uid:$channelType:$channelId';
+  }
+
+  String _gatewayCursorKey(String uid, String device) {
+    return '$_gatewayCursorPrefix:$uid:$device';
   }
 
   String _globalClearKey(String uid) {

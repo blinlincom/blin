@@ -1,5 +1,7 @@
 # BIM 客户端 IM 对接文档
 
+企业级连接状态、心跳保活、断线重连、Gateway ACK、Sequence 增量同步和跨端漫游设计见 [企业级客户端IM方案书.md](企业级客户端IM方案书.md)。
+
 ## 运行配置
 
 客户端配置通过 `--dart-define` 覆盖：
@@ -11,31 +13,30 @@ flutter run \
   --dart-define=BIM_APP_KEY=替换为业务端应用密钥
 ```
 
-默认值在 `lib/src/core/app_config.dart`。业务 API 可以是 `http` 或 `https`，当前线上默认 `https://blcold.cn/api/`。IM 实时连接地址不写死，登录后读取业务端 `im_connect.route`。如果业务端配置了 `wss_addr` 或 `websocket_addr` 且启用了 TLS，客户端优先使用 WSS；没有 WSS/WS 时才使用 `tcp_addr`。
+默认值在 `lib/src/core/app_config.dart`。业务 API 可以是 `http` 或 `https`，当前线上默认 `https://blcold.cn/api/`。IM 实时连接地址不写死，登录后读取业务端 `im_connect.route.https_stream_addr` 和 `im_connect.stream`。客户端只走 Gateway HTTPS Stream，不再直连 WSS/WS/TCP。
 
 多平台配置要点：
 
 - Android：包名 `bimotc.com`，需要网络权限；缓存加密 key 通过 Android Keystore 保护。
 - Android 媒体权限：聊天内图片/视频选择使用应用内相册网格，需要 `READ_EXTERNAL_STORAGE`、`READ_MEDIA_IMAGES`、`READ_MEDIA_VIDEO`；不申请 `MANAGE_EXTERNAL_STORAGE`。
-- iOS/macOS：需要允许访问业务 API 和 WSS/WS 地址；聊天内图片/视频选择需要相册权限说明 `NSPhotoLibraryUsageDescription`；缓存加密 key 通过 Keychain 插件通道获取。若业务端仍使用 HTTP/WS，需要按平台网络安全策略放行对应域名。
+- iOS/macOS：需要允许访问业务 API 和 Gateway HTTP/HTTPS Stream 地址；聊天内图片/视频选择需要相册权限说明 `NSPhotoLibraryUsageDescription`；缓存加密 key 通过 Keychain 插件通道获取。若业务端仍使用 HTTP，需要按平台网络安全策略放行对应域名。
 - Windows/Linux：当前使用应用私有目录下的 `.bim_data` 初始化 MMKV，运行环境必须允许写入应用数据目录；缓存加密 key 由本地安全文件兜底保存，发布时应配合系统账户权限保护目录。
 - Web：当前实时层和 MMKV 缓存不是 Web 适配方案，不能直接按移动端配置运行；如要支持 Web，需要补 WebSocket-only 实时层和 Web 安全存储实现。
-- 实时地址：业务端配置 `wss_addr` 时客户端必走 WSS；没有 WSS 时才按 `websocket_addr`、`ws_addr`、`tcp_addr` 依次降级。客户未配置 HTTPS/TLS 时可以使用 HTTP/WS/TCP。
+- 实时地址：业务端必须返回 `route.https_stream_addr` 和 `stream.ticket`。客户配置 HTTPS/TLS 时地址使用 `https://.../api/sync/open`，未配置时可使用 `http://.../api/sync/open`；客户端不接受 WSS/WS/TCP 降级。
 - 屏幕方向：Android、iOS 入口固定竖屏，多端布局仍按不同屏幕宽度自适应。
 
 ## 当前实时架构
 
-客户端不再接入 Flutter IM SDK，不保留 SDK 封装代码。实时层由 `lib/src/im/business_im_service.dart` 直接实现：
+客户端不再接入 Flutter IM SDK，也不保留旧 WSS/TCP 直连协议代码。实时层由 `lib/src/im/gateway_stream_client.dart` 和 `lib/src/im/business_im_service.dart` 实现：
 
-- 登录后调用业务端 `im_connect` 获取 `uid`、`token`、`device_flag`、`device_level`、`route`。
-- 实时连接优先级：`wss_addr` -> `websocket_addr` -> `ws_addr` -> `tcp_addr`。
-- WSS/WS 使用 WebSocket 二进制帧承载同一套 IM 协议；TCP 使用 `Socket.connect(tcp_addr)`。
-- 按业务端接入的悟空 IM 协议发送 connect 包，并完成 X25519/AES 握手。
-- 实时协议收到消息后校验 `msg_key`、AES 解密、Base64 解码业务 payload，然后写入 MMKV 消息缓存并通知 UI。
-- 收到可持久化消息后发送 `recvack`。
+- 登录后调用业务端 `im_connect` 获取 `uid`、`token`、`device_flag`、`device_level`、`route.https_stream_addr`、`stream.ticket`、`stream.expire_in`、`stream.last_cursor`。
+- 实时连接固定为 Gateway：`POST /api/sync/open`，请求体为 `ticket + last_cursor`。
+- Gateway 下发 4 字节大端长度前缀 + JSON frame，客户端解析 `message/heartbeat/kick/error`。
+- 实时消息 payload 归一化后写入 MMKV，并通知聊天页和会话列表增量刷新。
+- 本地落库成功后调用 `POST /api/sync/ack` 推进 Gateway ACK cursor；ACK ticket 过期前自动重新 `im_connect` 刷新。
 - 发送消息仍必须调用业务端 `im_person_send` / `im_group_send`，由业务端执行权限、好友、红包、转账、@、引用、阅后即焚等规则。
 
-客户端没有消息轮询。周期任务只有实时连接 ping/pong 保活，不会定时请求会话列表或消息列表。新版 IM 文档已经废弃旧 `user_heartbeat`，客户端不再调用该接口。
+客户端没有消息轮询。实时活性只看 Gateway frame/heartbeat，超过 75 秒无任何帧会关闭连接并按指数退避重连。新版 IM 文档已经废弃旧 `user_heartbeat`，客户端不再调用该接口。
 
 ## 启动流程
 
@@ -43,8 +44,9 @@ flutter run \
 2. `SessionStore.ensureDeviceId()` 生成并持久化设备号，格式为 32 位随机 hex，不带包名前缀。开发期发现旧 `bimotc.com-` 前缀设备号会直接重置。
 3. 冷启动 `SessionController.coldStart()` 读取 MMKV 登录态。
 4. 已登录时调用 `im_connect`，请求携带 `device`、`device_flag=0`、`device_level=1`、`timestamp`、`nonce`、`sign`。
-5. `BusinessImService.start()` 读取本地 MMKV 会话缓存，并按 WSS/WS/TCP 优先级建立实时长连接。
-6. 握手成功后状态变为“已连接”，聊天页依靠实时长连接收包刷新。
+5. `BusinessImService.start()` 读取本地 MMKV 会话缓存，并调用 `im_connect` 获取新的 Gateway ticket。
+6. 使用本地 ACK cursor 或 `stream.last_cursor` 打开 `/api/sync/open`。
+7. Gateway stream 打开成功后状态变为“已连接”，聊天页依靠实时长连接收包刷新。
 
 用户端页面不展示全局用户 ID、IM UID、`app...user...` 等内部标识；列表、聊天页、群成员页只显示昵称或用户名。内部 ID 只作为接口参数留在代码层，后台管理可另行展示。
 
@@ -106,15 +108,15 @@ flutter run \
 
 实时收包处理流程：
 
-1. 按协议帧长度切包。
-2. 解码 packet header 和 recv body。
-3. 使用握手后的 AES key 校验 `msg_key`。
-4. AES 解密 payload。
-5. Base64 解码业务 payload JSON。
+1. Gateway stream 按 4 字节大端长度前缀切包。
+2. JSON 解码 frame，按 `type=message|heartbeat|kick|error` 分发。
+3. `heartbeat` 只刷新连接活性；`kick/error` 关闭当前 stream 并按状态机处理。
+4. `message` 读取 `cursor`、`channel_id`、`channel_type`、`client_msg_no`、`message_id`、`message_seq`、`payload`。
+5. payload 如果是 JSON 对象直接使用；如果是字符串或 Base64 JSON，客户端会解成业务 payload。
 6. 归一化为聊天页字段：`client_msg_no`、`message_id`、`message_seq`、`channel_id`、`channel_type`、`from_uid`、`is_me`、`content`、`content_type`、`payload`、`timestamp`、`status`。
-7. 写入 MMKV，按 `client_msg_no` 去重合并。
+7. 写入 MMKV，按 `client_msg_no` 优先、`message_seq` 次之去重合并。
 8. 更新会话缓存和当前频道消息版本，UI 自动刷新。
-9. 非 `no_persist` 消息发送 `recvack`。
+9. 本地落库成功后调用 `/api/sync/ack`，ACK 成功才保存本地 Gateway cursor。
 
 私聊收到的频道如果是当前用户 UID，会转换为对方 `from_uid`，与聊天页使用的私聊频道保持一致。
 
@@ -156,7 +158,7 @@ MMKV 存储：
 - 私聊：`im_person_messages`
 - 群聊：`im_group_messages`
 
-这些同步由用户打开会话触发，不会使用定时器反复请求历史消息，也不会用业务接口代替实时收消息。若历史接口返回错误，本次启动不会标记为已完成，后续再次打开仍可补偿；实时收发仍以 WSS/WS/TCP 长连接为准。
+这些同步由用户打开会话触发，不会使用定时器反复请求历史消息，也不会用业务接口代替实时收消息。若历史接口返回错误，本次启动不会标记为已完成，后续再次打开仍可补偿；实时收发只以 Gateway HTTPS Stream 为准。
 
 同一个会话页生命周期内只允许一个历史同步任务在跑。成功返回空列表也会标记本次已同步，避免聊天页因为会话摘要尾消息和本地缓存暂时不一致而反复请求 `im_person_messages` 或 `im_group_messages`；接口异常会短暂退避后再允许重新打开会话补偿。
 
@@ -175,12 +177,12 @@ MMKV 存储：
 
 ## 连接保活
 
-实时连接使用 30 秒 ping/pong 保活。如果连续未收到 pong，会关闭当前连接并按退避策略重连。客户端不再调用旧 `user_heartbeat`。
+实时连接由 Gateway 周期性下发 heartbeat 帧。客户端收到任何 Gateway 帧都会刷新 `lastFrameAt`；超过 75 秒没有任何帧即判定假在线，关闭当前 stream 并按指数退避 + 随机抖动重连。客户端不再调用旧 `user_heartbeat`。
 
 ## 用户端功能
 
 - 登录/注册：业务端登录注册接口。
-- 消息：首页显示 MMKV 会话缓存，启动时同步一次 `im_conversations`，之后由 TCP 新消息推动更新。
+- 消息：首页显示 MMKV 会话缓存，启动时同步一次 `im_conversations`，之后由 Gateway 新消息推动更新。
 - 聊天：文本、图片、表情、GIF、贴纸、语音、视频、文件、名片、转账、红包。
 - 私聊规则：非好友只能发送文字，且单向最多三条；图片、语音、视频、文件、转账、红包等由业务端拦截。
 - 群聊：文本、图片、表情、GIF、贴纸、语音、视频、文件、名片、红包、指定转账。
@@ -195,10 +197,10 @@ MMKV 存储：
 日志路径在应用“我的 -> 消息连接 -> 诊断日志”页面展示。重点日志：
 
 - API 请求/响应、耗时和错误码。
-- WSS/WS/TCP 连接、握手、断线、重连、ping/pong。
+- Gateway Stream 打开、heartbeat、断线、重连、ACK。
 - `client_msg_no`、频道、消息类型和发送结果。
 - 实时收消息、解密、缓存写入和 UI 版本刷新。
-- 实时原始数据、帧类型、握手、断线、重连、ping/pong。
+- 实时原始数据、帧类型、断线、重连、ACK。
 
 敏感字段会脱敏：`token`、`password`、`sign`、`secret`、`key`、`secure_payload`、消息正文、金额、备注、附件名、附件大小、附件密文 hash。
 

@@ -1055,7 +1055,10 @@ class SessionController extends ChangeNotifier {
       'refresh logged in session success',
       data: {
         'uid': withProfile.chat?.uid ?? '',
-        'tcp': withProfile.chat?.route.tcpAddr ?? '',
+        'gateway_stream':
+            withProfile.chat?.stream?.httpsStreamAddr.isNotEmpty == true
+            ? withProfile.chat?.stream?.httpsStreamAddr
+            : withProfile.chat?.route.httpsStreamAddr ?? '',
       },
     );
   }

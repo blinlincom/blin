@@ -141,6 +141,48 @@ class ApiClient {
     return ChatSession.fromJson(result.data);
   }
 
+  Future<void> ackGatewayCursor({
+    required String ackUrl,
+    required String ticket,
+    required String lastCursor,
+    List<String> clientMsgNos = const [],
+  }) async {
+    final stopwatch = Stopwatch()..start();
+    AppLogger.info(
+      'api',
+      'gateway ack start',
+      data: {'ack_url': ackUrl, 'cursor': lastCursor},
+    );
+    try {
+      final response = await _dio.post<Object?>(
+        ackUrl,
+        data: <String, Object?>{
+          'ticket': ticket,
+          'last_cursor': lastCursor,
+          if (clientMsgNos.isNotEmpty) 'client_msg_nos': clientMsgNos,
+        },
+        options: Options(
+          contentType: Headers.jsonContentType,
+          responseType: ResponseType.json,
+        ),
+      );
+      final result = _parse<Map<String, Object?>>(response.data);
+      if (!result.isSuccess) {
+        throw ApiException(result.message, code: result.code);
+      }
+      AppLogger.info(
+        'api',
+        'gateway ack success',
+        data: {'cursor': lastCursor, 'ms': stopwatch.elapsedMilliseconds},
+      );
+    } on DioException catch (error) {
+      throw ApiException(
+        error.response?.data?.toString() ?? error.message ?? 'Gateway ACK 失败',
+        code: error.response?.statusCode,
+      );
+    }
+  }
+
   Future<List<Map<String, Object?>>> conversations({
     required UserSession session,
     required String device,

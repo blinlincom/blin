@@ -24,6 +24,8 @@ flutter run --dart-define=BIM_API_BASE_URL=https://your-domain/api/ --dart-defin
 
 详细接口和客户端规则见 [docs/client_im.md](docs/client_im.md)。
 
+企业级连接、心跳、重连、ACK、Sequence 增量同步和跨端漫游方案见 [docs/企业级客户端IM方案书.md](docs/企业级客户端IM方案书.md)。
+
 ## GitHub 自动打包
 
 已配置 GitHub Actions：推送到 `main` 会执行静态检查，推送 `v*` 标签或手动运行 workflow 会生成 Android、Web、iOS unsigned 产物。

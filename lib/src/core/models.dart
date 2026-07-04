@@ -27,21 +27,10 @@ class ApiException implements Exception {
 }
 
 class ImRoute {
-  const ImRoute({
-    this.apiUrl = '',
-    this.tcpAddr = '',
-    this.websocketAddr = '',
-    this.wsAddr = '',
-    this.wssAddr = '',
-    this.tls = false,
-  });
+  const ImRoute({this.apiUrl = '', this.httpsStreamAddr = ''});
 
   final String apiUrl;
-  final String tcpAddr;
-  final String websocketAddr;
-  final String wsAddr;
-  final String wssAddr;
-  final bool tls;
+  final String httpsStreamAddr;
 
   factory ImRoute.fromJson(Object? value) {
     final map = value is Map
@@ -49,21 +38,51 @@ class ImRoute {
         : <String, Object?>{};
     return ImRoute(
       apiUrl: map['api_url']?.toString() ?? '',
-      tcpAddr: map['tcp_addr']?.toString() ?? '',
-      websocketAddr: map['websocket_addr']?.toString() ?? '',
-      wsAddr: map['ws_addr']?.toString() ?? '',
-      wssAddr: map['wss_addr']?.toString() ?? '',
-      tls: map['tls'] == true || map['tls']?.toString() == '1',
+      httpsStreamAddr: map['https_stream_addr']?.toString() ?? '',
     );
   }
 
   Map<String, Object?> toJson() => {
     'api_url': apiUrl,
-    'tcp_addr': tcpAddr,
-    'websocket_addr': websocketAddr,
-    'ws_addr': wsAddr,
-    'wss_addr': wssAddr,
-    'tls': tls,
+    'https_stream_addr': httpsStreamAddr,
+  };
+}
+
+class GatewayStreamSession {
+  const GatewayStreamSession({
+    this.ticket = '',
+    this.expireIn = 0,
+    this.lastCursor = '',
+    this.httpsStreamAddr = '',
+  });
+
+  final String ticket;
+  final int expireIn;
+  final String lastCursor;
+  final String httpsStreamAddr;
+
+  bool get isAvailable => ticket.isNotEmpty && httpsStreamAddr.isNotEmpty;
+
+  factory GatewayStreamSession.fromJson(
+    Object? value, {
+    String httpsStreamAddr = '',
+  }) {
+    final map = value is Map
+        ? value.cast<String, Object?>()
+        : <String, Object?>{};
+    return GatewayStreamSession(
+      ticket: map['ticket']?.toString() ?? '',
+      expireIn: int.tryParse(map['expire_in']?.toString() ?? '') ?? 0,
+      lastCursor: map['last_cursor']?.toString() ?? '',
+      httpsStreamAddr: map['https_stream_addr']?.toString() ?? httpsStreamAddr,
+    );
+  }
+
+  Map<String, Object?> toJson() => {
+    'ticket': ticket,
+    'expire_in': expireIn,
+    'last_cursor': lastCursor,
+    'https_stream_addr': httpsStreamAddr,
   };
 }
 
@@ -77,6 +96,7 @@ class ChatSession {
     required this.channelTypePerson,
     required this.channelTypeGroup,
     required this.route,
+    this.stream,
     this.privateHistorySyncEnabled = true,
     this.groupHistorySyncEnabled = true,
   });
@@ -89,6 +109,7 @@ class ChatSession {
   final int channelTypePerson;
   final int channelTypeGroup;
   final ImRoute route;
+  final GatewayStreamSession? stream;
   final bool privateHistorySyncEnabled;
   final bool groupHistorySyncEnabled;
 
@@ -96,6 +117,7 @@ class ChatSession {
     final map = value is Map
         ? value.cast<String, Object?>()
         : <String, Object?>{};
+    final route = ImRoute.fromJson(map['route']);
     return ChatSession(
       uid: map['uid']?.toString() ?? '',
       token: map['token']?.toString() ?? '',
@@ -106,7 +128,13 @@ class ChatSession {
           int.tryParse(map['channel_type_person']?.toString() ?? '') ?? 1,
       channelTypeGroup:
           int.tryParse(map['channel_type_group']?.toString() ?? '') ?? 2,
-      route: ImRoute.fromJson(map['route']),
+      route: route,
+      stream: map['stream'] == null
+          ? null
+          : GatewayStreamSession.fromJson(
+              map['stream'],
+              httpsStreamAddr: route.httpsStreamAddr,
+            ),
       privateHistorySyncEnabled:
           _flagEnabled(map['private_history_sync_enabled']) &&
           _flagEnabled(map['server_history_sync_enabled'], defaultValue: true),
@@ -125,6 +153,7 @@ class ChatSession {
     'channel_type_person': channelTypePerson,
     'channel_type_group': channelTypeGroup,
     'route': route.toJson(),
+    if (stream != null) 'stream': stream!.toJson(),
     'private_history_sync_enabled': privateHistorySyncEnabled ? 1 : 0,
     'group_history_sync_enabled': groupHistorySyncEnabled ? 1 : 0,
     'server_history_sync_enabled':

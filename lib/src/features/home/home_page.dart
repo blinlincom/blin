@@ -1176,7 +1176,7 @@ class ConnectionInfoPage extends StatelessWidget {
               icon: Icons.router_outlined,
               iconColor: const Color(0xff20c997),
               title: '连接地址',
-              subtitle: session?.chat?.route.tcpAddr ?? '',
+              subtitle: _gatewayStreamAddress(session?.chat),
               onTap: () {},
             ),
             _MenuTile(
@@ -5883,6 +5883,14 @@ String _formatTime(int millis) {
   final time = DateTime.fromMillisecondsSinceEpoch(millis);
   String two(int value) => value.toString().padLeft(2, '0');
   return '${time.year}-${two(time.month)}-${two(time.day)} ${two(time.hour)}:${two(time.minute)}:${two(time.second)}';
+}
+
+String _gatewayStreamAddress(ChatSession? chat) {
+  if (chat == null) {
+    return '';
+  }
+  final streamAddr = chat.stream?.httpsStreamAddr ?? '';
+  return streamAddr.isNotEmpty ? streamAddr : chat.route.httpsStreamAddr;
 }
 
 bool _shouldShowTimeDivider(List<Map<String, Object?>> messages, int index) {
