@@ -289,6 +289,19 @@ class BusinessImService extends ChangeNotifier {
   Future<List<Map<String, Object?>>> syncConversationsFromServer() async {
     final session = _requireSession();
     final chat = _requireChat();
+    final local = _cache
+        .readConversations(chat.uid)
+        .map(_normalizeConversation)
+        .toList();
+    if (!chat.privateHistorySyncEnabled && !chat.groupHistorySyncEnabled) {
+      _latestConversations = local;
+      AppLogger.info(
+        'im',
+        'server conversation sync skipped',
+        data: {'reason': 'server_history_sync_disabled'},
+      );
+      return _latestConversations;
+    }
     final statusBeforeSync = _statusText;
     if (statusBeforeSync == '已连接') {
       _setStatus('同步中');
@@ -299,7 +312,27 @@ class BusinessImService extends ChangeNotifier {
         device: _device,
         limit: 50,
       );
-      _latestConversations = list.map(_normalizeConversation).toList();
+      final serverConversations = list
+          .map(_normalizeConversation)
+          .where(
+            (item) => _historySyncEnabledForType(
+              _intValue(item, ['channel_type']),
+              chat,
+            ),
+          )
+          .toList();
+      final localOnlyConversations = local
+          .where(
+            (item) => !_historySyncEnabledForType(
+              _intValue(item, ['channel_type']),
+              chat,
+            ),
+          )
+          .toList();
+      _latestConversations = _mergeConversationLists(
+        serverConversations,
+        localOnlyConversations,
+      );
       _seedConversationTailMessages(
         _latestConversations,
         source: 'server_sync',
@@ -425,6 +458,22 @@ class BusinessImService extends ChangeNotifier {
   }) async {
     final session = _requireSession();
     final chat = _requireChat();
+    if (!_historySyncEnabledForType(channelType, chat)) {
+      _historySyncedChannels.add(_messageKey(channelID, channelType));
+      AppLogger.info(
+        'im',
+        'channel history sync skipped',
+        data: {
+          'channel_id': channelID,
+          'channel_type': channelType,
+          'reason': 'server_history_sync_disabled',
+        },
+      );
+      return _sortAndLimit(
+        _readMessagesForChannel(channelID, channelType),
+        limit,
+      );
+    }
     try {
       final list = channelType == chat.channelTypeGroup
           ? await _api.groupMessages(
@@ -473,6 +522,45 @@ class BusinessImService extends ChangeNotifier {
       );
       return _readMessagesForChannel(channelID, channelType);
     }
+  }
+
+  bool _historySyncEnabledForType(int channelType, ChatSession chat) {
+    if (channelType == chat.channelTypeGroup) {
+      return chat.groupHistorySyncEnabled;
+    }
+    if (channelType == chat.channelTypePerson) {
+      return chat.privateHistorySyncEnabled;
+    }
+    return true;
+  }
+
+  List<Map<String, Object?>> _mergeConversationLists(
+    List<Map<String, Object?>> primary,
+    List<Map<String, Object?>> secondary,
+  ) {
+    final merged = primary
+        .map((item) => Map<String, Object?>.from(item))
+        .toList();
+    for (final conversation in secondary) {
+      final channelId = _value(conversation, ['channel_id']);
+      final channelType = _intValue(conversation, ['channel_type']);
+      final exists = merged.any(
+        (item) =>
+            _value(item, ['channel_id']) == channelId &&
+            _intValue(item, ['channel_type']) == channelType,
+      );
+      if (!exists) {
+        merged.add(Map<String, Object?>.from(conversation));
+      }
+    }
+    merged.sort(
+      (a, b) => _value(b, [
+        'msg_time',
+        'create_time',
+        'timestamp',
+      ]).compareTo(_value(a, ['msg_time', 'create_time', 'timestamp'])),
+    );
+    return merged;
   }
 
   Future<Map<String, Object?>?> localMessageByClientMsgNo(
@@ -1738,9 +1826,11 @@ class BusinessImService extends ChangeNotifier {
     if (_tailMessageMissing(tail, current) ||
         !_sameMessageList(current, sorted)) {
       _writeMessages(normalizedChannelId, channelType, sorted);
-      _historySyncedChannels.remove(
-        _messageKey(normalizedChannelId, channelType),
-      );
+      if (_historySyncEnabledForType(channelType, _requireChat())) {
+        _historySyncedChannels.remove(
+          _messageKey(normalizedChannelId, channelType),
+        );
+      }
       _markMessageChannel(
         source: 'conversation_tail_$source',
         channelId: normalizedChannelId,

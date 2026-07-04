@@ -77,6 +77,8 @@ class ChatSession {
     required this.channelTypePerson,
     required this.channelTypeGroup,
     required this.route,
+    this.privateHistorySyncEnabled = true,
+    this.groupHistorySyncEnabled = true,
   });
 
   final String uid;
@@ -87,6 +89,8 @@ class ChatSession {
   final int channelTypePerson;
   final int channelTypeGroup;
   final ImRoute route;
+  final bool privateHistorySyncEnabled;
+  final bool groupHistorySyncEnabled;
 
   factory ChatSession.fromJson(Object? value) {
     final map = value is Map
@@ -103,6 +107,12 @@ class ChatSession {
       channelTypeGroup:
           int.tryParse(map['channel_type_group']?.toString() ?? '') ?? 2,
       route: ImRoute.fromJson(map['route']),
+      privateHistorySyncEnabled:
+          _flagEnabled(map['private_history_sync_enabled']) &&
+          _flagEnabled(map['server_history_sync_enabled'], defaultValue: true),
+      groupHistorySyncEnabled:
+          _flagEnabled(map['group_history_sync_enabled']) &&
+          _flagEnabled(map['server_history_sync_enabled'], defaultValue: true),
     );
   }
 
@@ -115,7 +125,22 @@ class ChatSession {
     'channel_type_person': channelTypePerson,
     'channel_type_group': channelTypeGroup,
     'route': route.toJson(),
+    'private_history_sync_enabled': privateHistorySyncEnabled ? 1 : 0,
+    'group_history_sync_enabled': groupHistorySyncEnabled ? 1 : 0,
+    'server_history_sync_enabled':
+        privateHistorySyncEnabled || groupHistorySyncEnabled ? 1 : 0,
   };
+}
+
+bool _flagEnabled(Object? value, {bool defaultValue = true}) {
+  if (value == null) {
+    return defaultValue;
+  }
+  if (value is bool) {
+    return value;
+  }
+  final text = value.toString().toLowerCase();
+  return text == '1' || text == 'true' || text == 'yes' || text == 'on';
 }
 
 class UserSession {
