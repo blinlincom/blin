@@ -3081,19 +3081,24 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     if (data == null) {
       return;
     }
+    final money = (data['money'] ?? '').trim();
+    if (!_isPositiveMoney(money)) {
+      setState(() => _error = '金额必须大于 0');
+      return;
+    }
     await _runSending(() async {
       if (_isGroup) {
         await widget.controller.sendGroupTransfer(
           groupId: _groupId,
           channelId: widget.channelId,
           receiverId: data['receiver_id'] ?? '',
-          money: data['money'] ?? '',
+          money: money,
           assetType: data['asset_type'] ?? 'money',
         );
       } else {
         await widget.controller.sendPrivateTransfer(
           receiverId: _receiverId,
-          money: data['money'] ?? '',
+          money: money,
           assetType: data['asset_type'] ?? 'money',
         );
       }
@@ -3141,12 +3146,17 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     if (data == null) {
       return;
     }
+    final money = (data['money'] ?? '').trim();
+    if (!_isPositiveMoney(money)) {
+      setState(() => _error = '金额必须大于 0');
+      return;
+    }
     await _runSending(() async {
       if (_isGroup) {
         await widget.controller.sendGroupRedPacket(
           groupId: _groupId,
           channelId: widget.channelId,
-          money: data['money'] ?? '',
+          money: money,
           assetType: data['asset_type'] ?? 'money',
           packetType: data['packet_type'] ?? 'ordinary',
           quantity: int.tryParse(data['quantity'] ?? '') ?? 1,
@@ -3156,12 +3166,17 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       } else {
         await widget.controller.sendPrivateRedPacket(
           receiverId: _receiverId,
-          money: data['money'] ?? '',
+          money: money,
           assetType: data['asset_type'] ?? 'money',
           remark: data['remark'] ?? '',
         );
       }
     });
+  }
+
+  bool _isPositiveMoney(String value) {
+    final amount = double.tryParse(value);
+    return amount != null && amount > 0;
   }
 
   Future<void> _openTextOptions() async {
@@ -4777,7 +4792,7 @@ class _MessageRow extends StatelessWidget {
         ? currentUserAvatarUrl
         : _messageSenderAvatarUrl(item);
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 10),
+      padding: const EdgeInsets.symmetric(vertical: 7),
       child: Row(
         mainAxisAlignment: isMe
             ? MainAxisAlignment.end
@@ -4785,8 +4800,8 @@ class _MessageRow extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           if (!isMe) ...[
-            _Avatar(label: sender, imageUrl: avatarUrl, size: 42, circle: true),
-            const SizedBox(width: 10),
+            _Avatar(label: sender, imageUrl: avatarUrl, size: 38, circle: true),
+            const SizedBox(width: 8),
           ],
           Flexible(
             child: Column(
@@ -4796,7 +4811,7 @@ class _MessageRow extends StatelessWidget {
               children: [
                 if (!isMe && showSenderName && sender.isNotEmpty)
                   Padding(
-                    padding: const EdgeInsets.only(left: 2, bottom: 4),
+                    padding: const EdgeInsets.only(left: 2, bottom: 3),
                     child: Text(
                       sender,
                       maxLines: 1,
@@ -4823,11 +4838,11 @@ class _MessageRow extends StatelessWidget {
             ),
           ),
           if (isMe) ...[
-            const SizedBox(width: 10),
+            const SizedBox(width: 8),
             _Avatar(
               label: '我',
               imageUrl: avatarUrl,
-              size: 42,
+              size: 38,
               color: _primaryColor,
               circle: true,
             ),
@@ -4856,26 +4871,26 @@ class _ChatHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      height: 72,
+      height: 64,
       color: _chatPageColor,
-      padding: const EdgeInsets.fromLTRB(10, 6, 12, 8),
+      padding: const EdgeInsets.fromLTRB(8, 4, 10, 5),
       child: Row(
         children: [
           _HeaderIconButton(
             tooltip: '返回',
             icon: Icons.chevron_left,
-            iconSize: 34,
+            iconSize: 31,
             onPressed: onBack,
           ),
-          const SizedBox(width: 2),
+          const SizedBox(width: 3),
           _Avatar(
             label: title,
             imageUrl: avatarUrl,
-            size: 44,
+            size: 40,
             color: isGroup ? const Color(0xff34c759) : _primaryColor,
             circle: true,
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: 10),
           Expanded(
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
@@ -4887,18 +4902,18 @@ class _ChatHeader extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
                     color: Colors.black,
-                    fontSize: 20,
+                    fontSize: 19,
                     fontWeight: FontWeight.w800,
                     height: 1.05,
                   ),
                 ),
-                const SizedBox(height: 7),
+                const SizedBox(height: 5),
                 Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     const SizedBox(
-                      width: 8,
-                      height: 8,
+                      width: 7,
+                      height: 7,
                       child: DecoratedBox(
                         decoration: BoxDecoration(
                           color: _chatOnlineColor,
@@ -4911,7 +4926,7 @@ class _ChatHeader extends StatelessWidget {
                       isGroup ? '群聊' : '在线',
                       style: const TextStyle(
                         color: Color(0xff8c939d),
-                        fontSize: 12,
+                        fontSize: 11.5,
                         fontWeight: FontWeight.w500,
                         height: 1,
                       ),
@@ -4926,13 +4941,13 @@ class _ChatHeader extends StatelessWidget {
             icon: Icons.call_outlined,
             onPressed: () {},
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: 5),
           _HeaderIconButton(
             tooltip: '视频通话',
             icon: Icons.videocam_outlined,
             onPressed: () {},
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: 5),
           _HeaderIconButton(
             tooltip: isGroup ? '群设置' : '聊天设置',
             icon: Icons.more_horiz,
@@ -4949,7 +4964,7 @@ class _HeaderIconButton extends StatelessWidget {
     required this.tooltip,
     required this.icon,
     required this.onPressed,
-    this.iconSize = 28,
+    this.iconSize = 26,
   });
 
   final String tooltip;
@@ -4960,12 +4975,12 @@ class _HeaderIconButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      width: 36,
-      height: 44,
+      width: 34,
+      height: 42,
       child: IconButton(
         tooltip: tooltip,
         padding: EdgeInsets.zero,
-        splashRadius: 22,
+        splashRadius: 20,
         onPressed: onPressed,
         icon: Icon(icon, color: Colors.black, size: iconSize),
       ),
@@ -5003,12 +5018,12 @@ class _MessageBubble extends StatelessWidget {
     );
     return Container(
       constraints: BoxConstraints(
-        maxWidth: MediaQuery.sizeOf(context).width * 0.68,
+        maxWidth: MediaQuery.sizeOf(context).width * 0.64,
       ),
       padding: _bubblePadding(contentType),
       decoration: BoxDecoration(
         color: _bubbleColor(contentType),
-        borderRadius: BorderRadius.circular(isImageLike ? 8 : 11),
+        borderRadius: BorderRadius.circular(isImageLike ? 8 : 10),
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -5047,10 +5062,10 @@ class _MessageBubble extends StatelessWidget {
       ChatContentTypes.video ||
       ChatContentTypes.contactCard ||
       ChatContentTypes.transfer => const EdgeInsets.symmetric(
-        horizontal: 14,
-        vertical: 12,
+        horizontal: 12,
+        vertical: 10,
       ),
-      _ => const EdgeInsets.fromLTRB(16, 12, 12, 8),
+      _ => const EdgeInsets.fromLTRB(14, 10, 10, 7),
     };
   }
 }
@@ -5099,13 +5114,13 @@ class _RedPacketPreview extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      width: 250,
+      width: 236,
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Container(
-            padding: const EdgeInsets.fromLTRB(18, 15, 18, 14),
+            padding: const EdgeInsets.fromLTRB(16, 13, 16, 12),
             decoration: const BoxDecoration(
               gradient: LinearGradient(
                 colors: [Color(0xffffa34c), Color(0xffff963c)],
@@ -5117,8 +5132,8 @@ class _RedPacketPreview extends StatelessWidget {
             child: Row(
               children: [
                 Container(
-                  width: 52,
-                  height: 58,
+                  width: 47,
+                  height: 52,
                   alignment: Alignment.center,
                   decoration: const BoxDecoration(
                     color: Color(0xffe94632),
@@ -5127,10 +5142,10 @@ class _RedPacketPreview extends StatelessWidget {
                   child: const Icon(
                     Icons.redeem,
                     color: Color(0xffffd35b),
-                    size: 24,
+                    size: 22,
                   ),
                 ),
-                const SizedBox(width: 16),
+                const SizedBox(width: 14),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -5142,18 +5157,18 @@ class _RedPacketPreview extends StatelessWidget {
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
                           color: Colors.white,
-                          fontSize: 15,
+                          fontSize: 14,
                           fontWeight: FontWeight.w700,
                         ),
                       ),
-                      const SizedBox(height: 6),
+                      const SizedBox(height: 5),
                       Text(
                         amount.isEmpty ? '¥0.00' : amount,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
                           color: Colors.white,
-                          fontSize: 20,
+                          fontSize: 18,
                           fontWeight: FontWeight.w800,
                           height: 1.05,
                         ),
@@ -5170,7 +5185,7 @@ class _RedPacketPreview extends StatelessWidget {
             ),
           ),
           Container(
-            height: 30,
+            height: 28,
             alignment: Alignment.centerLeft,
             padding: const EdgeInsets.symmetric(horizontal: 12),
             decoration: const BoxDecoration(
@@ -5250,7 +5265,7 @@ class _MessageBubbleContent extends StatelessWidget {
         content.isEmpty ? '[消息]' : content,
         style: const TextStyle(
           color: Colors.black,
-          fontSize: 16,
+          fontSize: 15,
           fontWeight: FontWeight.w700,
           height: 1.35,
         ),
@@ -5346,7 +5361,7 @@ class _ImageMessagePreview extends StatelessWidget {
     }
     return ClipRRect(
       borderRadius: BorderRadius.circular(8),
-      child: SizedBox(width: 220, height: 132, child: image),
+      child: SizedBox(width: 208, height: 124, child: image),
     );
   }
 }
@@ -5383,16 +5398,16 @@ class _VideoMessagePreview extends StatelessWidget {
     return ClipRRect(
       borderRadius: BorderRadius.circular(8),
       child: SizedBox(
-        width: 220,
-        height: 132,
+        width: 208,
+        height: 124,
         child: Stack(
           fit: StackFit.expand,
           children: [
             image,
             Center(
               child: Container(
-                width: 42,
-                height: 42,
+                width: 38,
+                height: 38,
                 decoration: const BoxDecoration(
                   color: Color(0x99000000),
                   shape: BoxShape.circle,
@@ -5400,7 +5415,7 @@ class _VideoMessagePreview extends StatelessWidget {
                 child: const Icon(
                   Icons.play_arrow,
                   color: Colors.white,
-                  size: 28,
+                  size: 26,
                 ),
               ),
             ),
@@ -5440,7 +5455,7 @@ class _VoicePreview extends StatelessWidget {
   Widget build(BuildContext context) {
     final label = seconds == '0' || seconds.isEmpty ? '' : '$seconds"';
     return SizedBox(
-      width: 108,
+      width: 100,
       child: Row(
         mainAxisAlignment: isMe
             ? MainAxisAlignment.end
@@ -5483,12 +5498,12 @@ class _FilePreview extends StatelessWidget {
       'size',
     ], fallback: _value(media, ['size']));
     return SizedBox(
-      width: 230,
+      width: 218,
       child: Row(
         children: [
           Container(
-            width: 48,
-            height: 48,
+            width: 42,
+            height: 42,
             alignment: Alignment.center,
             decoration: const BoxDecoration(
               color: Color(0xfff05045),
@@ -5497,10 +5512,10 @@ class _FilePreview extends StatelessWidget {
             child: const Icon(
               Icons.article_outlined,
               color: Colors.white,
-              size: 25,
+              size: 23,
             ),
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: 10),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -5512,7 +5527,7 @@ class _FilePreview extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
                     color: _textColor,
-                    fontSize: 16,
+                    fontSize: 15,
                     fontWeight: FontWeight.w700,
                     height: 1.25,
                   ),
@@ -5674,12 +5689,12 @@ class _TimeDivider extends StatelessWidget {
       return const SizedBox.shrink();
     }
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 14),
+      padding: const EdgeInsets.symmetric(vertical: 10),
       child: Text(
         text,
         style: const TextStyle(
           color: Color(0xff8f96a3),
-          fontSize: 15,
+          fontSize: 14,
           fontWeight: FontWeight.w700,
         ),
       ),
@@ -5892,13 +5907,13 @@ class _ChatToolsPanel extends StatelessWidget {
       pages.add(items.sublist(index, (index + 8).clamp(0, items.length)));
     }
     return Container(
-      height: 188,
+      height: 174,
       color: _chatPageColor,
-      padding: const EdgeInsets.fromLTRB(18, 0, 18, 12),
+      padding: const EdgeInsets.fromLTRB(14, 0, 14, 10),
       child: DecoratedBox(
         decoration: const BoxDecoration(
           color: Colors.white,
-          borderRadius: BorderRadius.all(Radius.circular(18)),
+          borderRadius: BorderRadius.all(Radius.circular(16)),
         ),
         child: PageView.builder(
           itemCount: pages.length,
@@ -5906,14 +5921,14 @@ class _ChatToolsPanel extends StatelessWidget {
           itemBuilder: (context, pageIndex) {
             final pageItems = pages[pageIndex];
             return GridView.builder(
-              padding: const EdgeInsets.fromLTRB(22, 16, 22, 14),
+              padding: const EdgeInsets.fromLTRB(18, 13, 18, 12),
               physics: const NeverScrollableScrollPhysics(),
               itemCount: pageItems.length,
               gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                 crossAxisCount: 4,
-                mainAxisExtent: 74,
-                crossAxisSpacing: 12,
-                mainAxisSpacing: 10,
+                mainAxisExtent: 66,
+                crossAxisSpacing: 10,
+                mainAxisSpacing: 8,
               ),
               itemBuilder: (context, index) =>
                   _ToolButton(item: pageItems[index]),
@@ -5948,8 +5963,8 @@ class _ToolButton extends StatelessWidget {
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           Container(
-            width: 32,
-            height: 32,
+            width: 30,
+            height: 30,
             alignment: Alignment.center,
             decoration: BoxDecoration(
               color: item.color,
@@ -5957,15 +5972,15 @@ class _ToolButton extends StatelessWidget {
                 item.icon == Icons.attach_money_rounded ? 16 : 6,
               ),
             ),
-            child: Icon(item.icon, size: 21, color: Colors.white),
+            child: Icon(item.icon, size: 20, color: Colors.white),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 7),
           Text(
             item.label,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: const TextStyle(
-              fontSize: 13,
+              fontSize: 12,
               color: Color(0xff2f3338),
               fontWeight: FontWeight.w500,
               height: 1,
@@ -6007,7 +6022,7 @@ class _Composer extends StatelessWidget {
     return Container(
       color: _chatPageColor,
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(18, 10, 18, 12),
+        padding: const EdgeInsets.fromLTRB(14, 8, 14, 10),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
@@ -6019,10 +6034,10 @@ class _Composer extends StatelessWidget {
             const SizedBox(width: 6),
             Expanded(
               child: Container(
-                constraints: const BoxConstraints(minHeight: 42),
+                constraints: const BoxConstraints(minHeight: 40),
                 decoration: BoxDecoration(
                   color: Colors.white,
-                  borderRadius: BorderRadius.circular(22),
+                  borderRadius: BorderRadius.circular(20),
                 ),
                 child: TextField(
                   controller: controller,
@@ -6053,24 +6068,24 @@ class _Composer extends StatelessWidget {
                         : Colors.white,
                     isDense: true,
                     border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(22),
+                      borderRadius: BorderRadius.circular(20),
                       borderSide: BorderSide.none,
                     ),
                     enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(22),
+                      borderRadius: BorderRadius.circular(20),
                       borderSide: BorderSide.none,
                     ),
                     disabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(22),
+                      borderRadius: BorderRadius.circular(20),
                       borderSide: BorderSide.none,
                     ),
                     focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(22),
+                      borderRadius: BorderRadius.circular(20),
                       borderSide: BorderSide.none,
                     ),
                     contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 11,
+                      horizontal: 14,
+                      vertical: 10,
                     ),
                   ),
                 ),
@@ -6099,23 +6114,23 @@ class _Composer extends StatelessWidget {
                   children: [
                     const SizedBox(width: 4),
                     SizedBox(
-                      height: 38,
+                      height: 36,
                       child: TextButton(
                         onPressed: sending ? null : onSend,
                         style: TextButton.styleFrom(
                           foregroundColor: Colors.white,
                           backgroundColor: _chatAckColor,
                           padding: const EdgeInsets.symmetric(horizontal: 8),
-                          minimumSize: const Size(42, 38),
+                          minimumSize: const Size(40, 36),
                           shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(19),
+                            borderRadius: BorderRadius.circular(18),
                           ),
                         ),
                         child: const Text(
                           '发送',
                           style: TextStyle(
                             fontWeight: FontWeight.w700,
-                            fontSize: 14,
+                            fontSize: 13,
                           ),
                         ),
                       ),
@@ -6145,15 +6160,15 @@ class _ComposerIconButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      width: 36,
-      height: 42,
+      width: 34,
+      height: 40,
       child: IconButton(
         tooltip: tooltip,
         onPressed: onPressed,
         padding: EdgeInsets.zero,
         icon: Icon(
           icon,
-          size: 29,
+          size: 27,
           color: onPressed == null ? _mutedColor : Colors.black,
         ),
       ),

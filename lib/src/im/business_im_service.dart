@@ -900,19 +900,22 @@ class BusinessImService extends ChangeNotifier {
       contentType: contentType,
       payload: localPayload,
     );
-    _upsertMessage(channelID, channelType, optimistic);
-    _upsertConversationFromMessage(optimistic);
-    _publishMessageEvent(
-      source: 'send_local',
-      channelId: channelID,
-      channelType: channelType,
-      message: optimistic,
-    );
-    _markMessageChannel(
-      source: 'send_local',
-      channelId: channelID,
-      channelType: channelType,
-    );
+    final waitServerConfirm = _messageMustWaitServerConfirm(contentType);
+    if (!waitServerConfirm) {
+      _upsertMessage(channelID, channelType, optimistic);
+      _upsertConversationFromMessage(optimistic);
+      _publishMessageEvent(
+        source: 'send_local',
+        channelId: channelID,
+        channelType: channelType,
+        message: optimistic,
+      );
+      _markMessageChannel(
+        source: 'send_local',
+        channelId: channelID,
+        channelType: channelType,
+      );
+    }
     try {
       final result = await _sendBusinessMessageWithRetry(
         session: session,
@@ -956,6 +959,21 @@ class BusinessImService extends ChangeNotifier {
       );
       return result;
     } catch (error, stackTrace) {
+      if (waitServerConfirm) {
+        AppLogger.error(
+          'im',
+          'business message rejected before local display',
+          error: error,
+          stackTrace: stackTrace,
+          data: {
+            'client_msg_no': clientMsgNo,
+            'channel_id': channelID,
+            'channel_type': channelType,
+            'content_type': contentType,
+          },
+        );
+        rethrow;
+      }
       final failed = Map<String, Object?>.from(optimistic)
         ..['status'] = 'failed'
         ..['error'] = error.toString();
@@ -985,6 +1003,11 @@ class BusinessImService extends ChangeNotifier {
       );
       rethrow;
     }
+  }
+
+  bool _messageMustWaitServerConfirm(String contentType) {
+    return contentType == ChatContentTypes.redPacket ||
+        contentType == ChatContentTypes.transfer;
   }
 
   Future<Map<String, Object?>> retryBusinessMessage(
