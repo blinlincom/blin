@@ -50,4 +50,22 @@ class ChatContentTypes {
   static const contactCard = 'contact_card';
   static const transfer = 'transfer';
   static const redPacket = 'red_packet';
+  static const redPacketReceived = 'red_packet_received';
+  static const transferReceived = 'transfer_received';
+
+  static const displayable = <String>{
+    text,
+    image,
+    emoji,
+    gif,
+    sticker,
+    voice,
+    video,
+    file,
+    contactCard,
+    transfer,
+    redPacket,
+    redPacketReceived,
+    transferReceived,
+  };
 }

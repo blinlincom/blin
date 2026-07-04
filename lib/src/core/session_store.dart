@@ -3,7 +3,6 @@ import 'dart:math';
 
 import 'package:mmkv/mmkv.dart';
 
-import 'app_config.dart';
 import 'models.dart';
 
 class SessionStore {
@@ -13,6 +12,7 @@ class SessionStore {
 
   static const _sessionKey = 'session';
   static const _deviceKey = 'device';
+  static const _legacyPackageDevicePrefix = 'bimotc.com-';
   static const _launchAtKey = 'last_launch_at';
   static const _resumeAtKey = 'last_resume_at';
 
@@ -46,7 +46,9 @@ class SessionStore {
   String ensureDeviceId() {
     final cached = _kv.decodeString(_deviceKey);
     if (cached != null && cached.isNotEmpty) {
-      return cached;
+      if (!cached.startsWith(_legacyPackageDevicePrefix)) {
+        return cached;
+      }
     }
     final generated = _newDeviceId();
     _kv.encodeString(_deviceKey, generated);
@@ -77,6 +79,6 @@ class SessionStore {
     final hex = bytes
         .map((byte) => byte.toRadixString(16).padLeft(2, '0'))
         .join();
-    return '${AppConfig.packageName}-$hex';
+    return hex;
   }
 }

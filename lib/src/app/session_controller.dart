@@ -61,6 +61,13 @@ class SessionController extends ChangeNotifier {
 
   List<Map<String, Object?>> cachedConversations() => _im.cachedConversations();
 
+  Map<String, Object?> groupMuteState({
+    required String channelId,
+    required String groupId,
+  }) {
+    return _im.groupMuteState(channelID: channelId, groupId: groupId);
+  }
+
   int messageVersion({required String channelId, required int channelType}) =>
       _im.messageVersion(channelID: channelId, channelType: channelType);
 
@@ -736,6 +743,25 @@ class SessionController extends ChangeNotifier {
     );
   }
 
+  Future<Map<String, Object?>> loadGroupMuteStatus({
+    required String groupId,
+    required String channelId,
+  }) async {
+    final current = _requireSession();
+    final result = await _chat.groupMuteStatus(
+      session: current,
+      device: _device,
+      groupId: groupId,
+    );
+    _im.applyGroupMuteState(
+      channelID: channelId,
+      groupId: groupId,
+      state: result,
+      source: 'server_status',
+    );
+    return result;
+  }
+
   Future<Map<String, Object?>> createGroup({
     required String name,
     List<String> memberIds = const [],
@@ -827,7 +853,6 @@ class SessionController extends ChangeNotifier {
 
   Future<Map<String, Object?>> searchFriends({
     String keyword = '',
-    String friendId = '',
     int limit = 20,
   }) {
     final current = _requireSession();
@@ -835,7 +860,6 @@ class SessionController extends ChangeNotifier {
       session: current,
       device: _device,
       keyword: keyword,
-      friendId: friendId,
       limit: limit,
     );
   }

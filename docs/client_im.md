@@ -13,6 +13,14 @@ flutter run \
 
 默认值在 `lib/src/core/app_config.dart`。业务 API 可以是 `http` 或 `https`，当前线上默认 `https://blcold.cn/api/`。IM 实时连接地址不写死，登录后读取业务端 `im_connect.route`。如果业务端配置了 `wss_addr` 或 `websocket_addr` 且启用了 TLS，客户端优先使用 WSS；没有 WSS/WS 时才使用 `tcp_addr`。
 
+多平台配置要点：
+
+- Android：包名 `bimotc.com`，需要网络权限；缓存加密 key 通过 Android Keystore 保护。
+- iOS/macOS：需要允许访问业务 API 和 WSS/WS 地址；缓存加密 key 通过 Keychain 插件通道获取。若业务端仍使用 HTTP/WS，需要按平台网络安全策略放行对应域名。
+- Windows/Linux：当前使用应用私有目录下的 `.bim_data` 初始化 MMKV，运行环境必须允许写入应用数据目录；缓存加密 key 由本地安全文件兜底保存，发布时应配合系统账户权限保护目录。
+- Web：当前实时层和 MMKV 缓存不是 Web 适配方案，不能直接按移动端配置运行；如要支持 Web，需要补 WebSocket-only 实时层和 Web 安全存储实现。
+- 实时地址：业务端配置 `wss_addr` 时客户端必走 WSS；没有 WSS 时才按 `websocket_addr`、`ws_addr`、`tcp_addr` 依次降级。客户未配置 HTTPS/TLS 时可以使用 HTTP/WS/TCP。
+
 ## 当前实时架构
 
 客户端不再接入 Flutter IM SDK，不保留 SDK 封装代码。实时层由 `lib/src/im/business_im_service.dart` 直接实现：
@@ -30,11 +38,13 @@ flutter run \
 ## 启动流程
 
 1. `main.dart` 初始化 MMKV 和本地日志。
-2. `SessionStore.ensureDeviceId()` 生成并持久化设备号，格式为 `bimotc.com-<随机16字节hex>`。
+2. `SessionStore.ensureDeviceId()` 生成并持久化设备号，格式为 32 位随机 hex，不带包名前缀。开发期发现旧 `bimotc.com-` 前缀设备号会直接重置。
 3. 冷启动 `SessionController.coldStart()` 读取 MMKV 登录态。
 4. 已登录时调用 `im_connect`，请求携带 `device`、`device_flag=0`、`device_level=1`、`timestamp`、`nonce`、`sign`。
 5. `BusinessImService.start()` 读取本地 MMKV 会话缓存，并按 WSS/WS/TCP 优先级建立实时长连接。
 6. 握手成功后状态变为“已连接”，聊天页依靠实时长连接收包刷新。
+
+用户端页面不展示全局用户 ID、IM UID、`app...user...` 等内部标识；列表、聊天页、群成员页只显示昵称或用户名。内部 ID 只作为接口参数留在代码层，后台管理可另行展示。
 
 热启动恢复时如果长连接已断开，`resumeConnection()` 会重新连接实时通道；不会循环请求业务端消息列表。
 
@@ -56,21 +66,26 @@ flutter run \
 
 - 私聊：`im_person_send`
 - 群聊：`im_group_send`
+- 群禁言状态：`im_group_mute_status`
 
-通用参数：`appid`、`usertoken`、`device`、`device_flag`、`device_level`、`timestamp`、`nonce`、`sign`、`client_msg_no`、`content_type`。
+通用外层参数：`appid`、`usertoken`、`device`、`device_flag`、`device_level`、`timestamp`、`nonce`、`sign`、`client_msg_no`、`content_type`。
 
 私聊额外传 `receiver_id`，群聊额外传 `group_id`。
+
+消息内容不再以明文表单字段提交。客户端把 `content`、`money`、`asset_type`、`remark`、`url`、`card_user_id`、`mention_user_ids`、`reply_client_msg_no`、`burn_after_read` 等业务字段归一化后放入 `secure_payload`，再按业务端文档使用 AES-128-CBC 加密。签名只覆盖外层字段和密文，不覆盖明文字段。
+
+图片、语音、视频、文件等本地附件不会用明文 `file` 字段上传。客户端先把原文件字节加密到临时密文文件，通过 multipart 字段 `secure_file` 上传，并提交 `secure_file_name`、`secure_file_size`、`secure_file_sha256` 等外层字段。请求完成后会删除本地临时密文文件。
 
 支持的 `content_type`：
 
 - `text`：`content`
-- `image`：上传 `file` 或传 `url`
-- `emoji`：`emoji_code`，或上传 `file`，或传 `url`
-- `gif`：上传 `file` 或传 `url`
-- `sticker`：`sticker_id`，或上传 `file`，或传 `url`
-- `voice`：上传 `file` 或传 `url`，可选 `duration`
-- `video`：上传 `file` 或传 `url`，可选 `cover_url`、`duration`
-- `file`：上传 `file` 或传 `url`，可选 `name`、`mime`、`size`
+- `image`：上传 `secure_file` 或在 `secure_payload` 里传 `url`
+- `emoji`：`emoji_code`，或上传 `secure_file`，或传 `url`
+- `gif`：上传 `secure_file` 或传 `url`
+- `sticker`：`sticker_id`，或上传 `secure_file`，或传 `url`
+- `voice`：上传 `secure_file` 或传 `url`，可选 `duration`
+- `video`：上传 `secure_file` 或传 `url`，可选 `cover_url`、`duration`
+- `file`：上传 `secure_file` 或传 `url`，可选 `name`、`mime`、`size`
 - `contact_card`：`card_user_id`
 - `transfer`：`money`、`asset_type=money|integral`，群聊还必须传 `receiver_id`
 - `red_packet`：`money`、`asset_type=money|integral`，群聊可传 `packet_type=ordinary|luck|specified`、`quantity`、`receiver_id`
@@ -78,6 +93,8 @@ flutter run \
 客户端生成唯一 `client_msg_no`，格式为 `bim_{userId}_{timestamp随机串}`。同一条消息只生成一次，避免重复文本触发 `client_msg_no已被其它消息内容占用`。
 
 发送时客户端先写入 MMKV 本地“发送中”消息，业务端返回后按同一 `client_msg_no` 合并为“已发送”或“队列中”。网络或超时类错误最多重试 3 次，重试复用同一个 `client_msg_no` 但重新生成 `nonce/sign`；业务拒绝不重试。接收方和发送方的服务端推送都通过实时长连接进入本地缓存。
+
+群禁言不再使用悟空频道黑名单。服务端只写 `chat_group_mute` 业务表，群发前用该表硬校验；客户端打开群聊时调用 `im_group_mute_status` 获取当前用户禁言状态。若被禁言，输入框和更多面板直接禁用，并显示“你已被管理员禁言，原因：...”这类用户提示。
 
 ## 消息接收
 
@@ -96,6 +113,24 @@ flutter run \
 私聊收到的频道如果是当前用户 UID，会转换为对方 `from_uid`，与聊天页使用的私聊频道保持一致。
 
 服务层同时暴露本地广播消息流。聊天页和首页会话列表订阅该事件流后直接增量合并消息和会话，实时收包、本地发送中、发送确认、发送失败都会立即推送到 UI；重新读取 MMKV 只作为冷启动和补偿同步使用。
+
+命令消息不进入普通消息列表。群主或管理员禁言/解除禁言时，服务端发送 `content_type=cmd`、`cmd=group_member_mute_changed` 的 CMD 通知，客户端只用它刷新本地禁言状态和输入框，不把 CMD 当聊天气泡展示。会话列表同步时服务端会取多条 recent 并选择第一条可展示聊天消息，避免 CMD 把会话摘要冲空。
+
+`im_group_mute_status` 请求示例：
+
+```text
+action=im_group_mute_status
+usertoken=用户登录 token
+device=32位随机hex设备号
+device_flag=0
+device_level=1
+timestamp=当前秒级时间戳
+nonce=随机串
+sign=按签名规则生成
+group_id=群聊业务ID
+```
+
+返回字段：`muted`、`reason`、`expire_time`、`permanent`、`notice`、`group_id`、`channel_id`、`channel_type`。`muted=1` 时客户端禁用输入框；`muted=0` 时恢复输入。
 
 ## 本地缓存
 
@@ -131,7 +166,7 @@ MMKV 存储：
 - 群聊文本支持 `mention_user_ids`、`mention_all`、`reply_client_msg_no`、`burn_after_read`。
 - 私聊文本支持 `reply_client_msg_no`、`burn_after_read`。
 - 回执和动作：已读回执、回执状态、撤回、阅后即焚、红包领取、转账收款。
-- 好友：搜索用户、申请、处理申请、状态查询、删除好友。
+- 好友：本地已添加好友可按昵称/用户名过滤；添加朋友只能按用户名搜索；支持申请、处理申请、状态查询、删除好友。
 - 群管理：建群、更新群资料、成员列表、加人、踢人、退出、解散、设置管理员、转让群主、禁言、解除禁言。
 
 ## 本地日志
@@ -144,7 +179,7 @@ MMKV 存储：
 - 实时收消息、解密、缓存写入和 UI 版本刷新。
 - 实时原始数据、帧类型、握手、断线、重连、ping/pong。
 
-敏感字段会脱敏：`token`、`password`、`sign`、`secret`、`key`。
+敏感字段会脱敏：`token`、`password`、`sign`、`secret`、`key`、`secure_payload`、消息正文、金额、备注、附件名、附件大小、附件密文 hash。
 
 ## 校验
 

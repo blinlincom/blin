@@ -779,7 +779,7 @@ class QuickActionsPage extends StatelessWidget {
       _ActionEntry(
         Icons.person_add_alt_1,
         '添加朋友',
-        () => _push(context, AddFriendPage(controller: controller)),
+        () => _push(context, SearchPage(controller: controller)),
       ),
       _ActionEntry(Icons.qr_code_scanner, '扫一扫', () => _showSoon(context)),
       _ActionEntry(Icons.payments_outlined, '收付款', () => _showSoon(context)),
@@ -869,7 +869,7 @@ class _SearchPageState extends State<SearchPage> {
   void _searchRemoteFriends() {
     final keyword = _keyword.text.trim();
     if (keyword.isEmpty) {
-      setState(() => _error = '请输入用户 ID、用户名或昵称');
+      setState(() => _error = '请输入用户名');
       return;
     }
     setState(() {
@@ -904,8 +904,7 @@ class _SearchPageState extends State<SearchPage> {
             final friends = (snapshot.data?[0] ?? []).where((item) {
               return keyword.isEmpty ||
                   _friendTitle(item).toLowerCase().contains(keyword) ||
-                  _friendUsername(item).toLowerCase().contains(keyword) ||
-                  _friendUserId(item).contains(keyword);
+                  _friendUsername(item).toLowerCase().contains(keyword);
             }).toList();
             final groups = (snapshot.data?[1] ?? []).where((item) {
               return keyword.isEmpty ||
@@ -923,7 +922,7 @@ class _SearchPageState extends State<SearchPage> {
                     onSubmitted: (_) => _searchRemoteFriends(),
                     decoration: const InputDecoration(
                       prefixIcon: Icon(Icons.search),
-                      hintText: '搜索用户、联系人、群聊',
+                      hintText: '好友昵称/用户名，添加朋友用用户名',
                     ),
                   ),
                 ),
@@ -934,7 +933,7 @@ class _SearchPageState extends State<SearchPage> {
                       FilledButton.icon(
                         onPressed: _acting ? null : _searchRemoteFriends,
                         icon: const Icon(Icons.person_search_outlined),
-                        label: const Text('搜索用户'),
+                        label: const Text('按用户名搜索'),
                       ),
                       OutlinedButton.icon(
                         onPressed: _reload,
@@ -947,7 +946,7 @@ class _SearchPageState extends State<SearchPage> {
                 if (_acting) const _LinearBusy(),
                 _ResultBlock(text: _message),
                 _ErrorBlock(text: _error),
-                const _SectionHeader(text: '搜索用户'),
+                const _SectionHeader(text: '添加朋友'),
                 _RemoteFriendSearchBlock(
                   controller: widget.controller,
                   keyword: _friendSearchKeyword,
@@ -965,7 +964,7 @@ class _SearchPageState extends State<SearchPage> {
                   _ContactTile(
                     title: _friendTitle(item),
                     subtitle: _friendSubtitle(item),
-                    trailing: _friendUserId(item),
+                    trailing: _friendUsername(item),
                     isGroup: false,
                     onTap: () =>
                         _openPrivateChat(context, widget.controller, item),
@@ -993,7 +992,7 @@ class _SearchPageState extends State<SearchPage> {
   Future<void> _applyRemoteFriend(Map<String, Object?> item) async {
     final friendId = _searchFriendId(item);
     if (friendId.isEmpty) {
-      setState(() => _error = '用户 ID 为空');
+      setState(() => _error = '用户信息为空');
       return;
     }
     setState(() {
@@ -1064,7 +1063,7 @@ class _RemoteFriendSearchBlock extends StatelessWidget {
   Widget build(BuildContext context) {
     final request = future;
     if (request == null) {
-      return const _EmptyRow(text: '输入用户名、昵称或用户 ID 后搜索');
+      return const _EmptyRow(text: '输入用户名后搜索');
     }
     return FutureBuilder<Map<String, Object?>>(
       future: request,
@@ -1128,10 +1127,10 @@ class ConnectionInfoPage extends StatelessWidget {
               onTap: () {},
             ),
             _MenuTile(
-              icon: Icons.tag_outlined,
+              icon: Icons.person_outline,
               iconColor: const Color(0xff7c5cff),
-              title: 'IM UID',
-              subtitle: session?.chat?.uid ?? '',
+              title: '当前账号',
+              subtitle: _sessionDisplayName(session),
               onTap: () {},
             ),
             _MenuTile(
@@ -1299,10 +1298,9 @@ class _AddFriendPageState extends State<AddFriendPage> {
           children: [
             TextField(
               controller: _friendId,
-              keyboardType: TextInputType.number,
               decoration: const InputDecoration(
-                labelText: '好友用户 ID',
-                hintText: '例如 900100002',
+                labelText: '用户名',
+                hintText: '建议从搜索页选择用户',
               ),
             ),
             const SizedBox(height: 12),
@@ -1338,7 +1336,7 @@ class _AddFriendPageState extends State<AddFriendPage> {
   Future<void> _checkStatus() async {
     final id = _friendId.text.trim();
     if (id.isEmpty) {
-      setState(() => _error = '好友用户 ID 不能为空');
+      setState(() => _error = '用户名不能为空');
       return;
     }
     await _run(() async {
@@ -1350,7 +1348,7 @@ class _AddFriendPageState extends State<AddFriendPage> {
   Future<void> _apply() async {
     final id = _friendId.text.trim();
     if (id.isEmpty) {
-      setState(() => _error = '好友用户 ID 不能为空');
+      setState(() => _error = '用户名不能为空');
       return;
     }
     await _run(() async {
@@ -1472,7 +1470,7 @@ class _FriendRequestsPageState extends State<FriendRequestsPage> {
 
   Future<void> _handle(String applyId, bool accept) async {
     if (applyId.isEmpty) {
-      setState(() => _error = '申请 ID 为空');
+      setState(() => _error = '申请信息为空');
       return;
     }
     try {
@@ -1561,8 +1559,8 @@ class _CreateGroupPageState extends State<CreateGroupPage> {
             TextField(
               controller: _memberIds,
               decoration: const InputDecoration(
-                labelText: '成员用户 ID',
-                hintText: '多个 ID 用逗号分隔',
+                labelText: '成员',
+                hintText: '从下方好友列表选择，调试可填内部账号',
               ),
             ),
             const SizedBox(height: 16),
@@ -1613,7 +1611,7 @@ class _CreateGroupPageState extends State<CreateGroupPage> {
                           });
                         },
                         title: Text(_friendTitle(item)),
-                        subtitle: Text(_friendUserId(item)),
+                        subtitle: Text(_friendSubtitle(item)),
                         controlAffinity: ListTileControlAffinity.leading,
                         shape: const RoundedRectangleBorder(
                           borderRadius: BorderRadius.zero,
@@ -1703,7 +1701,7 @@ class _GroupDetailPageState extends State<GroupDetailPage> {
             _PlainListTile(
               icon: Icons.person_add_alt_1,
               title: '添加成员',
-              subtitle: '输入用户 ID，同步群订阅者',
+              subtitle: '添加好友到群聊',
               trailing: '',
               onTap: _addMembers,
             ),
@@ -1750,7 +1748,7 @@ class _GroupDetailPageState extends State<GroupDetailPage> {
                         icon: Icons.person_outline,
                         title: _memberTitle(member),
                         subtitle: _memberSubtitle(member),
-                        trailing: _memberUserId(member),
+                        trailing: _memberUsername(member),
                         onTap: () async {
                           await Navigator.of(context).push(
                             MaterialPageRoute<void>(
@@ -1804,11 +1802,7 @@ class _GroupDetailPageState extends State<GroupDetailPage> {
       context,
       title: '添加群成员',
       fields: const [
-        ActionInputField(
-          id: 'member_ids',
-          label: '成员用户 ID',
-          hint: '多个 ID 用逗号分隔',
-        ),
+        ActionInputField(id: 'member_ids', label: '成员', hint: '多个内部账号用逗号分隔'),
       ],
     );
     if (data == null) {
@@ -1816,7 +1810,7 @@ class _GroupDetailPageState extends State<GroupDetailPage> {
     }
     final ids = _idsFromText(data['member_ids'] ?? '');
     if (ids.isEmpty) {
-      setState(() => _error = '成员用户 ID 不能为空');
+      setState(() => _error = '成员不能为空');
       return;
     }
     await _run(
@@ -1944,8 +1938,8 @@ class _GroupMemberActionPageState extends State<GroupMemberActionPage> {
           children: [
             _PlainListTile(
               icon: Icons.badge_outlined,
-              title: '成员 ID',
-              subtitle: memberId,
+              title: '成员',
+              subtitle: _memberSubtitle(widget.member),
               trailing: _memberRoleText(widget.member),
             ),
             _PlainListTile(
@@ -2112,8 +2106,8 @@ class _PrivateChatActionsPageState extends State<PrivateChatActionsPage> {
           children: [
             _PlainListTile(
               icon: Icons.badge_outlined,
-              title: '对方用户 ID',
-              subtitle: widget.receiverId,
+              title: '对方',
+              subtitle: widget.title,
               trailing: '',
             ),
             _PlainListTile(
@@ -2203,9 +2197,10 @@ class ChatPage extends StatefulWidget {
   State<ChatPage> createState() => _ChatPageState();
 }
 
-class _ChatPageState extends State<ChatPage> {
+class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   final _textController = TextEditingController();
   final _scrollController = ScrollController();
+  final _inputFocusNode = FocusNode();
   bool _sending = false;
   bool _toolsOpen = false;
   bool _burnAfterRead = false;
@@ -2216,6 +2211,7 @@ class _ChatPageState extends State<ChatPage> {
   String _selectedClientMsgNo = '';
   int _selectedMessageSeq = 0;
   Map<String, Object?> _selectedPayload = const {};
+  Map<String, Object?> _groupMuteState = const {};
   String? _error;
   String _message = '';
   List<Map<String, Object?>> _messages = const [];
@@ -2229,14 +2225,18 @@ class _ChatPageState extends State<ChatPage> {
   String get _groupId =>
       widget.groupId.isEmpty ? widget.channelId : widget.groupId;
   String get _receiverId => _privateReceiverIdFromChannel(widget.channelId);
+  bool get _composerEnabled =>
+      !_isGroup || _groupMuteText(_groupMuteState).isEmpty;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _conversationRevision = widget.controller.conversationVersion;
     _messageRevision = _currentMessageRevision();
     widget.controller.addListener(_onControllerChanged);
     _messageSub = widget.controller.messageEvents.listen(_onMessageEvent);
+    _inputFocusNode.addListener(_onInputFocusChanged);
     unawaited(
       widget.controller.openConversation(
         channelId: widget.channelId,
@@ -2244,6 +2244,10 @@ class _ChatPageState extends State<ChatPage> {
       ),
     );
     _loadMessagesIntoState(showLoading: true);
+    _refreshGroupMuteState();
+    if (_isGroup) {
+      unawaited(_loadGroupMuteStatus());
+    }
     _textController.text = widget.controller.readDraft(
       channelId: widget.channelId,
       channelType: widget.channelType,
@@ -2255,6 +2259,24 @@ class _ChatPageState extends State<ChatPage> {
         text: _textController.text,
       );
     });
+  }
+
+  @override
+  void didChangeMetrics() {
+    super.didChangeMetrics();
+    if (_inputFocusNode.hasFocus) {
+      _scheduleKeyboardScroll();
+    }
+  }
+
+  void _onInputFocusChanged() {
+    if (!_inputFocusNode.hasFocus) {
+      return;
+    }
+    if (_toolsOpen) {
+      setState(() => _toolsOpen = false);
+    }
+    _scheduleKeyboardScroll();
   }
 
   @override
@@ -2272,6 +2294,7 @@ class _ChatPageState extends State<ChatPage> {
       _conversationRevision = widget.controller.conversationVersion;
       _messageRevision = _currentMessageRevision();
       _messages = const [];
+      _groupMuteState = const {};
       unawaited(
         widget.controller.openConversation(
           channelId: widget.channelId,
@@ -2279,6 +2302,10 @@ class _ChatPageState extends State<ChatPage> {
         ),
       );
       _loadMessagesIntoState(showLoading: true);
+      _refreshGroupMuteState();
+      if (_isGroup) {
+        unawaited(_loadGroupMuteStatus());
+      }
     }
   }
 
@@ -2288,13 +2315,56 @@ class _ChatPageState extends State<ChatPage> {
     }
     final nextConversation = widget.controller.conversationVersion;
     final nextMessage = _currentMessageRevision();
+    final muteChanged = _refreshGroupMuteState();
     if (nextConversation == _conversationRevision &&
-        nextMessage == _messageRevision) {
+        nextMessage == _messageRevision &&
+        !muteChanged) {
       return;
     }
     _conversationRevision = nextConversation;
     _messageRevision = nextMessage;
     _loadMessagesIntoState(showLoading: false);
+  }
+
+  bool _refreshGroupMuteState() {
+    if (!_isGroup) {
+      if (_groupMuteState.isEmpty) {
+        return false;
+      }
+      setState(() => _groupMuteState = const {});
+      return true;
+    }
+    final state = widget.controller.groupMuteState(
+      channelId: widget.channelId,
+      groupId: _groupId,
+    );
+    if (_sameStringMap(_groupMuteState, state)) {
+      return false;
+    }
+    if (mounted) {
+      setState(() => _groupMuteState = state);
+    } else {
+      _groupMuteState = state;
+    }
+    return true;
+  }
+
+  Future<void> _loadGroupMuteStatus() async {
+    try {
+      await widget.controller.loadGroupMuteStatus(
+        groupId: _groupId,
+        channelId: widget.channelId,
+      );
+      if (mounted) {
+        _refreshGroupMuteState();
+      }
+    } catch (error) {
+      AppLogger.warn(
+        'ui',
+        'load group mute status failed',
+        data: {'group_id': _groupId, 'error': error.toString()},
+      );
+    }
   }
 
   void _onMessageEvent(BusinessImMessageEvent event) {
@@ -2372,8 +2442,11 @@ class _ChatPageState extends State<ChatPage> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _messageSub?.cancel();
     _scrollController.dispose();
+    _inputFocusNode.removeListener(_onInputFocusChanged);
+    _inputFocusNode.dispose();
     widget.controller.closeConversation(
       channelId: widget.channelId,
       channelType: widget.channelType,
@@ -2434,9 +2507,41 @@ class _ChatPageState extends State<ChatPage> {
     });
   }
 
+  void _scheduleKeyboardScroll() {
+    _scrollToBottom();
+    Future<void>.delayed(const Duration(milliseconds: 80), () {
+      if (mounted && _inputFocusNode.hasFocus) {
+        _scrollToBottom();
+      }
+    });
+    Future<void>.delayed(const Duration(milliseconds: 260), () {
+      if (mounted && _inputFocusNode.hasFocus) {
+        _scrollToBottom();
+      }
+    });
+  }
+
+  void _toggleTools() {
+    if (!_composerEnabled) {
+      return;
+    }
+    final opening = !_toolsOpen;
+    if (opening) {
+      FocusScope.of(context).unfocus();
+    }
+    setState(() => _toolsOpen = opening);
+    if (!opening) {
+      _scrollToBottom();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    final keyboardInset = MediaQuery.viewInsetsOf(context).bottom;
+    final muteText = _groupMuteText(_groupMuteState);
+    final composerEnabled = _composerEnabled;
     return Scaffold(
+      resizeToAvoidBottomInset: false,
       backgroundColor: const Color(0xfff1f2f4),
       appBar: AppBar(
         backgroundColor: Colors.white,
@@ -2470,87 +2575,95 @@ class _ChatPageState extends State<ChatPage> {
         ],
       ),
       body: SafeArea(
-        child: AnimatedBuilder(
-          animation: widget.controller,
-          builder: (context, _) {
-            return Column(
-              children: [
-                if (_error != null) _ChatError(text: _error!),
-                if (_message.isNotEmpty) _InfoBar(text: _message),
-                if (_replyClientMsgNo.isNotEmpty ||
-                    _burnAfterRead ||
-                    _mentionAll ||
-                    _mentionUserIds.isNotEmpty)
-                  _ChatOptionBar(text: _optionText(), onClear: _clearOptions),
-                if (_selectedClientMsgNo.isNotEmpty)
-                  _SelectedMessageBar(
-                    onReply: () => setState(() {
-                      _replyClientMsgNo = _selectedClientMsgNo;
-                      _selectedClientMsgNo = '';
-                    }),
-                    onReceipt: _queryReceipt,
-                    onRecall: _recallSelected,
-                    onBurn: _burnSelected,
-                    onReceiveRedPacket: _receiveSelectedRedPacket,
-                    onReceiveTransfer: _receiveSelectedTransfer,
-                    onClear: () => setState(() {
-                      _selectedClientMsgNo = '';
-                      _selectedPayload = const {};
-                    }),
+        child: AnimatedPadding(
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeOut,
+          padding: EdgeInsets.only(bottom: keyboardInset),
+          child: AnimatedBuilder(
+            animation: widget.controller,
+            builder: (context, _) {
+              return Column(
+                children: [
+                  if (_error != null) _ChatError(text: _error!),
+                  if (_message.isNotEmpty) _InfoBar(text: _message),
+                  if (_replyClientMsgNo.isNotEmpty ||
+                      _burnAfterRead ||
+                      _mentionAll ||
+                      _mentionUserIds.isNotEmpty)
+                    _ChatOptionBar(text: _optionText(), onClear: _clearOptions),
+                  if (_selectedClientMsgNo.isNotEmpty)
+                    _SelectedMessageBar(
+                      onReply: () => setState(() {
+                        _replyClientMsgNo = _selectedClientMsgNo;
+                        _selectedClientMsgNo = '';
+                      }),
+                      onReceipt: _queryReceipt,
+                      onRecall: _recallSelected,
+                      onBurn: _burnSelected,
+                      onReceiveRedPacket: _receiveSelectedRedPacket,
+                      onReceiveTransfer: _receiveSelectedTransfer,
+                      onClear: () => setState(() {
+                        _selectedClientMsgNo = '';
+                        _selectedPayload = const {};
+                      }),
+                    ),
+                  Expanded(
+                    child: _messagesLoading && _messages.isEmpty
+                        ? const Center(child: CircularProgressIndicator())
+                        : _messages.isEmpty
+                        ? const _EmptyState(text: '暂无消息')
+                        : ListView.builder(
+                            controller: _scrollController,
+                            padding: const EdgeInsets.fromLTRB(14, 14, 14, 20),
+                            itemCount: _messages.length,
+                            itemBuilder: (context, index) {
+                              final item = _messages[index];
+                              return Column(
+                                children: [
+                                  if (_shouldShowTimeDivider(_messages, index))
+                                    _TimeDivider(text: _messageTimeLabel(item)),
+                                  _MessageRow(
+                                    item: item,
+                                    showSenderName: _isGroup,
+                                    onLongPress: () => _selectMessage(item),
+                                  ),
+                                ],
+                              );
+                            },
+                          ),
                   ),
-                Expanded(
-                  child: _messagesLoading && _messages.isEmpty
-                      ? const Center(child: CircularProgressIndicator())
-                      : _messages.isEmpty
-                      ? const _EmptyState(text: '暂无消息')
-                      : ListView.builder(
-                          controller: _scrollController,
-                          padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
-                          itemCount: _messages.length,
-                          itemBuilder: (context, index) {
-                            final item = _messages[index];
-                            return Column(
-                              children: [
-                                if (_shouldShowTimeDivider(_messages, index))
-                                  _TimeDivider(text: _messageTimeLabel(item)),
-                                _MessageRow(
-                                  item: item,
-                                  showSenderName: _isGroup,
-                                  onLongPress: () => _selectMessage(item),
-                                ),
-                              ],
-                            );
-                          },
-                        ),
-                ),
-                if (_toolsOpen)
-                  _ChatToolsPanel(
-                    isGroup: _isGroup,
-                    onTextOption: _openTextOptions,
-                    onImage: () => _sendMedia(ChatContentTypes.image),
-                    onEmoji: () => _sendMedia(ChatContentTypes.emoji),
-                    onGif: () => _sendMedia(ChatContentTypes.gif),
-                    onSticker: () => _sendMedia(ChatContentTypes.sticker),
+                  if (_toolsOpen)
+                    _ChatToolsPanel(
+                      isGroup: _isGroup,
+                      onTextOption: _openTextOptions,
+                      onImage: () => _sendMedia(ChatContentTypes.image),
+                      onEmoji: () => _sendMedia(ChatContentTypes.emoji),
+                      onGif: () => _sendMedia(ChatContentTypes.gif),
+                      onSticker: () => _sendMedia(ChatContentTypes.sticker),
+                      onVoice: () => _sendMedia(ChatContentTypes.voice),
+                      onVideo: () => _sendMedia(ChatContentTypes.video),
+                      onFile: () => _sendMedia(ChatContentTypes.file),
+                      onContactCard: _sendContactCard,
+                      onTransfer: _sendTransfer,
+                      onRedPacket: _sendRedPacket,
+                      onGroupMembers: _isGroup ? _openGroupMembers : null,
+                    ),
+                  _Composer(
+                    controller: _textController,
+                    focusNode: _inputFocusNode,
+                    sending: _sending,
+                    enabled: composerEnabled,
+                    disabledText: muteText,
+                    toolsOpen: _toolsOpen,
                     onVoice: () => _sendMedia(ChatContentTypes.voice),
-                    onVideo: () => _sendMedia(ChatContentTypes.video),
-                    onFile: () => _sendMedia(ChatContentTypes.file),
-                    onContactCard: _sendContactCard,
-                    onTransfer: _sendTransfer,
-                    onRedPacket: _sendRedPacket,
-                    onGroupMembers: _isGroup ? _openGroupMembers : null,
+                    onEmoji: () => _sendMedia(ChatContentTypes.emoji),
+                    onTools: _toggleTools,
+                    onSend: _sendText,
                   ),
-                _Composer(
-                  controller: _textController,
-                  sending: _sending,
-                  toolsOpen: _toolsOpen,
-                  onVoice: () => _sendMedia(ChatContentTypes.voice),
-                  onEmoji: () => _sendMedia(ChatContentTypes.emoji),
-                  onTools: () => setState(() => _toolsOpen = !_toolsOpen),
-                  onSend: _sendText,
-                ),
-              ],
-            );
-          },
+                ],
+              );
+            },
+          ),
         ),
       ),
     );
@@ -2566,6 +2679,10 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   Future<void> _sendText() async {
+    if (!_composerEnabled) {
+      setState(() => _message = _groupMuteText(_groupMuteState));
+      return;
+    }
     final text = _textController.text.trim();
     if (text.isEmpty) {
       return;
@@ -2590,6 +2707,10 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   Future<void> _sendMedia(String contentType) async {
+    if (!_composerEnabled) {
+      setState(() => _message = _groupMuteText(_groupMuteState));
+      return;
+    }
     final fields = _mediaFields(contentType);
     final data = await _openInput(
       context,
@@ -2633,17 +2754,21 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   Future<void> _sendContactCard() async {
+    if (!_composerEnabled) {
+      setState(() => _message = _groupMuteText(_groupMuteState));
+      return;
+    }
     final data = await _openInput(
       context,
       title: '发送名片',
-      fields: const [ActionInputField(id: 'card_user_id', label: '名片用户 ID')],
+      fields: const [ActionInputField(id: 'card_user_id', label: '名片用户')],
     );
     if (data == null) {
       return;
     }
     final cardUserId = data['card_user_id'] ?? '';
     if (cardUserId.isEmpty) {
-      setState(() => _error = '名片用户 ID 不能为空');
+      setState(() => _error = '名片用户不能为空');
       return;
     }
     await _runSending(() async {
@@ -2663,6 +2788,10 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   Future<void> _sendTransfer() async {
+    if (!_composerEnabled) {
+      setState(() => _message = _groupMuteText(_groupMuteState));
+      return;
+    }
     final data = await _openInput(
       context,
       title: '发送转账',
@@ -2678,8 +2807,7 @@ class _ChatPageState extends State<ChatPage> {
           hint: 'money 或 integral',
           initial: 'money',
         ),
-        if (_isGroup)
-          const ActionInputField(id: 'receiver_id', label: '指定收款人 ID'),
+        if (_isGroup) const ActionInputField(id: 'receiver_id', label: '指定收款人'),
       ],
     );
     if (data == null) {
@@ -2705,6 +2833,10 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   Future<void> _sendRedPacket() async {
+    if (!_composerEnabled) {
+      setState(() => _message = _groupMuteText(_groupMuteState));
+      return;
+    }
     final data = await _openInput(
       context,
       title: '发送红包',
@@ -2735,8 +2867,7 @@ class _ChatPageState extends State<ChatPage> {
             keyboardType: TextInputType.number,
             initial: '1',
           ),
-        if (_isGroup)
-          const ActionInputField(id: 'receiver_id', label: '指定接收人 ID'),
+        if (_isGroup) const ActionInputField(id: 'receiver_id', label: '指定接收人'),
       ],
     );
     if (data == null) {
@@ -2766,6 +2897,10 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   Future<void> _openTextOptions() async {
+    if (!_composerEnabled) {
+      setState(() => _message = _groupMuteText(_groupMuteState));
+      return;
+    }
     final data = await _openInput(
       context,
       title: '文本选项',
@@ -2773,8 +2908,8 @@ class _ChatPageState extends State<ChatPage> {
         if (_isGroup)
           ActionInputField(
             id: 'mention_user_ids',
-            label: '@成员 ID',
-            hint: '多个 ID 用逗号分隔',
+            label: '@成员',
+            hint: '多个成员用逗号分隔',
             initial: _mentionUserIds.join(','),
           ),
         if (_isGroup)
@@ -4247,7 +4382,10 @@ class _ToolItem {
 class _Composer extends StatelessWidget {
   const _Composer({
     required this.controller,
+    required this.focusNode,
     required this.sending,
+    required this.enabled,
+    required this.disabledText,
     required this.toolsOpen,
     required this.onVoice,
     required this.onEmoji,
@@ -4256,7 +4394,10 @@ class _Composer extends StatelessWidget {
   });
 
   final TextEditingController controller;
+  final FocusNode focusNode;
   final bool sending;
+  final bool enabled;
+  final String disabledText;
   final bool toolsOpen;
   final VoidCallback onVoice;
   final VoidCallback onEmoji;
@@ -4278,7 +4419,7 @@ class _Composer extends StatelessWidget {
             _ComposerIconButton(
               tooltip: '语音',
               icon: Icons.mic_none,
-              onPressed: sending ? null : onVoice,
+              onPressed: sending || !enabled ? null : onVoice,
             ),
             const SizedBox(width: 6),
             Expanded(
@@ -4287,32 +4428,39 @@ class _Composer extends StatelessWidget {
                 color: Colors.white,
                 child: TextField(
                   controller: controller,
+                  focusNode: focusNode,
                   minLines: 1,
                   maxLines: 4,
+                  readOnly: !enabled,
+                  enabled: enabled,
                   textInputAction: TextInputAction.send,
                   onSubmitted: (_) {
-                    if (!sending) {
+                    if (!sending && enabled) {
                       onSend();
                     }
                   },
-                  decoration: const InputDecoration(
-                    hintText: '',
+                  decoration: InputDecoration(
+                    hintText: enabled ? '' : disabledText,
                     filled: true,
-                    fillColor: Colors.white,
+                    fillColor: enabled ? Colors.white : const Color(0xffeeeeee),
                     isDense: true,
-                    border: OutlineInputBorder(
+                    border: const OutlineInputBorder(
                       borderRadius: BorderRadius.zero,
                       borderSide: BorderSide.none,
                     ),
-                    enabledBorder: OutlineInputBorder(
+                    enabledBorder: const OutlineInputBorder(
                       borderRadius: BorderRadius.zero,
                       borderSide: BorderSide.none,
                     ),
-                    focusedBorder: OutlineInputBorder(
+                    disabledBorder: const OutlineInputBorder(
                       borderRadius: BorderRadius.zero,
                       borderSide: BorderSide.none,
                     ),
-                    contentPadding: EdgeInsets.symmetric(
+                    focusedBorder: const OutlineInputBorder(
+                      borderRadius: BorderRadius.zero,
+                      borderSide: BorderSide.none,
+                    ),
+                    contentPadding: const EdgeInsets.symmetric(
                       horizontal: 10,
                       vertical: 10,
                     ),
@@ -4324,18 +4472,18 @@ class _Composer extends StatelessWidget {
             _ComposerIconButton(
               tooltip: '表情',
               icon: Icons.sentiment_satisfied_alt,
-              onPressed: sending ? null : onEmoji,
+              onPressed: sending || !enabled ? null : onEmoji,
             ),
             const SizedBox(width: 4),
             _ComposerIconButton(
               tooltip: toolsOpen ? '收起' : '更多',
               icon: toolsOpen ? Icons.close : Icons.add_circle_outline,
-              onPressed: onTools,
+              onPressed: enabled ? onTools : null,
             ),
             ValueListenableBuilder<TextEditingValue>(
               valueListenable: controller,
               builder: (context, value, _) {
-                if (value.text.trim().isEmpty) {
+                if (!enabled || value.text.trim().isEmpty) {
                   return const SizedBox.shrink();
                 }
                 return Row(
@@ -4795,11 +4943,7 @@ String _messageSenderName(Map<String, Object?> item) {
   return _value(
     fromUser,
     ['nickname', 'username', 'name'],
-    fallback: _value(item, [
-      'from_nickname',
-      'from_username',
-      'from_uid',
-    ], fallback: 'B'),
+    fallback: _value(item, ['from_nickname', 'from_username'], fallback: '成员'),
   );
 }
 
@@ -4938,6 +5082,16 @@ String _receiptText(Map<String, Object?> result, {required bool isGroup}) {
   return parts.join('\n');
 }
 
+String _sessionDisplayName(UserSession? session) {
+  if (session == null) {
+    return '';
+  }
+  if (session.nickname.isNotEmpty) {
+    return session.nickname;
+  }
+  return session.username;
+}
+
 String _conversationTitle(Map<String, Object?> item) {
   if (_channelTypeFromConversation(item) == _groupChannelType) {
     return _value(item, ['name', 'group_name'], fallback: '群聊');
@@ -5013,10 +5167,8 @@ String _friendSubtitle(Map<String, Object?> item) {
     'signature',
     'bio',
   ], fallback: _value(item, ['signature']));
-  final id = _friendUserId(item);
   return [
     if (username.isNotEmpty) '用户名 $username',
-    if (id.isNotEmpty) 'ID $id',
     if (signature.isNotEmpty) signature,
   ].join(' · ');
 }
@@ -5054,11 +5206,9 @@ String _searchFriendTitle(Map<String, Object?> item) {
 
 String _searchFriendSubtitle(Map<String, Object?> item) {
   final user = _asObjectMap(item['user']);
-  final id = _searchFriendId(item);
   final username = _value(user, ['username']);
   final signature = _value(user, ['signature']);
   return [
-    if (id.isNotEmpty) 'ID $id',
     if (username.isNotEmpty) username,
     if (signature.isNotEmpty) signature,
     _friendStatusText(item),
@@ -5111,6 +5261,10 @@ String _memberTitle(Map<String, Object?> item) {
   return _value(item, ['nickname', 'username', 'name'], fallback: '群成员');
 }
 
+String _memberUsername(Map<String, Object?> item) {
+  return _value(item, ['username'], fallback: _memberRoleText(item));
+}
+
 String _memberUserId(Map<String, Object?> item) {
   final value = _value(item, ['user_id', 'userid', 'member_id', 'id']);
   if (value.isNotEmpty) {
@@ -5120,7 +5274,12 @@ String _memberUserId(Map<String, Object?> item) {
 }
 
 String _memberSubtitle(Map<String, Object?> item) {
-  final parts = [_memberRoleText(item)];
+  final username = _memberUsername(item);
+  final parts = [
+    if (username.isNotEmpty && username != _memberRoleText(item))
+      '用户名 $username',
+    _memberRoleText(item),
+  ];
   final muted = _boolValue(item['muted']);
   if (muted) {
     final permanent = _boolValue(item['mute_permanent']);
@@ -5208,6 +5367,53 @@ bool _boolValue(Object? value) {
   }
   final text = value?.toString().toLowerCase() ?? '';
   return text == '1' || text == 'true' || text == 'yes';
+}
+
+bool _sameStringMap(Map<String, Object?> left, Map<String, Object?> right) {
+  if (left.length != right.length) {
+    return false;
+  }
+  for (final entry in left.entries) {
+    if (right[entry.key]?.toString() != entry.value?.toString()) {
+      return false;
+    }
+  }
+  return true;
+}
+
+String _groupMuteText(Map<String, Object?> state) {
+  if (!_boolValue(state['muted'])) {
+    return '';
+  }
+  final expire = _value(state, ['expire_time', 'mute_expire_time']);
+  if (expire.isNotEmpty) {
+    final expireAt = _parseUiTime(expire);
+    if (expireAt != null && !expireAt.isAfter(DateTime.now())) {
+      return '';
+    }
+  }
+  final notice = _value(state, ['notice']);
+  if (notice.isNotEmpty) {
+    return notice;
+  }
+  final reason = _value(state, ['reason']);
+  final permanent =
+      _boolValue(state['permanent']) || _boolValue(state['mute_permanent']);
+  final parts = <String>['你已被管理员禁言'];
+  if (reason.isNotEmpty) {
+    parts.add('原因：$reason');
+  }
+  parts.add(permanent || expire.isEmpty ? '永久生效' : '至 $expire');
+  return parts.join('，');
+}
+
+DateTime? _parseUiTime(String value) {
+  final numeric = int.tryParse(value);
+  if (numeric != null) {
+    final millis = numeric > 100000000000 ? numeric : numeric * 1000;
+    return DateTime.fromMillisecondsSinceEpoch(millis);
+  }
+  return DateTime.tryParse(value.replaceFirst(' ', 'T'));
 }
 
 Map<String, Object?> _asObjectMap(Object? value) {

@@ -51,6 +51,8 @@ class BusinessImService extends ChangeNotifier {
       <String, Future<List<Map<String, Object?>>>>{};
   final Set<String> _historySyncedChannels = <String>{};
   final Set<String> _openMessageChannels = <String>{};
+  final Map<String, Map<String, Object?>> _groupMuteStates =
+      <String, Map<String, Object?>>{};
 
   Stream<BusinessImMessageEvent> get messageEvents => _messageEvents.stream;
   bool get isStarted => _started;
@@ -78,6 +80,66 @@ class BusinessImService extends ChangeNotifier {
     return _channelMessageVersions[_messageKey(channelID, channelType)] ?? 0;
   }
 
+  Map<String, Object?> groupMuteState({
+    required String channelID,
+    required String groupId,
+  }) {
+    final chat = _requireChat();
+    final candidates = [
+      _messageKey(
+        _canonicalChannelId(channelID, chat.channelTypeGroup),
+        chat.channelTypeGroup,
+      ),
+      if (groupId.isNotEmpty) _messageKey(groupId, chat.channelTypeGroup),
+    ];
+    for (final key in candidates) {
+      final state = _groupMuteStates[key];
+      if (state != null) {
+        return Map<String, Object?>.from(state);
+      }
+    }
+    return const <String, Object?>{};
+  }
+
+  void applyGroupMuteState({
+    required String channelID,
+    required String groupId,
+    required Map<String, Object?> state,
+    required String source,
+  }) {
+    if (state.isEmpty) {
+      return;
+    }
+    final chat = _requireChat();
+    final canonicalChannelId = _canonicalChannelId(
+      channelID.isNotEmpty ? channelID : groupId,
+      chat.channelTypeGroup,
+    );
+    final normalized = _normalizeGroupMuteState(
+      state,
+      channelId: canonicalChannelId,
+      groupId: groupId,
+    );
+    final keys = <String>{
+      _messageKey(canonicalChannelId, chat.channelTypeGroup),
+      if (groupId.isNotEmpty) _messageKey(groupId, chat.channelTypeGroup),
+    };
+    for (final key in keys) {
+      _groupMuteStates[key] = normalized;
+    }
+    AppLogger.info(
+      'im',
+      'group mute state updated',
+      data: {
+        'source': source,
+        'channel_id': canonicalChannelId,
+        'group_id': normalized['group_id']?.toString() ?? groupId,
+        'muted': normalized['muted'],
+      },
+    );
+    notifyListeners();
+  }
+
   Future<void> start(UserSession session, {required String device}) async {
     final chat = session.chat;
     if (chat == null || chat.uid.isEmpty || chat.token.isEmpty) {
@@ -87,6 +149,7 @@ class BusinessImService extends ChangeNotifier {
     _started = true;
     _session = session;
     _device = device;
+    _groupMuteStates.clear();
     _historySyncedChannels.clear();
     _latestConversations = _cache.readConversations(chat.uid);
     _bumpConversations('cache_loaded', notify: false);
@@ -130,6 +193,7 @@ class BusinessImService extends ChangeNotifier {
     if (logout) {
       _session = null;
       _latestConversations = const [];
+      _groupMuteStates.clear();
     }
     _setStatus('未连接');
   }
@@ -165,6 +229,10 @@ class BusinessImService extends ChangeNotifier {
         .readConversations(chat.uid)
         .map(_normalizeConversation)
         .toList();
+    _seedConversationTailMessages(
+      _latestConversations,
+      source: 'local_refresh',
+    );
     _cache.writeConversations(
       uid: chat.uid,
       conversations: _latestConversations,
@@ -208,23 +276,7 @@ class BusinessImService extends ChangeNotifier {
       channelId: channelID,
       channelType: channelType,
     );
-    final lastSeq = messages.fold<int>(
-      0,
-      (maxSeq, item) => max(maxSeq, _intValue(item, ['message_seq'])),
-    );
-    final lastMsgNo = messages.isEmpty
-        ? ''
-        : messages.last['client_msg_no']?.toString() ?? '';
-    _cache.writeReadMarker(
-      uid: chat.uid,
-      channelId: channelID,
-      channelType: channelType,
-      marker: {
-        'message_seq': lastSeq,
-        'client_msg_no': lastMsgNo,
-        'read_at': DateTime.now().millisecondsSinceEpoch ~/ 1000,
-      },
-    );
+    _writeReadMarkerForMessages(channelID, channelType, messages);
     if (_clearConversationUnread(channelID, channelType, source: 'mark_read')) {
       _markMessageChannel(
         source: 'mark_read',
@@ -248,6 +300,10 @@ class BusinessImService extends ChangeNotifier {
         limit: 50,
       );
       _latestConversations = list.map(_normalizeConversation).toList();
+      _seedConversationTailMessages(
+        _latestConversations,
+        source: 'server_sync',
+      );
       _cache.writeConversations(
         uid: chat.uid,
         conversations: _latestConversations,
@@ -296,7 +352,16 @@ class BusinessImService extends ChangeNotifier {
       },
     );
     final key = _messageKey(channelID, channelType);
-    if (cached.isEmpty && !_historySyncedChannels.contains(key)) {
+    final missingTailBeforeSync = _conversationTailMissing(
+      channelID,
+      channelType,
+      cached,
+    );
+    if (missingTailBeforeSync) {
+      _historySyncedChannels.remove(key);
+    }
+    if ((cached.isEmpty && !_historySyncedChannels.contains(key)) ||
+        missingTailBeforeSync) {
       cached = await syncChannelMessages(
         channelID: channelID,
         channelType: channelType,
@@ -304,7 +369,18 @@ class BusinessImService extends ChangeNotifier {
         limit: limit,
       );
     }
-    return _sortAndLimit(cached, limit);
+    cached = _seedConversationTailMessageForChannel(
+      channelID,
+      channelType,
+      cached,
+      source: 'local_messages',
+    );
+    final sorted = _sortAndLimit(cached, limit);
+    if (_openMessageChannels.contains(key)) {
+      _writeReadMarkerForMessages(channelID, channelType, sorted);
+      _clearConversationUnread(channelID, channelType, source: 'local_read');
+    }
+    return sorted;
   }
 
   Future<List<Map<String, Object?>>> syncChannelMessages({
@@ -477,9 +553,17 @@ class BusinessImService extends ChangeNotifier {
     channelID = _canonicalChannelId(channelID, channelType);
     final session = _requireSession();
     final chat = _requireChat();
+    if (channelType == chat.channelTypeGroup) {
+      final muteState = groupMuteState(channelID: channelID, groupId: groupId);
+      final muteNotice = _activeGroupMuteNotice(muteState);
+      if (muteNotice.isNotEmpty) {
+        throw ApiException(muteNotice);
+      }
+    }
     final clientMsgNo = newClientMsgNo();
     final cleanPayload = _cleanPayload({
       ...payload,
+      'protocol': 'blin.chat.v1',
       'content_type': contentType,
       'client_msg_no': clientMsgNo,
     });
@@ -906,7 +990,35 @@ class BusinessImService extends ChangeNotifier {
       channelId = packet.fromUid;
     }
     channelId = _canonicalChannelId(channelId, packet.channelType);
-    final message = _messageFromTcp(packet, channelId);
+    final payload = _decodeBusinessPayload(packet.payload);
+    if (_handleCommandPayload(payload, channelId, packet.channelType)) {
+      _sendRecvAck(packet);
+      AppLogger.info(
+        'im',
+        'tcp command message handled',
+        data: {
+          'client_msg_no': packet.clientMsgNo,
+          'channel_id': channelId,
+          'channel_type': packet.channelType,
+          'cmd': payload['cmd']?.toString() ?? '',
+        },
+      );
+      return;
+    }
+    final message = _messageFromTcp(packet, channelId, decodedPayload: payload);
+    if (message.isEmpty) {
+      _sendRecvAck(packet);
+      AppLogger.info(
+        'im',
+        'tcp non-chat message ignored',
+        data: {
+          'client_msg_no': packet.clientMsgNo,
+          'channel_id': channelId,
+          'channel_type': packet.channelType,
+        },
+      );
+      return;
+    }
     _upsertMessage(channelId, packet.channelType, message);
     _upsertConversationFromMessage(message);
     _publishMessageEvent(
@@ -1110,19 +1222,29 @@ class BusinessImService extends ChangeNotifier {
         )
         ? 0
         : _intValue(item, ['unread_quantity', 'unread']);
+    final contentType = _value(item, [
+      'content_type',
+    ], fallback: payload['content_type']?.toString() ?? '');
+    final content = _value(item, [
+      'content',
+    ], fallback: _payloadContent(payload));
+    final displayable = _isDisplayableChatPayload(
+      payload,
+      contentType: contentType,
+    );
     return <String, Object?>{
       ...item,
       'conversation_type': item['conversation_type']?.toString() ?? type,
       'channel_type': resolvedType,
       'channel_id': channelId,
       if (receiverId.isNotEmpty) 'receiver_id': receiverId,
-      'content': _value(item, ['content'], fallback: _payloadContent(payload)),
-      'content_type': _value(item, [
-        'content_type',
-      ], fallback: payload['content_type']?.toString() ?? ''),
+      'content': displayable ? content : '',
+      'content_type': displayable ? contentType : '',
       'payload': payload,
-      'msg_time': _value(item, ['msg_time', 'create_time', 'timestamp']),
-      'unread_quantity': unread,
+      'msg_time': displayable
+          ? _value(item, ['msg_time', 'create_time', 'timestamp'])
+          : '',
+      'unread_quantity': displayable ? unread : 0,
     };
   }
 
@@ -1135,6 +1257,12 @@ class BusinessImService extends ChangeNotifier {
     final message = _asMap(item['message']);
     final payload = _asMap(message['payload']);
     final fromUser = _asMap(item['fromUser']);
+    final contentType = _value(message, [
+      'content_type',
+    ], fallback: payload['content_type']?.toString() ?? '');
+    if (!_isDisplayableChatPayload(payload, contentType: contentType)) {
+      return const <String, Object?>{};
+    }
     final fromUid = _value(
       raw,
       ['from_uid'],
@@ -1162,9 +1290,7 @@ class BusinessImService extends ChangeNotifier {
       'content': _value(message, [
         'content',
       ], fallback: _payloadContent(payload)),
-      'content_type': _value(message, [
-        'content_type',
-      ], fallback: payload['content_type']?.toString() ?? ''),
+      'content_type': contentType,
       'payload': payload.isEmpty ? message : payload,
       'timestamp': _value(message, ['create_time', 'timestamp']),
       'status': 'sent',
@@ -1201,8 +1327,15 @@ class BusinessImService extends ChangeNotifier {
     };
   }
 
-  Map<String, Object?> _messageFromTcp(TcpRecvPacket packet, String channelId) {
-    final payload = _decodeBusinessPayload(packet.payload);
+  Map<String, Object?> _messageFromTcp(
+    TcpRecvPacket packet,
+    String channelId, {
+    Map<String, Object?>? decodedPayload,
+  }) {
+    final payload = decodedPayload ?? _decodeBusinessPayload(packet.payload);
+    if (!_isDisplayableChatPayload(payload)) {
+      return const <String, Object?>{};
+    }
     final canonicalChannelId = _canonicalChannelId(
       channelId,
       packet.channelType,
@@ -1230,6 +1363,92 @@ class BusinessImService extends ChangeNotifier {
         'sync_once': packet.header.syncOnce,
       },
     };
+  }
+
+  Map<String, Object?> _messageFromConversationTail(
+    Map<String, Object?> conversation,
+  ) {
+    final channelType = _intValue(conversation, ['channel_type']);
+    final channelId = _value(conversation, ['channel_id']);
+    if (channelId.isEmpty || channelType <= 0) {
+      return const <String, Object?>{};
+    }
+    final payload = _asMap(conversation['payload']);
+    final clientMsgNo = _value(conversation, [
+      'last_client_msg_no',
+      'client_msg_no',
+    ], fallback: _value(payload, ['client_msg_no']));
+    final messageSeq = _intValue(conversation, [
+      'last_msg_seq',
+      'message_seq',
+    ], fallback: _intValue(payload, ['message_seq']));
+    final content = _value(conversation, [
+      'content',
+    ], fallback: _payloadContent(payload));
+    final contentType = _value(conversation, [
+      'content_type',
+    ], fallback: payload['content_type']?.toString() ?? '');
+    if (!_isDisplayableChatPayload(payload, contentType: contentType)) {
+      return const <String, Object?>{};
+    }
+    final timestamp = _value(conversation, [
+      'msg_time',
+      'create_time',
+      'timestamp',
+    ]);
+    if (clientMsgNo.isEmpty &&
+        messageSeq <= 0 &&
+        content.isEmpty &&
+        timestamp.isEmpty) {
+      return const <String, Object?>{};
+    }
+    final fromUid = _value(conversation, [
+      'from_uid',
+      'sender_uid',
+    ], fallback: _value(payload, ['from_uid', 'sender_uid']));
+    final normalizedPayload = payload.isEmpty
+        ? _cleanPayload({
+            'content': _value(conversation, ['content']),
+            'content_type': contentType,
+            if (clientMsgNo.isNotEmpty) 'client_msg_no': clientMsgNo,
+          })
+        : payload;
+    return <String, Object?>{
+      'message_id': _value(conversation, ['message_id', 'message_idstr']),
+      'client_msg_no': clientMsgNo.isNotEmpty
+          ? clientMsgNo
+          : _conversationTailLocalMsgNo(
+              channelId: channelId,
+              channelType: channelType,
+              messageSeq: messageSeq,
+              content: content,
+              timestamp: timestamp,
+            ),
+      'message_seq': messageSeq,
+      'channel_id': channelId,
+      'channel_type': channelType,
+      if (_value(conversation, ['receiver_id']).isNotEmpty)
+        'receiver_id': _value(conversation, ['receiver_id']),
+      'from_uid': fromUid,
+      'is_me': fromUid.isNotEmpty && fromUid == _requireChat().uid,
+      'content': content,
+      'content_type': contentType,
+      'payload': normalizedPayload,
+      'timestamp': timestamp,
+      'status': 'sent',
+      'from_conversation_tail': true,
+    };
+  }
+
+  String _conversationTailLocalMsgNo({
+    required String channelId,
+    required int channelType,
+    required int messageSeq,
+    required String content,
+    required String timestamp,
+  }) {
+    final source = '$channelType|$channelId|$messageSeq|$timestamp|$content';
+    return 'conversation_tail_${_crypto.md5Text(source)}';
   }
 
   Map<String, Object?> _localOutgoingMessage({
@@ -1278,6 +1497,146 @@ class BusinessImService extends ChangeNotifier {
     }
   }
 
+  bool _isDisplayableChatPayload(
+    Map<String, Object?> payload, {
+    String contentType = '',
+  }) {
+    final type = contentType.isNotEmpty
+        ? contentType
+        : payload['content_type']?.toString() ?? '';
+    if (payload['protocol']?.toString() != 'blin.chat.v1') {
+      return false;
+    }
+    if (type == 'cmd' || type == 'recall') {
+      return false;
+    }
+    return ChatContentTypes.displayable.contains(type);
+  }
+
+  bool _handleCommandPayload(
+    Map<String, Object?> payload,
+    String channelId,
+    int channelType,
+  ) {
+    if (payload['protocol']?.toString() != 'blin.chat.v1' ||
+        payload['content_type']?.toString() != 'cmd') {
+      return false;
+    }
+    final cmd = payload['cmd']?.toString() ?? '';
+    if (cmd != 'group_member_mute_changed' &&
+        cmd != 'group_mute_changed' &&
+        cmd != 'group_member_unmute') {
+      return false;
+    }
+    final chat = _requireChat();
+    if (channelType != chat.channelTypeGroup) {
+      return true;
+    }
+    final targetUid = _value(payload, ['target_uid', 'member_uid']);
+    final targetUserId = _value(payload, ['target_user_id', 'member_id']);
+    final selfUserId = _requireSession().userId.toString();
+    final targetsSelf =
+        (targetUid.isNotEmpty && targetUid == chat.uid) ||
+        (targetUserId.isNotEmpty && targetUserId == selfUserId);
+    if (!targetsSelf) {
+      return true;
+    }
+    applyGroupMuteState(
+      channelID: channelId,
+      groupId: _value(payload, ['group_id']),
+      state: payload,
+      source: 'tcp_cmd',
+    );
+    return true;
+  }
+
+  Map<String, Object?> _normalizeGroupMuteState(
+    Map<String, Object?> state, {
+    required String channelId,
+    required String groupId,
+  }) {
+    final expireTime = _value(state, ['expire_time', 'mute_expire_time']);
+    final muted = _boolValue(state['muted']);
+    final permanent =
+        _boolValue(state['permanent']) ||
+        _boolValue(state['mute_permanent']) ||
+        (muted && expireTime.isEmpty);
+    final reason = _value(state, ['reason']);
+    final resolvedGroupId = _value(state, [
+      'group_id',
+    ], fallback: groupId.isNotEmpty ? groupId : _groupIdForChannel(channelId));
+    return <String, Object?>{
+      ...state,
+      'group_id': resolvedGroupId,
+      'channel_id': channelId,
+      'channel_type': _requireChat().channelTypeGroup,
+      'muted': muted ? 1 : 0,
+      'permanent': permanent ? 1 : 0,
+      'reason': reason,
+      'expire_time': expireTime,
+      'notice': _groupMuteNotice(
+        muted: muted,
+        reason: reason,
+        expireTime: expireTime,
+        permanent: permanent,
+        fallback: _value(state, ['notice']),
+      ),
+    };
+  }
+
+  String _activeGroupMuteNotice(Map<String, Object?> state) {
+    if (!_boolValue(state['muted'])) {
+      return '';
+    }
+    final expireTime = _value(state, ['expire_time', 'mute_expire_time']);
+    if (expireTime.isNotEmpty) {
+      final expireAt = _parseServerTime(expireTime);
+      if (expireAt != null && !expireAt.isAfter(DateTime.now())) {
+        return '';
+      }
+    }
+    return _groupMuteNotice(
+      muted: true,
+      reason: _value(state, ['reason']),
+      expireTime: expireTime,
+      permanent:
+          _boolValue(state['permanent']) ||
+          _boolValue(state['mute_permanent']) ||
+          expireTime.isEmpty,
+      fallback: _value(state, ['notice']),
+    );
+  }
+
+  String _groupMuteNotice({
+    required bool muted,
+    required String reason,
+    required String expireTime,
+    required bool permanent,
+    required String fallback,
+  }) {
+    if (fallback.isNotEmpty) {
+      return fallback;
+    }
+    if (!muted) {
+      return '你已恢复群内发言';
+    }
+    final parts = <String>['你已被管理员禁言'];
+    if (reason.isNotEmpty) {
+      parts.add('原因：$reason');
+    }
+    parts.add(permanent ? '永久生效' : '至 $expireTime');
+    return parts.join('，');
+  }
+
+  DateTime? _parseServerTime(String value) {
+    final numeric = int.tryParse(value);
+    if (numeric != null) {
+      final millis = numeric > 100000000000 ? numeric : numeric * 1000;
+      return DateTime.fromMillisecondsSinceEpoch(millis);
+    }
+    return DateTime.tryParse(value.replaceFirst(' ', 'T'));
+  }
+
   Map<String, Object?> _tryJsonMap(String text) {
     try {
       final decoded = jsonDecode(text);
@@ -1300,17 +1659,72 @@ class BusinessImService extends ChangeNotifier {
   ) {
     final messages = _readMessagesForChannel(channelId, channelType).toList();
     final clientMsgNo = message['client_msg_no']?.toString() ?? '';
-    final index = clientMsgNo.isEmpty
-        ? -1
-        : messages.indexWhere(
-            (item) => item['client_msg_no']?.toString() == clientMsgNo,
-          );
+    final messageSeq = _intValue(message, ['message_seq']);
+    final index = messages.indexWhere(
+      (item) => _sameMessageIdentity(item, clientMsgNo, messageSeq),
+    );
     if (index >= 0) {
       messages[index] = {...messages[index], ...message};
     } else {
       messages.add(message);
     }
     _writeMessages(channelId, channelType, _sortAndLimit(messages, 200));
+  }
+
+  void _seedConversationTailMessages(
+    List<Map<String, Object?>> conversations, {
+    required String source,
+  }) {
+    for (final conversation in conversations) {
+      final channelType = _intValue(conversation, ['channel_type']);
+      final channelId = _value(conversation, ['channel_id']);
+      if (channelId.isEmpty || channelType <= 0) {
+        continue;
+      }
+      final current = _readMessagesForChannel(channelId, channelType);
+      _seedConversationTailMessageForChannel(
+        channelId,
+        channelType,
+        current,
+        conversation: conversation,
+        source: source,
+      );
+    }
+  }
+
+  List<Map<String, Object?>> _seedConversationTailMessageForChannel(
+    String channelId,
+    int channelType,
+    List<Map<String, Object?>> current, {
+    Map<String, Object?>? conversation,
+    required String source,
+  }) {
+    final normalizedChannelId = _canonicalChannelId(channelId, channelType);
+    final sourceConversation =
+        conversation ??
+        _conversationForChannel(normalizedChannelId, channelType);
+    if (sourceConversation.isEmpty) {
+      return current;
+    }
+    final tail = _messageFromConversationTail(sourceConversation);
+    if (tail.isEmpty) {
+      return current;
+    }
+    final merged = _mergeMessages(current, [tail]);
+    final sorted = _sortAndLimit(merged, 200);
+    if (_tailMessageMissing(tail, current) ||
+        !_sameMessageList(current, sorted)) {
+      _writeMessages(normalizedChannelId, channelType, sorted);
+      _historySyncedChannels.remove(
+        _messageKey(normalizedChannelId, channelType),
+      );
+      _markMessageChannel(
+        source: 'conversation_tail_$source',
+        channelId: normalizedChannelId,
+        channelType: channelType,
+      );
+    }
+    return sorted;
   }
 
   List<Map<String, Object?>> _readMessagesForChannel(
@@ -1437,11 +1851,10 @@ class BusinessImService extends ChangeNotifier {
         .toList();
     for (final message in incoming) {
       final clientMsgNo = message['client_msg_no']?.toString() ?? '';
-      final index = clientMsgNo.isEmpty
-          ? -1
-          : merged.indexWhere(
-              (item) => item['client_msg_no']?.toString() == clientMsgNo,
-            );
+      final messageSeq = _intValue(message, ['message_seq']);
+      final index = merged.indexWhere(
+        (item) => _sameMessageIdentity(item, clientMsgNo, messageSeq),
+      );
       if (index >= 0) {
         merged[index] = {...merged[index], ...message};
       } else {
@@ -1449,6 +1862,44 @@ class BusinessImService extends ChangeNotifier {
       }
     }
     return merged;
+  }
+
+  bool _sameMessageIdentity(
+    Map<String, Object?> item,
+    String clientMsgNo,
+    int messageSeq,
+  ) {
+    if (clientMsgNo.isNotEmpty &&
+        item['client_msg_no']?.toString() == clientMsgNo) {
+      return true;
+    }
+    return messageSeq > 0 && _intValue(item, ['message_seq']) == messageSeq;
+  }
+
+  bool _tailMessageMissing(
+    Map<String, Object?> tail,
+    List<Map<String, Object?>> messages,
+  ) {
+    final clientMsgNo = _value(tail, ['client_msg_no']);
+    final messageSeq = _intValue(tail, ['message_seq']);
+    return !messages.any(
+      (item) => _sameMessageIdentity(item, clientMsgNo, messageSeq),
+    );
+  }
+
+  bool _sameMessageList(
+    List<Map<String, Object?>> left,
+    List<Map<String, Object?>> right,
+  ) {
+    if (left.length != right.length) {
+      return false;
+    }
+    for (var index = 0; index < left.length; index++) {
+      if (jsonEncode(left[index]) != jsonEncode(right[index])) {
+        return false;
+      }
+    }
+    return true;
   }
 
   void _writeMessages(
@@ -1461,6 +1912,61 @@ class BusinessImService extends ChangeNotifier {
       channelId: channelId,
       channelType: channelType,
       messages: messages,
+    );
+  }
+
+  bool _conversationTailMissing(
+    String channelId,
+    int channelType,
+    List<Map<String, Object?>> messages,
+  ) {
+    final conversation = _conversationForChannel(channelId, channelType);
+    if (conversation.isEmpty) {
+      return false;
+    }
+    final lastClientMsgNo = _value(conversation, [
+      'last_client_msg_no',
+      'client_msg_no',
+    ]);
+    final lastSeq = _intValue(conversation, ['last_msg_seq', 'message_seq']);
+    if (lastClientMsgNo.isEmpty && lastSeq <= 0) {
+      return false;
+    }
+    for (final message in messages) {
+      if (lastClientMsgNo.isNotEmpty &&
+          _value(message, ['client_msg_no']) == lastClientMsgNo) {
+        return false;
+      }
+      if (lastSeq > 0 && _intValue(message, ['message_seq']) == lastSeq) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  void _writeReadMarkerForMessages(
+    String channelId,
+    int channelType,
+    List<Map<String, Object?>> messages,
+  ) {
+    final chat = _requireChat();
+    final lastSeq = messages.fold<int>(
+      0,
+      (maxSeq, item) => max(maxSeq, _intValue(item, ['message_seq'])),
+    );
+    final sorted = _sortAndLimit(messages, messages.length);
+    final lastMsgNo = sorted.isEmpty
+        ? ''
+        : sorted.last['client_msg_no']?.toString() ?? '';
+    _cache.writeReadMarker(
+      uid: chat.uid,
+      channelId: channelId,
+      channelType: channelType,
+      marker: {
+        'message_seq': lastSeq,
+        'client_msg_no': lastMsgNo,
+        'read_at': DateTime.now().millisecondsSinceEpoch ~/ 1000,
+      },
     );
   }
 
@@ -1729,6 +2235,8 @@ class BusinessImService extends ChangeNotifier {
       ChatContentTypes.contactCard => '[名片]',
       ChatContentTypes.transfer => '[转账]',
       ChatContentTypes.redPacket => '[红包]',
+      ChatContentTypes.redPacketReceived => '[领取红包]',
+      ChatContentTypes.transferReceived => '[已收款]',
       _ => '',
     };
   }

@@ -1,8 +1,10 @@
+import 'dart:io';
 import 'dart:math';
 
 import 'package:dio/dio.dart';
 
 import 'app_logger.dart';
+import 'api_payload_crypto.dart';
 import 'api_signer.dart';
 import 'app_config.dart';
 import 'models.dart';
@@ -283,12 +285,13 @@ class ApiClient {
     Map<String, Object?> params = const {},
     String filePath = '',
   }) {
-    return imBusinessAction(
+    return secureImBusinessAction(
       action: 'im_person_send',
       session: session,
       device: device,
+      clientMsgNo: clientMsgNo,
+      secureParams: params,
       params: {
-        ...params,
         'receiver_id': receiverId,
         'client_msg_no': clientMsgNo,
         'content_type': contentType,
@@ -306,12 +309,13 @@ class ApiClient {
     Map<String, Object?> params = const {},
     String filePath = '',
   }) {
-    return imBusinessAction(
+    return secureImBusinessAction(
       action: 'im_group_send',
       session: session,
       device: device,
+      clientMsgNo: clientMsgNo,
+      secureParams: params,
       params: {
-        ...params,
         'group_id': groupId,
         'client_msg_no': clientMsgNo,
         'content_type': contentType,
@@ -390,6 +394,77 @@ class ApiClient {
     return result.data;
   }
 
+  Future<Map<String, Object?>> secureImBusinessAction({
+    required String action,
+    required UserSession session,
+    required String device,
+    required String clientMsgNo,
+    required Map<String, Object?> params,
+    required Map<String, Object?> secureParams,
+    String filePath = '',
+  }) async {
+    final timestamp = _timestamp();
+    final nonce = _nonce();
+    final payload = <String, Object?>{
+      ...params,
+      'usertoken': session.userToken,
+      'device': device,
+      'device_flag': AppConfig.imDeviceFlagApp.toString(),
+      'device_level': AppConfig.imDeviceLevelMaster.toString(),
+      'timestamp': timestamp,
+      'nonce': nonce,
+    };
+    if (secureParams.isNotEmpty) {
+      payload.addAll(
+        ApiPayloadCrypto.encrypt(
+          payload: secureParams,
+          appId: appId,
+          appKey: _signer.appKey,
+          userToken: session.userToken,
+          device: device,
+          clientMsgNo: clientMsgNo,
+          timestamp: timestamp,
+          nonce: nonce,
+        ),
+      );
+    }
+    EncryptedApiFile? encryptedFile;
+    if (filePath.isNotEmpty) {
+      encryptedFile = await ApiPayloadCrypto.encryptFile(
+        filePath: filePath,
+        device: device,
+        clientMsgNo: clientMsgNo,
+        timestamp: timestamp,
+        nonce: nonce,
+      );
+      payload.addAll({
+        'secure_file_alg': 'AES-128-CBC',
+        'secure_file_version': '1',
+        'secure_file_name': encryptedFile.originalName,
+        'secure_file_size': encryptedFile.originalSize.toString(),
+        'secure_file_sha256': encryptedFile.cipherSha256,
+      });
+    }
+    try {
+      payload['sign'] = _signer.sign({'appid': appId, ...payload});
+      final result = await post<Map<String, Object?>>(
+        action,
+        payload,
+        filePath: encryptedFile?.path ?? '',
+        fileFieldName: encryptedFile == null ? 'file' : 'secure_file',
+      );
+      if (!result.isSuccess) {
+        throw ApiException(result.message, code: result.code);
+      }
+      return result.data;
+    } finally {
+      final tempPath = encryptedFile?.path ?? '';
+      if (tempPath.isNotEmpty) {
+        await File(tempPath).delete().catchError((Object _) => File(tempPath));
+      }
+    }
+  }
+
   Future<void> logout({
     required UserSession session,
     required String device,
@@ -429,6 +504,7 @@ class ApiClient {
     String action,
     Map<String, Object?> params, {
     String filePath = '',
+    String fileFieldName = 'file',
   }) async {
     final stopwatch = Stopwatch()..start();
     AppLogger.info(
@@ -438,13 +514,13 @@ class ApiClient {
         'action': action,
         'base_url': baseUrl,
         'has_file': filePath.isNotEmpty,
-        'params': params,
+        'params': _safeLogParams(params),
       },
     );
     try {
       final requestData = <String, Object?>{'appid': appId, ...params};
       if (filePath.isNotEmpty) {
-        requestData['file'] = await MultipartFile.fromFile(filePath);
+        requestData[fileFieldName] = await MultipartFile.fromFile(filePath);
       }
       final response = await _dio.post<Object?>(
         action,
@@ -528,5 +604,29 @@ class ApiClient {
     final micros = DateTime.now().microsecondsSinceEpoch.toRadixString(36);
     final random = _nonceRandom.nextInt(1 << 32).toRadixString(36);
     return '$micros$random';
+  }
+
+  Map<String, Object?> _safeLogParams(Map<String, Object?> params) {
+    const sensitiveKeys = {
+      'password',
+      'usertoken',
+      'sign',
+      'content',
+      'secure_payload',
+      'file',
+      'money',
+      'remark',
+      'secure_file_name',
+      'secure_file_size',
+      'secure_file_sha256',
+    };
+    return {
+      for (final entry in params.entries)
+        entry.key: sensitiveKeys.contains(entry.key)
+            ? '***'
+            : entry.value is Map || entry.value is Iterable
+            ? '[complex]'
+            : entry.value,
+    };
   }
 }

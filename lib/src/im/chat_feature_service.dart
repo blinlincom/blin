@@ -116,7 +116,6 @@ class ChatFeatureService {
     required UserSession session,
     required String device,
     String keyword = '',
-    String friendId = '',
     int limit = 20,
   }) {
     return action(
@@ -125,7 +124,6 @@ class ChatFeatureService {
       device: device,
       params: {
         if (keyword.isNotEmpty) 'keyword': keyword,
-        if (friendId.isNotEmpty) 'friend_id': friendId,
         'limit': limit.toString(),
       },
     );
@@ -259,6 +257,19 @@ class ChatFeatureService {
       session: session,
       device: device,
       params: {'group_id': groupId, 'member_id': memberId},
+    );
+  }
+
+  Future<Map<String, Object?>> groupMuteStatus({
+    required UserSession session,
+    required String device,
+    required String groupId,
+  }) {
+    return action(
+      action: 'im_group_mute_status',
+      session: session,
+      device: device,
+      params: {'group_id': groupId},
     );
   }
 
