@@ -22,6 +22,10 @@ const _fillColor = Color(0xfff4f5f7);
 const _mutedColor = Color(0xff9aa0aa);
 const _textColor = Color(0xff202124);
 const _dangerColor = Color(0xffa40000);
+const _chatPageColor = Color(0xfff7f8fa);
+const _chatMineBubbleColor = Color(0xffdff6d8);
+const _chatOnlineColor = Color(0xff55c875);
+const _chatAckColor = Color(0xff42c977);
 const _privateChannelType = 1;
 const _groupChannelType = 2;
 
@@ -2767,44 +2771,35 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     final composerEnabled = _composerEnabled;
     return Scaffold(
       resizeToAvoidBottomInset: true,
-      backgroundColor: const Color(0xfff1f2f4),
-      appBar: AppBar(
-        backgroundColor: Colors.white,
-        surfaceTintColor: Colors.transparent,
-        foregroundColor: _textColor,
-        elevation: 0,
-        scrolledUnderElevation: 0,
-        title: Text(widget.title),
-        centerTitle: true,
-        actions: [
-          IconButton(
-            tooltip: _isGroup ? '群设置' : '聊天设置',
-            onPressed: () => _push(
-              context,
-              _isGroup
-                  ? GroupDetailPage(
-                      controller: widget.controller,
-                      title: widget.title,
-                      groupId: _groupId,
-                      channelId: widget.channelId,
-                    )
-                  : PrivateChatActionsPage(
-                      controller: widget.controller,
-                      title: widget.title,
-                      receiverId: _receiverId,
-                      channelId: widget.channelId,
-                    ),
-            ),
-            icon: const Icon(Icons.more_horiz),
-          ),
-        ],
-      ),
+      backgroundColor: _chatPageColor,
       body: SafeArea(
         child: AnimatedBuilder(
           animation: widget.controller,
           builder: (context, _) {
             return Column(
               children: [
+                _ChatHeader(
+                  title: widget.title,
+                  avatarUrl: _headerAvatarUrl(),
+                  isGroup: _isGroup,
+                  onBack: () => Navigator.of(context).maybePop(),
+                  onDetail: () => _push(
+                    context,
+                    _isGroup
+                        ? GroupDetailPage(
+                            controller: widget.controller,
+                            title: widget.title,
+                            groupId: _groupId,
+                            channelId: widget.channelId,
+                          )
+                        : PrivateChatActionsPage(
+                            controller: widget.controller,
+                            title: widget.title,
+                            receiverId: _receiverId,
+                            channelId: widget.channelId,
+                          ),
+                  ),
+                ),
                 if (_error != null) _ChatError(text: _error!),
                 if (_message.isNotEmpty) _InfoBar(text: _message),
                 if (_replyClientMsgNo.isNotEmpty ||
@@ -2837,7 +2832,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                       : ListView.builder(
                           controller: _scrollController,
                           reverse: true,
-                          padding: const EdgeInsets.fromLTRB(14, 14, 14, 20),
+                          padding: const EdgeInsets.fromLTRB(18, 12, 18, 18),
                           itemCount: _messages.length,
                           itemBuilder: (context, index) {
                             final messageIndex = _messages.length - 1 - index;
@@ -2863,6 +2858,18 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                           },
                         ),
                 ),
+                _Composer(
+                  controller: _textController,
+                  focusNode: _inputFocusNode,
+                  sending: _sending,
+                  enabled: composerEnabled,
+                  disabledText: muteText,
+                  toolsOpen: _toolsOpen,
+                  onVoice: () => _sendMedia(ChatContentTypes.voice),
+                  onEmoji: () => _sendMedia(ChatContentTypes.emoji),
+                  onTools: _toggleTools,
+                  onSend: _sendText,
+                ),
                 if (_toolsOpen)
                   _ChatToolsPanel(
                     isGroup: _isGroup,
@@ -2879,18 +2886,6 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                     onRedPacket: _sendRedPacket,
                     onGroupMembers: _isGroup ? _openGroupMembers : null,
                   ),
-                _Composer(
-                  controller: _textController,
-                  focusNode: _inputFocusNode,
-                  sending: _sending,
-                  enabled: composerEnabled,
-                  disabledText: muteText,
-                  toolsOpen: _toolsOpen,
-                  onVoice: () => _sendMedia(ChatContentTypes.voice),
-                  onEmoji: () => _sendMedia(ChatContentTypes.emoji),
-                  onTools: _toggleTools,
-                  onSend: _sendText,
-                ),
               ],
             );
           },
@@ -3488,6 +3483,27 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     return value == true ||
         value?.toString() == '1' ||
         value?.toString() == 'true';
+  }
+
+  String _headerAvatarUrl() {
+    for (final item in widget.controller.cachedConversations()) {
+      if (_value(item, ['channel_id']) == widget.channelId &&
+          _intValue(item, ['channel_type']) == widget.channelType) {
+        final avatar = _conversationAvatarUrl(item);
+        if (avatar.isNotEmpty) {
+          return avatar;
+        }
+      }
+    }
+    for (final item in _messages) {
+      if (!_isSelfMessage(item)) {
+        final avatar = _messageSenderAvatarUrl(item);
+        if (avatar.isNotEmpty) {
+          return avatar;
+        }
+      }
+    }
+    return '';
   }
 
   String _optionText() {
@@ -4606,6 +4622,7 @@ class _Avatar extends StatelessWidget {
     this.color = _primaryColor,
     this.icon,
     this.imageUrl = '',
+    this.circle = false,
   });
 
   final String label;
@@ -4613,6 +4630,7 @@ class _Avatar extends StatelessWidget {
   final Color color;
   final IconData? icon;
   final String imageUrl;
+  final bool circle;
 
   @override
   Widget build(BuildContext context) {
@@ -4621,6 +4639,7 @@ class _Avatar extends StatelessWidget {
       size: size,
       color: color,
       icon: icon,
+      circle: circle,
     );
     final url = _normalizeAvatarUrl(imageUrl);
     if (url.isEmpty) {
@@ -4631,7 +4650,7 @@ class _Avatar extends StatelessWidget {
       height: size,
       clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(size * 0.28),
+        borderRadius: BorderRadius.circular(circle ? size / 2 : size * 0.28),
       ),
       child: Image.network(
         url,
@@ -4653,12 +4672,14 @@ class _AvatarFallback extends StatelessWidget {
     required this.size,
     required this.color,
     this.icon,
+    this.circle = false,
   });
 
   final String label;
   final double size;
   final Color color;
   final IconData? icon;
+  final bool circle;
 
   @override
   Widget build(BuildContext context) {
@@ -4668,7 +4689,7 @@ class _AvatarFallback extends StatelessWidget {
       alignment: Alignment.center,
       decoration: BoxDecoration(
         color: color,
-        borderRadius: BorderRadius.circular(size * 0.28),
+        borderRadius: BorderRadius.circular(circle ? size / 2 : size * 0.28),
       ),
       child: icon == null
           ? Text(
@@ -4756,7 +4777,7 @@ class _MessageRow extends StatelessWidget {
         ? currentUserAvatarUrl
         : _messageSenderAvatarUrl(item);
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 7),
+      padding: const EdgeInsets.symmetric(vertical: 10),
       child: Row(
         mainAxisAlignment: isMe
             ? MainAxisAlignment.end
@@ -4764,8 +4785,8 @@ class _MessageRow extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           if (!isMe) ...[
-            _Avatar(label: sender, imageUrl: avatarUrl, size: 34),
-            const SizedBox(width: 8),
+            _Avatar(label: sender, imageUrl: avatarUrl, size: 42, circle: true),
+            const SizedBox(width: 10),
           ],
           Flexible(
             child: Column(
@@ -4789,27 +4810,26 @@ class _MessageRow extends StatelessWidget {
                   children: [
                     GestureDetector(
                       onLongPress: onLongPress,
-                      child: _MessageBubble(item: item, isMe: isMe),
-                    ),
-                    if (isMe) ...[
-                      const SizedBox(width: 5),
-                      _MessageSendStatus(
+                      child: _MessageBubble(
+                        item: item,
+                        isMe: isMe,
                         status: _messageStatus(item),
                         onRetry: onRetry,
                       ),
-                    ],
+                    ),
                   ],
                 ),
               ],
             ),
           ),
           if (isMe) ...[
-            const SizedBox(width: 8),
+            const SizedBox(width: 10),
             _Avatar(
               label: '我',
               imageUrl: avatarUrl,
-              size: 34,
+              size: 42,
               color: _primaryColor,
+              circle: true,
             ),
           ],
         ],
@@ -4818,51 +4838,357 @@ class _MessageRow extends StatelessWidget {
   }
 }
 
+class _ChatHeader extends StatelessWidget {
+  const _ChatHeader({
+    required this.title,
+    required this.avatarUrl,
+    required this.isGroup,
+    required this.onBack,
+    required this.onDetail,
+  });
+
+  final String title;
+  final String avatarUrl;
+  final bool isGroup;
+  final VoidCallback onBack;
+  final VoidCallback onDetail;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 72,
+      color: _chatPageColor,
+      padding: const EdgeInsets.fromLTRB(10, 6, 12, 8),
+      child: Row(
+        children: [
+          _HeaderIconButton(
+            tooltip: '返回',
+            icon: Icons.chevron_left,
+            iconSize: 34,
+            onPressed: onBack,
+          ),
+          const SizedBox(width: 2),
+          _Avatar(
+            label: title,
+            imageUrl: avatarUrl,
+            size: 44,
+            color: isGroup ? const Color(0xff34c759) : _primaryColor,
+            circle: true,
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title.isEmpty ? '聊天' : title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Colors.black,
+                    fontSize: 20,
+                    fontWeight: FontWeight.w800,
+                    height: 1.05,
+                  ),
+                ),
+                const SizedBox(height: 7),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const SizedBox(
+                      width: 8,
+                      height: 8,
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          color: _chatOnlineColor,
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 5),
+                    Text(
+                      isGroup ? '群聊' : '在线',
+                      style: const TextStyle(
+                        color: Color(0xff8c939d),
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
+                        height: 1,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          _HeaderIconButton(
+            tooltip: '语音通话',
+            icon: Icons.call_outlined,
+            onPressed: () {},
+          ),
+          const SizedBox(width: 8),
+          _HeaderIconButton(
+            tooltip: '视频通话',
+            icon: Icons.videocam_outlined,
+            onPressed: () {},
+          ),
+          const SizedBox(width: 8),
+          _HeaderIconButton(
+            tooltip: isGroup ? '群设置' : '聊天设置',
+            icon: Icons.more_horiz,
+            onPressed: onDetail,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _HeaderIconButton extends StatelessWidget {
+  const _HeaderIconButton({
+    required this.tooltip,
+    required this.icon,
+    required this.onPressed,
+    this.iconSize = 28,
+  });
+
+  final String tooltip;
+  final IconData icon;
+  final VoidCallback onPressed;
+  final double iconSize;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 36,
+      height: 44,
+      child: IconButton(
+        tooltip: tooltip,
+        padding: EdgeInsets.zero,
+        splashRadius: 22,
+        onPressed: onPressed,
+        icon: Icon(icon, color: Colors.black, size: iconSize),
+      ),
+    );
+  }
+}
+
 class _MessageBubble extends StatelessWidget {
-  const _MessageBubble({required this.item, required this.isMe});
+  const _MessageBubble({
+    required this.item,
+    required this.isMe,
+    required this.status,
+    required this.onRetry,
+  });
 
   final Map<String, Object?> item;
   final bool isMe;
+  final String status;
+  final VoidCallback onRetry;
 
   @override
   Widget build(BuildContext context) {
     final contentType = _messageContentType(item);
     final payload = _asObjectMap(item['payload']);
     final content = _messageContentText(item, payload);
+    final isImageLike =
+        contentType == ChatContentTypes.image ||
+        contentType == ChatContentTypes.gif ||
+        contentType == ChatContentTypes.sticker;
+    final bubble = _MessageBubbleContent(
+      contentType: contentType,
+      content: content,
+      payload: payload,
+      isMe: isMe,
+    );
     return Container(
       constraints: BoxConstraints(
-        maxWidth: MediaQuery.sizeOf(context).width * 0.64,
+        maxWidth: MediaQuery.sizeOf(context).width * 0.68,
       ),
       padding: _bubblePadding(contentType),
       decoration: BoxDecoration(
-        color: isMe ? const Color(0xff95ec69) : Colors.white,
-        borderRadius: BorderRadius.circular(4),
+        color: _bubbleColor(contentType),
+        borderRadius: BorderRadius.circular(isImageLike ? 8 : 11),
       ),
-      child: _MessageBubbleContent(
-        contentType: contentType,
-        content: content,
-        payload: payload,
-        isMe: isMe,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          bubble,
+          if (!isImageLike) ...[
+            const SizedBox(height: 5),
+            _MessageMeta(
+              time: _messageBubbleTime(item),
+              isMe: isMe,
+              status: status,
+              onRetry: onRetry,
+            ),
+          ],
+        ],
       ),
     );
   }
 
+  Color _bubbleColor(String contentType) {
+    if (contentType == ChatContentTypes.redPacket) {
+      return Colors.transparent;
+    }
+    return isMe ? _chatMineBubbleColor : Colors.white;
+  }
+
   EdgeInsets _bubblePadding(String contentType) {
     return switch (contentType) {
+      ChatContentTypes.redPacket => EdgeInsets.zero,
       ChatContentTypes.image ||
       ChatContentTypes.gif ||
-      ChatContentTypes.sticker => const EdgeInsets.all(8),
+      ChatContentTypes.sticker => const EdgeInsets.all(0),
       ChatContentTypes.file ||
       ChatContentTypes.voice ||
       ChatContentTypes.video ||
       ChatContentTypes.contactCard ||
-      ChatContentTypes.transfer ||
-      ChatContentTypes.redPacket => const EdgeInsets.symmetric(
-        horizontal: 12,
-        vertical: 10,
+      ChatContentTypes.transfer => const EdgeInsets.symmetric(
+        horizontal: 14,
+        vertical: 12,
       ),
-      _ => const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+      _ => const EdgeInsets.fromLTRB(16, 12, 12, 8),
     };
+  }
+}
+
+class _MessageMeta extends StatelessWidget {
+  const _MessageMeta({
+    required this.time,
+    required this.isMe,
+    required this.status,
+    required this.onRetry,
+  });
+
+  final String time;
+  final bool isMe;
+  final String status;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          time,
+          style: TextStyle(
+            color: isMe ? const Color(0xff73946f) : const Color(0xff9198a2),
+            fontSize: 12,
+            fontWeight: FontWeight.w500,
+            height: 1,
+          ),
+        ),
+        if (isMe) ...[
+          const SizedBox(width: 5),
+          _MessageSendStatus(status: status, onRetry: onRetry),
+        ],
+      ],
+    );
+  }
+}
+
+class _RedPacketPreview extends StatelessWidget {
+  const _RedPacketPreview({required this.amount});
+
+  final String amount;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 250,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Container(
+            padding: const EdgeInsets.fromLTRB(18, 15, 18, 14),
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                colors: [Color(0xffffa34c), Color(0xffff963c)],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              borderRadius: BorderRadius.vertical(top: Radius.circular(8)),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 52,
+                  height: 58,
+                  alignment: Alignment.center,
+                  decoration: const BoxDecoration(
+                    color: Color(0xffe94632),
+                    borderRadius: BorderRadius.all(Radius.circular(7)),
+                  ),
+                  child: const Icon(
+                    Icons.redeem,
+                    color: Color(0xffffd35b),
+                    size: 24,
+                  ),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Text(
+                        '恭喜发财，大吉大利',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 15,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        amount.isEmpty ? '¥0.00' : amount,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 20,
+                          fontWeight: FontWeight.w800,
+                          height: 1.05,
+                        ),
+                      ),
+                      const SizedBox(height: 5),
+                      const Text(
+                        'BIM红包',
+                        style: TextStyle(color: Colors.white, fontSize: 12),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Container(
+            height: 30,
+            alignment: Alignment.centerLeft,
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            decoration: const BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.vertical(bottom: Radius.circular(8)),
+            ),
+            child: const Text(
+              'BIM红包',
+              style: TextStyle(
+                color: Color(0xffaeb4bd),
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 
@@ -4902,11 +5228,9 @@ class _MessageBubbleContent extends StatelessWidget {
         seconds: _value(payload, ['duration'], fallback: '0'),
         isMe: isMe,
       ),
-      ChatContentTypes.video => _MediaPreview(
-        icon: Icons.play_circle_outline,
-        title: content.isEmpty ? '视频' : content,
-        subtitle: _videoSubtitle(payload),
-        isMe: isMe,
+      ChatContentTypes.video => _VideoMessagePreview(
+        payload: payload,
+        content: content,
       ),
       ChatContentTypes.file => _FilePreview(payload: payload, content: content),
       ChatContentTypes.contactCard => _ContactCardPreview(payload: payload),
@@ -4924,7 +5248,12 @@ class _MessageBubbleContent extends StatelessWidget {
       ),
       _ => Text(
         content.isEmpty ? '[消息]' : content,
-        style: const TextStyle(color: _textColor, fontSize: 15, height: 1.38),
+        style: const TextStyle(
+          color: Colors.black,
+          fontSize: 16,
+          fontWeight: FontWeight.w700,
+          height: 1.35,
+        ),
       ),
     };
   }
@@ -5016,8 +5345,68 @@ class _ImageMessagePreview extends StatelessWidget {
       );
     }
     return ClipRRect(
-      borderRadius: BorderRadius.circular(3),
-      child: SizedBox(width: 150, height: 150, child: image),
+      borderRadius: BorderRadius.circular(8),
+      child: SizedBox(width: 220, height: 132, child: image),
+    );
+  }
+}
+
+class _VideoMessagePreview extends StatelessWidget {
+  const _VideoMessagePreview({required this.payload, required this.content});
+
+  final Map<String, Object?> payload;
+  final String content;
+
+  @override
+  Widget build(BuildContext context) {
+    final media = _asObjectMap(payload['media']);
+    final localPath = _value(payload, ['cover_file_path', 'file_path']);
+    final coverUrl = _normalizeAvatarUrl(
+      _value(payload, [
+        'cover_url',
+        'image_path',
+      ], fallback: _value(media, ['cover_url', 'url'])),
+    );
+    final image = localPath.isNotEmpty && File(localPath).existsSync()
+        ? Image.file(File(localPath), fit: BoxFit.cover)
+        : coverUrl.isNotEmpty
+        ? Image.network(coverUrl, fit: BoxFit.cover, gaplessPlayback: true)
+        : null;
+    if (image == null) {
+      return _MediaPreview(
+        icon: Icons.play_circle_outline,
+        title: content.isEmpty ? '视频' : content,
+        subtitle: _videoSubtitle(payload),
+        isMe: true,
+      );
+    }
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(8),
+      child: SizedBox(
+        width: 220,
+        height: 132,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            image,
+            Center(
+              child: Container(
+                width: 42,
+                height: 42,
+                decoration: const BoxDecoration(
+                  color: Color(0x99000000),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.play_arrow,
+                  color: Colors.white,
+                  size: 28,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -5094,9 +5483,24 @@ class _FilePreview extends StatelessWidget {
       'size',
     ], fallback: _value(media, ['size']));
     return SizedBox(
-      width: 190,
+      width: 230,
       child: Row(
         children: [
+          Container(
+            width: 48,
+            height: 48,
+            alignment: Alignment.center,
+            decoration: const BoxDecoration(
+              color: Color(0xfff05045),
+              borderRadius: BorderRadius.all(Radius.circular(6)),
+            ),
+            child: const Icon(
+              Icons.article_outlined,
+              color: Colors.white,
+              size: 25,
+            ),
+          ),
+          const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -5108,7 +5512,7 @@ class _FilePreview extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
                     color: _textColor,
-                    fontSize: 15,
+                    fontSize: 16,
                     fontWeight: FontWeight.w700,
                     height: 1.25,
                   ),
@@ -5122,18 +5526,6 @@ class _FilePreview extends StatelessWidget {
                     ),
                   ),
               ],
-            ),
-          ),
-          const SizedBox(width: 12),
-          Container(
-            width: 36,
-            height: 36,
-            alignment: Alignment.center,
-            color: const Color(0xffff4d4f),
-            child: const Icon(
-              Icons.picture_as_pdf_outlined,
-              color: Colors.white,
-              size: 22,
             ),
           ),
         ],
@@ -5192,6 +5584,9 @@ class _PaymentPreview extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (title == '红包') {
+      return _RedPacketPreview(amount: amount);
+    }
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -5260,7 +5655,7 @@ class _MessageSendStatus extends StatelessWidget {
             ),
           ),
           'queued' ||
-          'sent' => const Icon(Icons.check, size: 17, color: Color(0xff6f7785)),
+          'sent' => const Icon(Icons.done_all, size: 17, color: _chatAckColor),
           _ => const SizedBox.shrink(),
         },
       ),
@@ -5279,13 +5674,13 @@ class _TimeDivider extends StatelessWidget {
       return const SizedBox.shrink();
     }
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
+      padding: const EdgeInsets.symmetric(vertical: 14),
       child: Text(
         text,
         style: const TextStyle(
-          color: Color(0xffb0b4bc),
-          fontSize: 12,
-          fontWeight: FontWeight.w600,
+          color: Color(0xff8f96a3),
+          fontSize: 15,
+          fontWeight: FontWeight.w700,
         ),
       ),
     );
@@ -5416,74 +5811,170 @@ class _ChatToolsPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final items = [
-      _ToolItem(Icons.tune, '文本选项', onTextOption),
-      _ToolItem(Icons.image_outlined, '图片', onImage),
-      _ToolItem(Icons.emoji_emotions_outlined, '表情', onEmoji),
-      _ToolItem(Icons.gif_box_outlined, 'GIF', onGif),
-      _ToolItem(Icons.sticky_note_2_outlined, '贴纸', onSticker),
-      _ToolItem(Icons.keyboard_voice_outlined, '语音', onVoice),
-      _ToolItem(Icons.videocam_outlined, '视频', onVideo),
-      _ToolItem(Icons.attach_file, '文件', onFile),
-      _ToolItem(Icons.contact_page_outlined, '名片', onContactCard),
-      _ToolItem(Icons.payments_outlined, '转账', onTransfer),
-      _ToolItem(Icons.redeem_outlined, '红包', onRedPacket),
-      if (isGroup && onGroupMembers != null)
-        _ToolItem(Icons.groups_outlined, '群成员', onGroupMembers!),
-    ];
-    return Container(
-      height: 224,
-      decoration: const BoxDecoration(
-        color: Color(0xfff6f6f6),
-        border: Border(top: BorderSide(color: _borderColor)),
+      _ToolItem(
+        Icons.photo_library_rounded,
+        '相册',
+        onImage,
+        const Color(0xff8e6df7),
       ),
-      child: GridView.builder(
-        padding: const EdgeInsets.fromLTRB(14, 12, 14, 16),
-        itemCount: items.length,
-        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: 4,
-          mainAxisExtent: 70,
-          crossAxisSpacing: 10,
-          mainAxisSpacing: 10,
+      _ToolItem(
+        Icons.photo_camera_rounded,
+        '拍摄',
+        onImage,
+        const Color(0xff2f7df6),
+      ),
+      _ToolItem(
+        Icons.videocam_rounded,
+        '视频通话',
+        onVideo,
+        const Color(0xff2fc86f),
+      ),
+      _ToolItem(
+        Icons.location_on_rounded,
+        '位置',
+        onTextOption,
+        const Color(0xffffa21a),
+      ),
+      _ToolItem(Icons.folder_rounded, '文件', onFile, const Color(0xff2f7df6)),
+      _ToolItem(
+        Icons.attach_money_rounded,
+        '转账',
+        onTransfer,
+        const Color(0xff28b957),
+      ),
+      _ToolItem(
+        Icons.redeem_rounded,
+        '红包',
+        onRedPacket,
+        const Color(0xffff543c),
+      ),
+      _ToolItem(
+        Icons.contact_page_rounded,
+        '名片',
+        onContactCard,
+        const Color(0xff347cff),
+      ),
+      _ToolItem(
+        Icons.emoji_emotions_rounded,
+        '表情',
+        onEmoji,
+        const Color(0xffffc043),
+      ),
+      _ToolItem(Icons.gif_box_rounded, 'GIF', onGif, const Color(0xff20c997)),
+      _ToolItem(
+        Icons.sticky_note_2_rounded,
+        '贴纸',
+        onSticker,
+        const Color(0xff7c5cff),
+      ),
+      _ToolItem(
+        Icons.keyboard_voice_rounded,
+        '语音',
+        onVoice,
+        const Color(0xff5ac8fa),
+      ),
+      _ToolItem(
+        Icons.tune_rounded,
+        '文本选项',
+        onTextOption,
+        const Color(0xff8e99a8),
+      ),
+      if (isGroup && onGroupMembers != null)
+        _ToolItem(
+          Icons.groups_rounded,
+          '群成员',
+          onGroupMembers!,
+          const Color(0xff34c759),
         ),
-        itemBuilder: (context, index) {
-          final item = items[index];
-          return InkWell(
-            onTap: item.onTap,
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Container(
-                  width: 44,
-                  height: 44,
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    border: Border.all(color: _lightBorderColor),
-                  ),
-                  child: Icon(item.icon, size: 22, color: _primaryColor),
-                ),
-                const SizedBox(height: 5),
-                Text(
-                  item.label,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontSize: 12, color: _textColor),
-                ),
-              ],
-            ),
-          );
-        },
+    ];
+    final pages = <List<_ToolItem>>[];
+    for (var index = 0; index < items.length; index += 8) {
+      pages.add(items.sublist(index, (index + 8).clamp(0, items.length)));
+    }
+    return Container(
+      height: 188,
+      color: _chatPageColor,
+      padding: const EdgeInsets.fromLTRB(18, 0, 18, 12),
+      child: DecoratedBox(
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.all(Radius.circular(18)),
+        ),
+        child: PageView.builder(
+          itemCount: pages.length,
+          physics: const BouncingScrollPhysics(),
+          itemBuilder: (context, pageIndex) {
+            final pageItems = pages[pageIndex];
+            return GridView.builder(
+              padding: const EdgeInsets.fromLTRB(22, 16, 22, 14),
+              physics: const NeverScrollableScrollPhysics(),
+              itemCount: pageItems.length,
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 4,
+                mainAxisExtent: 74,
+                crossAxisSpacing: 12,
+                mainAxisSpacing: 10,
+              ),
+              itemBuilder: (context, index) =>
+                  _ToolButton(item: pageItems[index]),
+            );
+          },
+        ),
       ),
     );
   }
 }
 
 class _ToolItem {
-  const _ToolItem(this.icon, this.label, this.onTap);
+  const _ToolItem(this.icon, this.label, this.onTap, this.color);
 
   final IconData icon;
   final String label;
   final VoidCallback onTap;
+  final Color color;
+}
+
+class _ToolButton extends StatelessWidget {
+  const _ToolButton({required this.item});
+
+  final _ToolItem item;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: item.onTap,
+      borderRadius: BorderRadius.circular(10),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Container(
+            width: 32,
+            height: 32,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: item.color,
+              borderRadius: BorderRadius.circular(
+                item.icon == Icons.attach_money_rounded ? 16 : 6,
+              ),
+            ),
+            child: Icon(item.icon, size: 21, color: Colors.white),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            item.label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              fontSize: 13,
+              color: Color(0xff2f3338),
+              fontWeight: FontWeight.w500,
+              height: 1,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 class _Composer extends StatelessWidget {
@@ -5514,12 +6005,9 @@ class _Composer extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      decoration: const BoxDecoration(
-        color: Color(0xfff6f6f6),
-        border: Border(top: BorderSide(color: _borderColor)),
-      ),
+      color: _chatPageColor,
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(8, 7, 8, 8),
+        padding: const EdgeInsets.fromLTRB(18, 10, 18, 12),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
@@ -5531,8 +6019,11 @@ class _Composer extends StatelessWidget {
             const SizedBox(width: 6),
             Expanded(
               child: Container(
-                constraints: const BoxConstraints(minHeight: 38),
-                color: Colors.white,
+                constraints: const BoxConstraints(minHeight: 42),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(22),
+                ),
                 child: TextField(
                   controller: controller,
                   focusNode: focusNode,
@@ -5550,32 +6041,36 @@ class _Composer extends StatelessWidget {
                     hintText: sending
                         ? '发送中'
                         : enabled
-                        ? ''
+                        ? '输入消息'
                         : disabledText,
+                    hintStyle: const TextStyle(
+                      color: Color(0xffaeb4bd),
+                      fontSize: 15,
+                    ),
                     filled: true,
                     fillColor: !enabled
                         ? const Color(0xffeeeeee)
                         : Colors.white,
                     isDense: true,
-                    border: const OutlineInputBorder(
-                      borderRadius: BorderRadius.zero,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(22),
                       borderSide: BorderSide.none,
                     ),
-                    enabledBorder: const OutlineInputBorder(
-                      borderRadius: BorderRadius.zero,
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(22),
                       borderSide: BorderSide.none,
                     ),
-                    disabledBorder: const OutlineInputBorder(
-                      borderRadius: BorderRadius.zero,
+                    disabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(22),
                       borderSide: BorderSide.none,
                     ),
-                    focusedBorder: const OutlineInputBorder(
-                      borderRadius: BorderRadius.zero,
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(22),
                       borderSide: BorderSide.none,
                     ),
                     contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 10,
+                      horizontal: 16,
+                      vertical: 11,
                     ),
                   ),
                 ),
@@ -5608,10 +6103,13 @@ class _Composer extends StatelessWidget {
                       child: TextButton(
                         onPressed: sending ? null : onSend,
                         style: TextButton.styleFrom(
-                          foregroundColor: _primaryColor,
+                          foregroundColor: Colors.white,
+                          backgroundColor: _chatAckColor,
                           padding: const EdgeInsets.symmetric(horizontal: 8),
                           minimumSize: const Size(42, 38),
-                          shape: const RoundedRectangleBorder(),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(19),
+                          ),
                         ),
                         child: const Text(
                           '发送',
@@ -5647,16 +6145,16 @@ class _ComposerIconButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      width: 34,
-      height: 38,
+      width: 36,
+      height: 42,
       child: IconButton(
         tooltip: tooltip,
         onPressed: onPressed,
         padding: EdgeInsets.zero,
         icon: Icon(
           icon,
-          size: 25,
-          color: onPressed == null ? _mutedColor : _textColor,
+          size: 29,
+          color: onPressed == null ? _mutedColor : Colors.black,
         ),
       ),
     );
@@ -6109,6 +6607,14 @@ String _messageTimeLabel(Map<String, Object?> item) {
   return '${two(time.month)}-${two(time.day)} $clock';
 }
 
+String _messageBubbleTime(Map<String, Object?> item) {
+  final label = _messageTimeLabel(item);
+  if (label.length >= 5) {
+    return label.substring(label.length - 5);
+  }
+  return label;
+}
+
 DateTime? _messageDateTime(Map<String, Object?> item) {
   final raw = _value(item, ['timestamp', 'create_time', 'msg_time']);
   if (raw.isEmpty) {
@@ -6167,12 +6673,23 @@ String _durationLabel(Map<String, Object?> payload) {
 }
 
 String _paymentAmount(Map<String, Object?> payload) {
-  final money = _value(payload, ['money', 'amount']);
-  final asset = _value(payload, ['asset_type']);
+  final redPacket = _asObjectMap(payload['red_packet']);
+  final transfer = _asObjectMap(payload['transfer']);
+  final source = redPacket.isNotEmpty
+      ? redPacket
+      : transfer.isNotEmpty
+      ? transfer
+      : payload;
+  final money = _value(source, ['money', 'amount']);
+  final asset = _value(source, ['asset_type']);
   if (money.isEmpty) {
     return '';
   }
-  return asset.isEmpty ? money : '$money $asset';
+  if (asset.isEmpty || asset == 'money' || asset == '金币') {
+    final value = double.tryParse(money);
+    return value == null ? '¥$money' : '¥${value.toStringAsFixed(2)}';
+  }
+  return '$money $asset';
 }
 
 String _fileSizeLabel(Object? raw) {
