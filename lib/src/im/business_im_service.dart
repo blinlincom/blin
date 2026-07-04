@@ -360,8 +360,9 @@ class BusinessImService extends ChangeNotifier {
     if (missingTailBeforeSync) {
       _historySyncedChannels.remove(key);
     }
-    if ((cached.isEmpty && !_historySyncedChannels.contains(key)) ||
-        missingTailBeforeSync) {
+    final needsHistorySync =
+        !_historySyncedChannels.contains(key) || missingTailBeforeSync;
+    if (needsHistorySync) {
       cached = await syncChannelMessages(
         channelID: channelID,
         channelType: channelType,
@@ -463,7 +464,6 @@ class BusinessImService extends ChangeNotifier {
       );
       return _sortAndLimit(merged, limit);
     } catch (error, stackTrace) {
-      _historySyncedChannels.add(_messageKey(channelID, channelType));
       AppLogger.error(
         'im',
         'channel history sync failed',
