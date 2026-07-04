@@ -51,17 +51,22 @@ class ImRoute {
 class GatewayStreamSession {
   const GatewayStreamSession({
     this.ticket = '',
+    this.frameKey = '',
+    this.frameAlg = '',
     this.expireIn = 0,
     this.lastCursor = '',
     this.httpsStreamAddr = '',
   });
 
   final String ticket;
+  final String frameKey;
+  final String frameAlg;
   final int expireIn;
   final String lastCursor;
   final String httpsStreamAddr;
 
-  bool get isAvailable => ticket.isNotEmpty && httpsStreamAddr.isNotEmpty;
+  bool get isAvailable =>
+      ticket.isNotEmpty && frameKey.isNotEmpty && httpsStreamAddr.isNotEmpty;
 
   factory GatewayStreamSession.fromJson(
     Object? value, {
@@ -72,6 +77,8 @@ class GatewayStreamSession {
         : <String, Object?>{};
     return GatewayStreamSession(
       ticket: map['ticket']?.toString() ?? '',
+      frameKey: map['frame_key']?.toString() ?? '',
+      frameAlg: map['frame_alg']?.toString() ?? '',
       expireIn: int.tryParse(map['expire_in']?.toString() ?? '') ?? 0,
       lastCursor: map['last_cursor']?.toString() ?? '',
       httpsStreamAddr: map['https_stream_addr']?.toString() ?? httpsStreamAddr,
@@ -80,6 +87,8 @@ class GatewayStreamSession {
 
   Map<String, Object?> toJson() => {
     'ticket': ticket,
+    'frame_key': frameKey,
+    'frame_alg': frameAlg,
     'expire_in': expireIn,
     'last_cursor': lastCursor,
     'https_stream_addr': httpsStreamAddr,

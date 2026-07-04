@@ -18,13 +18,15 @@ flutter run --dart-define=BIM_API_BASE_URL=https://your-domain/api/ --dart-defin
 
 ## IM 对接
 
-客户端不再接入 Flutter IM SDK。登录后先调用业务端 `im_connect` 获取 `uid`、`token` 和 `route`，再按 `wss_addr`、`websocket_addr`、`ws_addr`、`tcp_addr` 的顺序建立实时长连接，实现握手、ping/pong、收包、ACK 和 MMKV 缓存刷新。
+客户端不再接入 Flutter IM SDK，也不再保留 WSS/WS/TCP 直连 IM 代码。登录后先调用业务端 `im_connect` 获取 `uid`、`token`、`route.https_stream_addr` 和 `stream.ticket`，再通过 Gateway HTTPS Stream 建立实时长连接，实现 heartbeat、收包、ACK 和 MMKV 缓存刷新。
 
 发送、红包、转账、撤回、回执、好友三句限制、禁言等业务规则不在客户端绕过，统一调用业务端签名 `im_*` 接口，由服务端发送到 IM，客户端通过实时长连接收到结果。IM 签名请求携带 `timestamp`、`nonce`、`sign`，服务端会拒绝同一 nonce 的抓包重放。客户端不会轮询消息列表。
 
 详细接口和客户端规则见 [docs/client_im.md](docs/client_im.md)。
 
 企业级连接、心跳、重连、ACK、Sequence 增量同步和跨端漫游方案见 [docs/企业级客户端IM方案书.md](docs/企业级客户端IM方案书.md)。
+
+服务端、Gateway、悟空 IM 和客户端完整部署教程见 [docs/全套IM部署教程.md](docs/全套IM部署教程.md)。
 
 ## GitHub 自动打包
 

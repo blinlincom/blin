@@ -13,6 +13,7 @@ class ImCacheStore {
   static const _messagePrefix = 'im_messages';
   static const _friendListPrefix = 'im_friend_list';
   static const _groupListPrefix = 'im_group_list';
+  static const _profilePrefix = 'im_profile';
   static const _readPrefix = 'im_read_marker';
   static const _gatewayCursorPrefix = 'im_gateway_cursor';
   static const _clearPrefix = 'im_chat_clear_marker';
@@ -273,6 +274,41 @@ class ImCacheStore {
     _kv.encodeString('$_friendListPrefix:$uid', jsonEncode(friends));
   }
 
+  void removeFriend({required String uid, required String friendId}) {
+    if (friendId.isEmpty) {
+      return;
+    }
+    final friends = readFriendList(
+      uid,
+    ).where((item) => _profileUserId(item) != friendId).toList(growable: false);
+    writeFriendList(uid: uid, friends: friends);
+  }
+
+  Map<String, Object?> readProfile({
+    required String uid,
+    required String userId,
+  }) {
+    if (userId.isEmpty) {
+      return const {};
+    }
+    return _readMap('$_profilePrefix:$uid:$userId');
+  }
+
+  void writeProfile({
+    required String uid,
+    required String userId,
+    required Map<String, Object?> profile,
+  }) {
+    if (userId.isEmpty || profile.isEmpty) {
+      return;
+    }
+    final current = readProfile(uid: uid, userId: userId);
+    _kv.encodeString(
+      '$_profilePrefix:$uid:$userId',
+      jsonEncode({...current, ...profile, 'userid': userId, 'id': userId}),
+    );
+  }
+
   List<Map<String, Object?>> readGroupList(String uid) {
     return _readMapList('$_groupListPrefix:$uid');
   }
@@ -397,5 +433,34 @@ class ImCacheStore {
 
   Map<String, Object?> _normalizeMap(Map<dynamic, dynamic> map) {
     return map.map((key, value) => MapEntry(key.toString(), value));
+  }
+
+  String _profileUserId(Map<String, Object?> item) {
+    final nested = item['friend'] is Map
+        ? _normalizeMap(item['friend'] as Map)
+        : item['user'] is Map
+        ? _normalizeMap(item['user'] as Map)
+        : item;
+    for (final key in ['friend_id', 'userid', 'user_id', 'id']) {
+      final value = item[key]?.toString() ?? '';
+      if (value.isNotEmpty) {
+        return value;
+      }
+    }
+    for (final key in ['userid', 'user_id', 'id']) {
+      final value = nested[key]?.toString() ?? '';
+      if (value.isNotEmpty) {
+        return value;
+      }
+    }
+    final uid =
+        (item['uid'] ??
+                item['channel_id'] ??
+                nested['uid'] ??
+                nested['channel_id'])
+            ?.toString() ??
+        '';
+    final match = RegExp(r'user(\d+)$').firstMatch(uid);
+    return match?.group(1) ?? '';
   }
 }

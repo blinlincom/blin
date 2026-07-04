@@ -202,7 +202,7 @@ MMKV 存储：
 - 实时收消息、解密、缓存写入和 UI 版本刷新。
 - 实时原始数据、帧类型、断线、重连、ACK。
 
-敏感字段会脱敏：`token`、`password`、`sign`、`secret`、`key`、`secure_payload`、消息正文、金额、备注、附件名、附件大小、附件密文 hash。
+敏感字段会脱敏：`token`、`password`、`sign`、`secret`、`key`、`secure_payload`、消息正文、金额、备注、附件名、附件大小、附件密文 hash、Gateway cursor。普通用户日志不输出原始 `message_id` 和 Gateway cursor。
 
 ## 校验
 

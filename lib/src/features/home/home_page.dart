@@ -265,6 +265,30 @@ class _MessagesTabState extends State<MessagesTab> {
     });
   }
 
+  Future<void> _refreshReadStateAfterChatPop(
+    String channelId,
+    int channelType,
+  ) async {
+    try {
+      await widget.controller.markConversationRead(
+        channelId: channelId,
+        channelType: channelType,
+      );
+      if (!mounted) {
+        return;
+      }
+      await _loadConversations(showLoading: false);
+    } catch (error, stackTrace) {
+      AppLogger.error(
+        'ui',
+        'refresh read state after chat pop failed',
+        error: error,
+        stackTrace: stackTrace,
+        data: {'channel_id': channelId, 'channel_type': channelType},
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final header = _SearchBar(
@@ -342,16 +366,25 @@ class _MessagesTabState extends State<MessagesTab> {
         if (channelId.isEmpty) {
           return;
         }
-        Navigator.of(context).push(
-          MaterialPageRoute<void>(
-            builder: (_) => ChatPage(
-              controller: widget.controller,
-              title: title,
-              channelId: channelId,
-              groupId: _value(item, ['group_id', 'id'], fallback: channelId),
-              channelType: channelType,
-            ),
-          ),
+        unawaited(
+          Navigator.of(context)
+              .push(
+                MaterialPageRoute<void>(
+                  builder: (_) => ChatPage(
+                    controller: widget.controller,
+                    title: title,
+                    channelId: channelId,
+                    groupId: _value(item, [
+                      'group_id',
+                      'id',
+                    ], fallback: channelId),
+                    channelType: channelType,
+                  ),
+                ),
+              )
+              .then(
+                (_) => _refreshReadStateAfterChatPop(channelId, channelType),
+              ),
         );
       },
     );
@@ -2528,7 +2561,14 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     }
     final shouldStickToBottom = _shouldAutoScrollForMessage(event);
     setState(() {
-      _messages = _mergeMessageList(_messages, event.message, limit: 200);
+      if (event.source == 'burn_after_read_cmd') {
+        final target = _value(event.message, ['client_msg_no']);
+        _messages = _messages
+            .where((item) => _value(item, ['client_msg_no']) != target)
+            .toList(growable: false);
+      } else {
+        _messages = _mergeMessageList(_messages, event.message, limit: 200);
+      }
       _messagesLoading = false;
       _messageRevision = _currentMessageRevision();
       _conversationRevision = widget.controller.conversationVersion;
@@ -2881,6 +2921,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     final replyClientMsgNo = _replyClientMsgNo;
     final burnAfterRead = _burnAfterRead;
     final burnSeconds = _burnSeconds;
+    final hadInputFocus = _inputFocusNode.hasFocus;
     await _runSending(
       () async {
         await widget.controller.sendTextMessage(
@@ -2902,7 +2943,11 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
           _mentionUserIds = const [];
           _mentionAll = false;
         });
+        if (hadInputFocus) {
+          _inputFocusNode.requestFocus();
+        }
       },
+      keepKeyboard: hadInputFocus,
     );
   }
 
@@ -3286,6 +3331,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   Future<void> _runSending(
     Future<void> Function() task, {
     VoidCallback? beforeTask,
+    bool keepKeyboard = false,
   }) async {
     if (_sending) {
       return;
@@ -3309,6 +3355,13 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     } finally {
       if (mounted) {
         setState(() => _sending = false);
+        if (keepKeyboard) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) {
+              _inputFocusNode.requestFocus();
+            }
+          });
+        }
       }
     }
   }
@@ -5387,7 +5440,7 @@ class _Composer extends StatelessWidget {
                   focusNode: focusNode,
                   minLines: 1,
                   maxLines: 4,
-                  readOnly: sending || !enabled,
+                  readOnly: !enabled,
                   enabled: enabled,
                   textInputAction: TextInputAction.send,
                   onSubmitted: (_) {
@@ -5402,7 +5455,7 @@ class _Composer extends StatelessWidget {
                         ? ''
                         : disabledText,
                     filled: true,
-                    fillColor: sending || !enabled
+                    fillColor: !enabled
                         ? const Color(0xffeeeeee)
                         : Colors.white,
                     isDense: true,
@@ -5834,17 +5887,25 @@ void _openPrivateChat(
   if (channelId.isEmpty) {
     return;
   }
-  Navigator.of(context).push(
-    MaterialPageRoute<void>(
-      builder: (_) => ChatPage(
-        controller: controller,
-        title: _friendTitle(item),
-        channelId: channelId,
-        groupId: '',
-        channelType: _privateChannelType,
-      ),
-    ),
-  );
+  Navigator.of(context)
+      .push(
+        MaterialPageRoute<void>(
+          builder: (_) => ChatPage(
+            controller: controller,
+            title: _friendTitle(item),
+            channelId: channelId,
+            groupId: '',
+            channelType: _privateChannelType,
+          ),
+        ),
+      )
+      .then(
+        (_) => _markConversationReadAfterPop(
+          controller,
+          channelId,
+          _privateChannelType,
+        ),
+      );
 }
 
 void _openGroupChat(
@@ -5857,17 +5918,46 @@ void _openGroupChat(
   if (channelId.isEmpty) {
     return;
   }
-  Navigator.of(context).push(
-    MaterialPageRoute<void>(
-      builder: (_) => ChatPage(
-        controller: controller,
-        title: _groupTitle(item),
-        channelId: channelId,
-        groupId: groupId,
-        channelType: _groupChannelType,
-      ),
-    ),
-  );
+  Navigator.of(context)
+      .push(
+        MaterialPageRoute<void>(
+          builder: (_) => ChatPage(
+            controller: controller,
+            title: _groupTitle(item),
+            channelId: channelId,
+            groupId: groupId,
+            channelType: _groupChannelType,
+          ),
+        ),
+      )
+      .then(
+        (_) => _markConversationReadAfterPop(
+          controller,
+          channelId,
+          _groupChannelType,
+        ),
+      );
+}
+
+Future<void> _markConversationReadAfterPop(
+  SessionController controller,
+  String channelId,
+  int channelType,
+) async {
+  try {
+    await controller.markConversationRead(
+      channelId: channelId,
+      channelType: channelType,
+    );
+  } catch (error, stackTrace) {
+    AppLogger.error(
+      'ui',
+      'mark conversation read after pop failed',
+      error: error,
+      stackTrace: stackTrace,
+      data: {'channel_id': channelId, 'channel_type': channelType},
+    );
+  }
 }
 
 void _showSoon(BuildContext context) {

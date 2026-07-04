@@ -50,15 +50,11 @@ class ApiClient {
     required String device,
     String captcha = '',
   }) async {
-    final result = await post<Map<String, Object?>>('login', {
-      'username': username,
-      'password': password,
-      'captcha': captcha,
-      'device': device,
-      'device_flag': AppConfig.imDeviceFlagApp.toString(),
-      'device_level': AppConfig.imDeviceLevelMaster.toString(),
-      'timestamp': _timestamp(),
-    });
+    final result = await securePublicPost<Map<String, Object?>>(
+      'login',
+      device: device,
+      params: {'username': username, 'password': password, 'captcha': captcha},
+    );
     if (!result.isSuccess) {
       throw ApiException(result.message, code: result.code);
     }
@@ -74,47 +70,58 @@ class ApiClient {
     String captcha = '',
     String inviteCode = '',
   }) async {
-    final result = await post<Object?>('register', {
-      'username': username,
-      'password': password,
-      if (mobile.isNotEmpty) 'mobile': mobile,
-      if (email.isNotEmpty) 'email': email,
-      if (captcha.isNotEmpty) 'captcha': captcha,
-      'device': device,
-      if (inviteCode.isNotEmpty) 'invitecode': inviteCode,
-      'timestamp': _timestamp(),
-    });
+    final result = await securePublicPost<Object?>(
+      'register',
+      device: device,
+      params: {
+        'username': username,
+        'password': password,
+        if (mobile.isNotEmpty) 'mobile': mobile,
+        if (email.isNotEmpty) 'email': email,
+        if (captcha.isNotEmpty) 'captcha': captcha,
+        if (inviteCode.isNotEmpty) 'invitecode': inviteCode,
+      },
+      expectSecureResponse: false,
+    );
     if (!result.isSuccess) {
       throw ApiException(result.message, code: result.code);
     }
   }
 
-  Future<void> sendEmailCode(String email) async {
-    final result = await post<Object?>('get_email_verification_code', {
-      'email': email,
-      'type': '1',
-      'timestamp': _timestamp(),
-    });
+  Future<void> sendEmailCode(String email, {required String device}) async {
+    final result = await securePublicPost<Object?>(
+      'get_email_verification_code',
+      device: device,
+      params: {'email': email, 'type': '1'},
+      expectSecureResponse: false,
+    );
     if (!result.isSuccess) {
       throw ApiException(result.message, code: result.code);
     }
   }
 
-  Future<void> sendMobileCode(String mobile) async {
-    final result = await post<Object?>('get_mobile_verification_code', {
-      'mobile': mobile,
-      'type': '2',
-      'timestamp': _timestamp(),
-    });
+  Future<void> sendMobileCode(String mobile, {required String device}) async {
+    final result = await securePublicPost<Object?>(
+      'get_mobile_verification_code',
+      device: device,
+      params: {'mobile': mobile, 'type': '2'},
+      expectSecureResponse: false,
+    );
     if (!result.isSuccess) {
       throw ApiException(result.message, code: result.code);
     }
   }
 
-  Future<UserSession> getCurrentUser(UserSession session) async {
-    final result = await post<Map<String, Object?>>(
+  Future<UserSession> getCurrentUser(
+    UserSession session, {
+    required String device,
+  }) async {
+    final result = await secureSignedImPost<Map<String, Object?>>(
       'get_user_other_information',
-      {'usertoken': session.userToken, 'timestamp': _timestamp()},
+      session: session,
+      device: device,
+      params: const {},
+      secureResponse: true,
     );
     if (!result.isSuccess) {
       throw ApiException(result.message, code: result.code);
@@ -129,11 +136,12 @@ class ApiClient {
     required UserSession session,
     required String device,
   }) async {
-    final result = await signedImPost<Map<String, Object?>>(
+    final result = await secureSignedImPost<Map<String, Object?>>(
       'im_connect',
       session: session,
       device: device,
       params: const {},
+      secureResponse: true,
     );
     if (!result.isSuccess) {
       throw ApiException(result.message, code: result.code);
@@ -151,7 +159,7 @@ class ApiClient {
     AppLogger.info(
       'api',
       'gateway ack start',
-      data: {'ack_url': ackUrl, 'cursor': lastCursor},
+      data: {'ack_url': ackUrl, 'cursor_len': lastCursor.length},
     );
     try {
       final response = await _dio.post<Object?>(
@@ -173,7 +181,10 @@ class ApiClient {
       AppLogger.info(
         'api',
         'gateway ack success',
-        data: {'cursor': lastCursor, 'ms': stopwatch.elapsedMilliseconds},
+        data: {
+          'cursor_len': lastCursor.length,
+          'ms': stopwatch.elapsedMilliseconds,
+        },
       );
     } on DioException catch (error) {
       throw ApiException(
@@ -189,7 +200,7 @@ class ApiClient {
     int page = 1,
     int limit = 20,
   }) async {
-    final result = await signedImPost<Map<String, Object?>>(
+    final result = await secureSignedImPost<Map<String, Object?>>(
       'im_conversations',
       session: session,
       device: device,
@@ -246,7 +257,7 @@ class ApiClient {
     int limit = 50,
     int pullMode = 0,
   }) async {
-    final result = await signedImPost<Map<String, Object?>>(
+    final result = await secureSignedImPost<Map<String, Object?>>(
       'im_person_messages',
       session: session,
       device: device,
@@ -302,7 +313,7 @@ class ApiClient {
     int limit = 50,
     int pullMode = 0,
   }) async {
-    final result = await signedImPost<Map<String, Object?>>(
+    final result = await secureSignedImPost<Map<String, Object?>>(
       'im_group_messages',
       session: session,
       device: device,
@@ -335,13 +346,14 @@ class ApiClient {
       session: session,
       device: device,
       clientMsgNo: clientMsgNo,
-      secureParams: params,
-      params: {
+      secureParams: {
         'receiver_id': receiverId,
-        'client_msg_no': clientMsgNo,
         'content_type': contentType,
+        ...params,
       },
+      params: {'client_msg_no': clientMsgNo},
       filePath: filePath,
+      secureResponse: true,
     );
   }
 
@@ -359,13 +371,14 @@ class ApiClient {
       session: session,
       device: device,
       clientMsgNo: clientMsgNo,
-      secureParams: params,
-      params: {
+      secureParams: {
         'group_id': groupId,
-        'client_msg_no': clientMsgNo,
         'content_type': contentType,
+        ...params,
       },
+      params: {'client_msg_no': clientMsgNo},
       filePath: filePath,
+      secureResponse: true,
     );
   }
 
@@ -426,11 +439,12 @@ class ApiClient {
     int page = 1,
     int limit = 50,
   }) async {
-    final result = await signedImPost<Map<String, Object?>>(
+    final result = await secureSignedImPost<Map<String, Object?>>(
       'im_friend_list',
       session: session,
       device: device,
       params: {'page': page.toString(), 'limit': limit.toString()},
+      secureResponse: true,
     );
     if (!result.isSuccess) {
       throw ApiException(result.message, code: result.code);
@@ -451,11 +465,12 @@ class ApiClient {
     int page = 1,
     int limit = 50,
   }) async {
-    final result = await signedImPost<Map<String, Object?>>(
+    final result = await secureSignedImPost<Map<String, Object?>>(
       'im_group_list',
       session: session,
       device: device,
       params: {'page': page.toString(), 'limit': limit.toString()},
+      secureResponse: true,
     );
     if (!result.isSuccess) {
       throw ApiException(result.message, code: result.code);
@@ -476,13 +491,15 @@ class ApiClient {
     required String device,
     Map<String, Object?> params = const {},
     String filePath = '',
+    bool secureResponse = true,
   }) async {
-    final result = await signedImPost<Map<String, Object?>>(
+    final result = await secureSignedImPost<Map<String, Object?>>(
       action,
       session: session,
       device: device,
       params: params,
       filePath: filePath,
+      secureResponse: secureResponse,
     );
     if (!result.isSuccess) {
       throw ApiException(result.message, code: result.code);
@@ -498,6 +515,7 @@ class ApiClient {
     required Map<String, Object?> params,
     required Map<String, Object?> secureParams,
     String filePath = '',
+    bool secureResponse = false,
   }) async {
     final timestamp = _timestamp();
     final nonce = _nonce();
@@ -509,21 +527,20 @@ class ApiClient {
       'device_level': AppConfig.imDeviceLevelMaster.toString(),
       'timestamp': timestamp,
       'nonce': nonce,
+      if (secureResponse) 'secure_response': '1',
     };
-    if (secureParams.isNotEmpty) {
-      payload.addAll(
-        ApiPayloadCrypto.encrypt(
-          payload: secureParams,
-          appId: appId,
-          appKey: _signer.appKey,
-          userToken: session.userToken,
-          device: device,
-          clientMsgNo: clientMsgNo,
-          timestamp: timestamp,
-          nonce: nonce,
-        ),
-      );
-    }
+    payload.addAll(
+      ApiPayloadCrypto.encrypt(
+        payload: secureParams,
+        appId: appId,
+        appKey: _signer.appKey,
+        userToken: session.userToken,
+        device: device,
+        clientMsgNo: clientMsgNo,
+        timestamp: timestamp,
+        nonce: nonce,
+      ),
+    );
     EncryptedApiFile? encryptedFile;
     if (filePath.isNotEmpty) {
       encryptedFile = await ApiPayloadCrypto.encryptFile(
@@ -548,6 +565,14 @@ class ApiClient {
         payload,
         filePath: encryptedFile?.path ?? '',
         fileFieldName: encryptedFile == null ? 'file' : 'secure_file',
+        secureResponse: secureResponse
+            ? _SecureResponseContext(
+                session: session,
+                device: device,
+                timestamp: timestamp,
+                nonce: nonce,
+              )
+            : null,
       );
       if (!result.isSuccess) {
         throw ApiException(result.message, code: result.code);
@@ -561,41 +586,39 @@ class ApiClient {
     }
   }
 
-  Future<void> logout({
-    required UserSession session,
-    required String device,
-  }) async {
-    final result = await signedImPost<Object?>(
-      'im_logout',
-      session: session,
-      device: device,
-      params: const {},
-    );
-    if (!result.isSuccess && result.code != 401) {
-      throw ApiException(result.message, code: result.code);
-    }
-  }
-
-  Future<ApiResult<T>> signedImPost<T>(
+  Future<ApiResult<T>> secureSignedImPost<T>(
     String action, {
     required UserSession session,
     required String device,
     required Map<String, Object?> params,
     String filePath = '',
-    bool secureResponse = false,
+    bool secureResponse = true,
   }) {
+    final clientMsgNo = _nonce();
     final timestamp = _timestamp();
     final nonce = _nonce();
     final payload = <String, Object?>{
-      ...params,
       'usertoken': session.userToken,
       'device': device,
       'device_flag': AppConfig.imDeviceFlagApp.toString(),
       'device_level': AppConfig.imDeviceLevelMaster.toString(),
       'timestamp': timestamp,
       'nonce': nonce,
+      'client_msg_no': clientMsgNo,
       if (secureResponse) 'secure_response': '1',
     };
+    payload.addAll(
+      ApiPayloadCrypto.encrypt(
+        payload: params,
+        appId: appId,
+        appKey: _signer.appKey,
+        userToken: session.userToken,
+        device: device,
+        clientMsgNo: clientMsgNo,
+        timestamp: timestamp,
+        nonce: nonce,
+      ),
+    );
     payload['sign'] = _signer.sign({'appid': appId, ...payload});
     return post<T>(
       action,
@@ -610,6 +633,67 @@ class ApiClient {
             )
           : null,
     );
+  }
+
+  Future<ApiResult<T>> securePublicPost<T>(
+    String action, {
+    required String device,
+    required Map<String, Object?> params,
+    String filePath = '',
+    bool expectSecureResponse = true,
+  }) {
+    final clientMsgNo = _nonce();
+    final timestamp = _timestamp();
+    final nonce = _nonce();
+    final payload = <String, Object?>{
+      'device': device,
+      'device_flag': AppConfig.imDeviceFlagApp.toString(),
+      'device_level': AppConfig.imDeviceLevelMaster.toString(),
+      'timestamp': timestamp,
+      'nonce': nonce,
+      'client_msg_no': clientMsgNo,
+      if (expectSecureResponse) 'secure_response': '1',
+    };
+    payload.addAll(
+      ApiPayloadCrypto.encrypt(
+        payload: params,
+        appId: appId,
+        appKey: _signer.appKey,
+        userToken: '',
+        device: device,
+        clientMsgNo: clientMsgNo,
+        timestamp: timestamp,
+        nonce: nonce,
+      ),
+    );
+    payload['sign'] = _signer.sign({'appid': appId, ...payload});
+    return post<T>(
+      action,
+      payload,
+      filePath: filePath,
+      secureResponse: expectSecureResponse
+          ? _SecureResponseContext.public(
+              device: device,
+              timestamp: timestamp,
+              nonce: nonce,
+            )
+          : null,
+    );
+  }
+
+  Future<void> logout({
+    required UserSession session,
+    required String device,
+  }) async {
+    final result = await secureSignedImPost<Object?>(
+      'im_logout',
+      session: session,
+      device: device,
+      params: const {},
+    );
+    if (!result.isSuccess && result.code != 401) {
+      throw ApiException(result.message, code: result.code);
+    }
   }
 
   Future<ApiResult<T>> post<T>(
@@ -714,7 +798,7 @@ class ApiClient {
         payload: rawData,
         appId: appId,
         appKey: _signer.appKey,
-        userToken: secureResponse.session.userToken,
+        userToken: secureResponse.userToken,
         device: secureResponse.device,
         timestamp: secureResponse.timestamp,
         nonce: secureResponse.nonce,
@@ -742,6 +826,9 @@ class ApiClient {
   }
 
   Map<String, Object?> _safeLogParams(Map<String, Object?> params) {
+    if (AppConfig.debugFullApiLog) {
+      return Map<String, Object?>.from(params);
+    }
     const sensitiveKeys = {
       'password',
       'usertoken',
@@ -767,14 +854,20 @@ class ApiClient {
 }
 
 class _SecureResponseContext {
-  const _SecureResponseContext({
-    required this.session,
+  _SecureResponseContext({
+    required UserSession session,
     required this.device,
     required this.timestamp,
     required this.nonce,
-  });
+  }) : userToken = session.userToken;
 
-  final UserSession session;
+  const _SecureResponseContext.public({
+    required this.device,
+    required this.timestamp,
+    required this.nonce,
+  }) : userToken = '';
+
+  final String userToken;
   final String device;
   final String timestamp;
   final String nonce;

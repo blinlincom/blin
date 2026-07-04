@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/widgets.dart';
 
 import '../core/api_client.dart';
+import '../core/app_config.dart';
 import '../core/app_logger.dart';
 import '../core/models.dart';
 import '../core/session_store.dart';
@@ -241,11 +242,11 @@ class SessionController extends ChangeNotifier {
   }
 
   Future<void> sendEmailCode(String email) {
-    return _runBusy(() => _api.sendEmailCode(email));
+    return _runBusy(() => _api.sendEmailCode(email, device: _device));
   }
 
   Future<void> sendMobileCode(String mobile) {
-    return _runBusy(() => _api.sendMobileCode(mobile));
+    return _runBusy(() => _api.sendMobileCode(mobile, device: _device));
   }
 
   Future<List<Map<String, Object?>>> loadConversations() async {
@@ -349,6 +350,16 @@ class SessionController extends ChangeNotifier {
     required int channelType,
   }) {
     return _im.openConversation(channelID: channelId, channelType: channelType);
+  }
+
+  Future<void> markConversationRead({
+    required String channelId,
+    required int channelType,
+  }) {
+    return _im.markConversationRead(
+      channelID: channelId,
+      channelType: channelType,
+    );
   }
 
   void closeConversation({
@@ -916,13 +927,25 @@ class SessionController extends ChangeNotifier {
     );
   }
 
-  Future<Map<String, Object?>> deleteFriend(String friendId) {
+  Future<Map<String, Object?>> deleteFriend(String friendId) async {
     final current = _requireSession();
-    return _chat.friendDelete(
+    final result = await _chat.friendDelete(
       session: current,
       device: _device,
       friendId: friendId,
     );
+    final uid = _chatUid();
+    if (uid.isNotEmpty) {
+      _cache.removeFriend(uid: uid, friendId: friendId);
+      _friendCache = _cache.readFriendList(uid);
+      _friendCacheAt = DateTime.now();
+    }
+    await _im.removePrivateConversationAfterFriendDelete(
+      friendId: friendId,
+      channelID: 'app${AppConfig.appId}user$friendId',
+    );
+    notifyListeners();
+    return result;
   }
 
   Future<Map<String, Object?>> retryMessages({int limit = 20}) {
@@ -1046,7 +1069,7 @@ class SessionController extends ChangeNotifier {
     AppLogger.info('session', 'refresh logged in session start');
     final chat = await _api.connectIm(session: current, device: _device);
     final withChat = current.copyWith(chat: chat);
-    final withProfile = await _api.getCurrentUser(withChat);
+    final withProfile = await _api.getCurrentUser(withChat, device: _device);
     _session = withProfile;
     _store.writeSession(withProfile);
     await _im.start(withProfile, device: _device);
@@ -1108,6 +1131,13 @@ class SessionController extends ChangeNotifier {
       return;
     }
     _cache.writeFriendList(uid: uid, friends: friends);
+    for (final item in friends) {
+      final profile = _profileFromFriendItem(item);
+      final userId = _profileUserId(profile, fallback: item);
+      if (userId.isNotEmpty) {
+        _cache.writeProfile(uid: uid, userId: userId, profile: profile);
+      }
+    }
   }
 
   void _writeGroupCache(List<Map<String, Object?>> groups) {
@@ -1127,6 +1157,33 @@ class SessionController extends ChangeNotifier {
     _groupRequest = null;
     _refreshRequest = null;
     _lastHotRefreshAt = null;
+  }
+
+  Map<String, Object?> _profileFromFriendItem(Map<String, Object?> item) {
+    final friend = item['friend'];
+    if (friend is Map) {
+      return friend.map((key, value) => MapEntry(key.toString(), value));
+    }
+    final user = item['user'];
+    if (user is Map) {
+      return user.map((key, value) => MapEntry(key.toString(), value));
+    }
+    return item;
+  }
+
+  String _profileUserId(
+    Map<String, Object?> profile, {
+    Map<String, Object?> fallback = const {},
+  }) {
+    for (final source in [profile, fallback]) {
+      for (final key in ['friend_id', 'userid', 'user_id', 'id']) {
+        final value = source[key]?.toString() ?? '';
+        if (value.isNotEmpty) {
+          return value;
+        }
+      }
+    }
+    return '';
   }
 
   Future<void> _runBusy(Future<void> Function() task) async {

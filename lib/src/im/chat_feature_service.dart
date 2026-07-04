@@ -36,12 +36,14 @@ class ChatFeatureService {
     required UserSession session,
     required String device,
     Map<String, Object?> params = const {},
+    bool secureResponse = true,
   }) {
     return _api.imBusinessAction(
       action: action,
       session: session,
       device: device,
       params: _clean(params),
+      secureResponse: secureResponse,
     );
   }
 

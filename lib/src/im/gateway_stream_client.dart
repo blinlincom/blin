@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:encrypt/encrypt.dart' as encrypt;
+
 import '../core/app_logger.dart';
 
 class GatewayFrame {
@@ -114,12 +116,16 @@ class GatewayStreamClient {
   Future<void> connect({
     required Uri uri,
     required String ticket,
+    required String frameKey,
     required String lastCursor,
     required void Function(GatewayFrame frame) onFrame,
     required void Function(String reason, Object? error) onClosed,
   }) async {
     if (uri.scheme != 'http' && uri.scheme != 'https') {
       throw GatewayStreamException('Gateway 实时地址必须是 HTTP/HTTPS');
+    }
+    if (frameKey.trim().isEmpty) {
+      throw const GatewayStreamException('Gateway 帧密钥缺失');
     }
     _onClosed = onClosed;
     _closed = false;
@@ -155,7 +161,7 @@ class GatewayStreamClient {
       (chunk) {
         _lastFrameAt = DateTime.now();
         try {
-          _appendAndDecode(Uint8List.fromList(chunk), onFrame);
+          _appendAndDecode(Uint8List.fromList(chunk), frameKey, onFrame);
         } catch (error) {
           if (_closed) {
             return;
@@ -191,6 +197,7 @@ class GatewayStreamClient {
 
   void _appendAndDecode(
     Uint8List chunk,
+    String frameKey,
     void Function(GatewayFrame frame) onFrame,
   ) {
     _buffer = Uint8List.fromList([..._buffer, ...chunk]);
@@ -209,15 +216,17 @@ class GatewayStreamClient {
       if (decoded is! Map) {
         continue;
       }
+      final map = decoded.map((key, value) => MapEntry(key.toString(), value));
+      final rawFrame = _decryptFrameEnvelope(map, frameKey);
       final frame = GatewayFrame.fromJson(
-        decoded.map((key, value) => MapEntry(key.toString(), value)),
+        rawFrame.map((key, value) => MapEntry(key.toString(), value)),
       );
       AppLogger.info(
         'im',
         'gateway frame received',
         data: {
           'type': frame.type,
-          'cursor': frame.cursor,
+          'has_cursor': frame.cursor.isNotEmpty,
           'channel_id': frame.channelId,
           'channel_type': frame.channelType,
           'client_msg_no': frame.clientMsgNo,
@@ -225,6 +234,40 @@ class GatewayStreamClient {
       );
       onFrame(frame);
     }
+  }
+
+  Map<String, Object?> _decryptFrameEnvelope(
+    Map<String, Object?> map,
+    String frameKey,
+  ) {
+    if (map['type'] != 'secure') {
+      throw const GatewayStreamException('Gateway 返回了未加密帧');
+    }
+    if (map['alg']?.toString() != 'AES-256-GCM') {
+      throw const GatewayStreamException('Gateway 帧加密算法不支持');
+    }
+    final keyBytes = base64Decode(frameKey);
+    if (keyBytes.length != 32) {
+      throw const GatewayStreamException('Gateway 帧密钥长度错误');
+    }
+    final nonce = base64Decode(map['nonce']?.toString() ?? '');
+    final ciphertext = base64Decode(map['ciphertext']?.toString() ?? '');
+    final encrypter = encrypt.Encrypter(
+      encrypt.AES(
+        encrypt.Key(Uint8List.fromList(keyBytes)),
+        mode: encrypt.AESMode.gcm,
+      ),
+    );
+    final plain = encrypter.decryptBytes(
+      encrypt.Encrypted(Uint8List.fromList(ciphertext)),
+      iv: encrypt.IV(Uint8List.fromList(nonce)),
+      associatedData: Uint8List.fromList(utf8.encode('bim-gateway-frame-v1')),
+    );
+    final decoded = jsonDecode(utf8.decode(plain));
+    if (decoded is! Map) {
+      throw const GatewayStreamException('Gateway 帧明文格式错误');
+    }
+    return decoded.map((key, value) => MapEntry(key.toString(), value));
   }
 
   void _notifyClosed(String reason, Object? error) {
