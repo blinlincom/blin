@@ -1270,8 +1270,13 @@ class BusinessImService extends ChangeNotifier {
         'sender_uid',
       ], fallback: _uidFromUser(fromUser)),
     );
-    final currentUid = _requireChat().uid;
     final canonicalChannelId = _canonicalChannelId(channelId, channelType);
+    final senderId = _value(payload, [
+      'sender_id',
+      'from_id',
+      'user_id',
+      'userid',
+    ], fallback: _value(fromUser, ['id', 'user_id', 'userid']));
     return <String, Object?>{
       'message_id': _value(raw, [
         'message_id',
@@ -1286,7 +1291,7 @@ class BusinessImService extends ChangeNotifier {
       'channel_id': canonicalChannelId,
       'channel_type': channelType,
       'from_uid': fromUid,
-      'is_me': fromUid == currentUid,
+      'is_me': _isCurrentUserMessage(senderId: senderId, senderUid: fromUid),
       'content': _value(message, [
         'content',
       ], fallback: _payloadContent(payload)),
@@ -1322,6 +1327,8 @@ class BusinessImService extends ChangeNotifier {
       'content_type':
           payload['content_type']?.toString() ?? fallback['content_type'],
       'payload': payload.isEmpty ? fallback['payload'] : payload,
+      'from_uid': _value(fallback, ['from_uid']),
+      'is_me': fallback['is_me'] == true,
       'status': _boolValue(result['queued']) ? 'queued' : 'sent',
       'send_ack': sendAck,
     };
@@ -1351,7 +1358,18 @@ class BusinessImService extends ChangeNotifier {
       'channel_type': packet.channelType,
       if (receiverId.isNotEmpty) 'receiver_id': receiverId,
       'from_uid': packet.fromUid,
-      'is_me': packet.fromUid == _requireChat().uid,
+      'is_me': _isCurrentUserMessage(
+        senderId: _value(payload, [
+          'sender_id',
+          'from_id',
+          'user_id',
+          'userid',
+        ]),
+        senderUid: _value(payload, [
+          'sender_uid',
+          'from_uid',
+        ], fallback: packet.fromUid),
+      ),
       'content': _payloadContent(payload),
       'content_type': payload['content_type']?.toString() ?? '',
       'payload': payload,
@@ -1406,6 +1424,11 @@ class BusinessImService extends ChangeNotifier {
       'from_uid',
       'sender_uid',
     ], fallback: _value(payload, ['from_uid', 'sender_uid']));
+    final senderId = _value(
+      conversation,
+      ['sender_id', 'from_id', 'user_id', 'userid'],
+      fallback: _value(payload, ['sender_id', 'from_id', 'user_id', 'userid']),
+    );
     final normalizedPayload = payload.isEmpty
         ? _cleanPayload({
             'content': _value(conversation, ['content']),
@@ -1430,7 +1453,7 @@ class BusinessImService extends ChangeNotifier {
       if (_value(conversation, ['receiver_id']).isNotEmpty)
         'receiver_id': _value(conversation, ['receiver_id']),
       'from_uid': fromUid,
-      'is_me': fromUid.isNotEmpty && fromUid == _requireChat().uid,
+      'is_me': _isCurrentUserMessage(senderId: senderId, senderUid: fromUid),
       'content': content,
       'content_type': contentType,
       'payload': normalizedPayload,
@@ -1664,7 +1687,7 @@ class BusinessImService extends ChangeNotifier {
       (item) => _sameMessageIdentity(item, clientMsgNo, messageSeq),
     );
     if (index >= 0) {
-      messages[index] = {...messages[index], ...message};
+      messages[index] = _mergeMessageFields(messages[index], message);
     } else {
       messages.add(message);
     }
@@ -1802,7 +1825,7 @@ class BusinessImService extends ChangeNotifier {
                 (item) => item['client_msg_no']?.toString() == clientMsgNo,
               );
         if (index >= 0) {
-          merged[index] = {...merged[index], ...message};
+          merged[index] = _mergeMessageFields(merged[index], message);
         } else {
           merged.add(message);
         }
@@ -1856,7 +1879,7 @@ class BusinessImService extends ChangeNotifier {
         (item) => _sameMessageIdentity(item, clientMsgNo, messageSeq),
       );
       if (index >= 0) {
-        merged[index] = {...merged[index], ...message};
+        merged[index] = _mergeMessageFields(merged[index], message);
       } else {
         merged.add(message);
       }
@@ -1874,6 +1897,24 @@ class BusinessImService extends ChangeNotifier {
       return true;
     }
     return messageSeq > 0 && _intValue(item, ['message_seq']) == messageSeq;
+  }
+
+  Map<String, Object?> _mergeMessageFields(
+    Map<String, Object?> existing,
+    Map<String, Object?> incoming,
+  ) {
+    final merged = <String, Object?>{...existing, ...incoming};
+    final sameClientMsgNo =
+        _value(existing, ['client_msg_no']).isNotEmpty &&
+        _value(existing, ['client_msg_no']) ==
+            _value(incoming, ['client_msg_no']);
+    if (sameClientMsgNo && existing['is_me'] == true) {
+      merged['is_me'] = true;
+      merged['from_uid'] = _value(existing, [
+        'from_uid',
+      ], fallback: _requireChat().uid);
+    }
+    return merged;
   }
 
   bool _tailMessageMissing(
@@ -2506,6 +2547,23 @@ class BusinessImService extends ChangeNotifier {
       return true;
     }
     return _receiverIdFromChannel(channelId) == current.userId.toString();
+  }
+
+  bool _isCurrentUserMessage({String senderId = '', String senderUid = ''}) {
+    final current = _requireSession();
+    final chat = _requireChat();
+    final currentUserId = current.userId.toString();
+    if (senderId.isNotEmpty && senderId == currentUserId) {
+      return true;
+    }
+    if (senderUid.isNotEmpty && senderUid == chat.uid) {
+      return true;
+    }
+    if (senderUid.isNotEmpty &&
+        _receiverIdFromChannel(senderUid) == currentUserId) {
+      return true;
+    }
+    return false;
   }
 
   String _groupIdForChannel(String channelId) {
