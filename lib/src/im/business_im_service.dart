@@ -795,8 +795,17 @@ class BusinessImService extends ChangeNotifier {
       }
     }
     final clientMsgNo = newClientMsgNo();
+    final serverPayload = Map<String, Object?>.from(payload)
+      ..remove('file_path');
     final cleanPayload = _cleanPayload({
+      ...serverPayload,
+      'protocol': 'blin.chat.v1',
+      'content_type': contentType,
+      'client_msg_no': clientMsgNo,
+    });
+    final localPayload = _cleanPayload({
       ...payload,
+      if (filePath.isNotEmpty) 'file_path': filePath,
       'protocol': 'blin.chat.v1',
       'content_type': contentType,
       'client_msg_no': clientMsgNo,
@@ -806,7 +815,7 @@ class BusinessImService extends ChangeNotifier {
       channelType: channelType,
       clientMsgNo: clientMsgNo,
       contentType: contentType,
-      payload: cleanPayload,
+      payload: localPayload,
     );
     _upsertMessage(channelID, channelType, optimistic);
     _upsertConversationFromMessage(optimistic);
@@ -882,6 +891,121 @@ class BusinessImService extends ChangeNotifier {
       AppLogger.error(
         'im',
         'business message send failed',
+        error: error,
+        stackTrace: stackTrace,
+        data: {
+          'client_msg_no': clientMsgNo,
+          'channel_id': channelID,
+          'channel_type': channelType,
+          'content_type': contentType,
+        },
+      );
+      rethrow;
+    }
+  }
+
+  Future<Map<String, Object?>> retryBusinessMessage(
+    Map<String, Object?> failedMessage,
+  ) async {
+    final session = _requireSession();
+    final chat = _requireChat();
+    final channelType = _intValue(failedMessage, ['channel_type']);
+    final channelID = _canonicalChannelId(
+      _value(failedMessage, ['channel_id']),
+      channelType,
+    );
+    final clientMsgNo = _value(failedMessage, ['client_msg_no']);
+    final contentType = _value(failedMessage, ['content_type']);
+    if (channelID.isEmpty || channelType <= 0 || clientMsgNo.isEmpty) {
+      throw ApiException('消息状态异常，无法重发');
+    }
+    if (channelType == chat.channelTypeGroup) {
+      final muteState = groupMuteState(
+        channelID: channelID,
+        groupId: _groupIdForChannel(channelID),
+      );
+      final muteNotice = _activeGroupMuteNotice(muteState);
+      if (muteNotice.isNotEmpty) {
+        throw ApiException(muteNotice);
+      }
+    }
+    final payload = _cleanPayload({
+      ..._asMap(failedMessage['payload']),
+      'client_msg_no': clientMsgNo,
+      if (contentType.isNotEmpty) 'content_type': contentType,
+    });
+    final filePath = _value(payload, ['file_path']);
+    final serverPayload = Map<String, Object?>.from(payload)
+      ..remove('file_path');
+    final sending = Map<String, Object?>.from(failedMessage)
+      ..['status'] = 'sending'
+      ..['payload'] = payload
+      ..['content_type'] = contentType
+      ..['content'] = _payloadContent(payload)
+      ..remove('error');
+    _upsertMessage(channelID, channelType, sending);
+    _publishMessageEvent(
+      source: 'retry_local',
+      channelId: channelID,
+      channelType: channelType,
+      message: sending,
+    );
+    _markMessageChannel(
+      source: 'retry_local',
+      channelId: channelID,
+      channelType: channelType,
+    );
+    try {
+      final result = await _sendBusinessMessageWithRetry(
+        session: session,
+        chat: chat,
+        channelID: channelID,
+        channelType: channelType,
+        groupId: _value(payload, ['group_id']),
+        clientMsgNo: clientMsgNo,
+        contentType: contentType,
+        params: serverPayload,
+        filePath: filePath,
+      );
+      final confirmed = _normalizeSendResult(
+        result,
+        fallback: sending,
+        channelId: channelID,
+        channelType: channelType,
+      );
+      _upsertMessage(channelID, channelType, confirmed);
+      _upsertConversationFromMessage(confirmed);
+      _publishMessageEvent(
+        source: 'retry_confirmed',
+        channelId: channelID,
+        channelType: channelType,
+        message: confirmed,
+      );
+      _markMessageChannel(
+        source: 'retry_confirmed',
+        channelId: channelID,
+        channelType: channelType,
+      );
+      return result;
+    } catch (error, stackTrace) {
+      final failed = Map<String, Object?>.from(sending)
+        ..['status'] = 'failed'
+        ..['error'] = error.toString();
+      _upsertMessage(channelID, channelType, failed);
+      _publishMessageEvent(
+        source: 'retry_failed',
+        channelId: channelID,
+        channelType: channelType,
+        message: failed,
+      );
+      _markMessageChannel(
+        source: 'retry_failed',
+        channelId: channelID,
+        channelType: channelType,
+      );
+      AppLogger.error(
+        'im',
+        'business message retry failed',
         error: error,
         stackTrace: stackTrace,
         data: {
@@ -1544,6 +1668,23 @@ class BusinessImService extends ChangeNotifier {
     required int channelType,
   }) {
     final payload = _asMap(result['payload']);
+    final fallbackPayload = _asMap(fallback['payload']);
+    final mergedPayload = payload.isEmpty
+        ? fallbackPayload
+        : <String, Object?>{
+            ...payload,
+            if (_value(fallbackPayload, ['file_path']).isNotEmpty)
+              'file_path': _value(fallbackPayload, ['file_path']),
+            if (_value(fallbackPayload, ['name']).isNotEmpty &&
+                _value(payload, ['name', 'file_name']).isEmpty)
+              'name': _value(fallbackPayload, ['name']),
+            if (_value(fallbackPayload, ['size']).isNotEmpty &&
+                _value(payload, ['size', 'file_size']).isEmpty)
+              'size': _value(fallbackPayload, ['size']),
+            if (_value(fallbackPayload, ['mime']).isNotEmpty &&
+                _value(payload, ['mime']).isEmpty)
+              'mime': _value(fallbackPayload, ['mime']),
+          };
     final sendAck = _asMap(result['send_ack']);
     return <String, Object?>{
       ...fallback,
@@ -1555,12 +1696,12 @@ class BusinessImService extends ChangeNotifier {
       ], fallback: _value(fallback, ['client_msg_no'])),
       'channel_id': channelId,
       'channel_type': channelType,
-      'content': _payloadContent(payload).isNotEmpty
-          ? _payloadContent(payload)
+      'content': _payloadContent(mergedPayload).isNotEmpty
+          ? _payloadContent(mergedPayload)
           : fallback['content'],
       'content_type':
-          payload['content_type']?.toString() ?? fallback['content_type'],
-      'payload': payload.isEmpty ? fallback['payload'] : payload,
+          mergedPayload['content_type']?.toString() ?? fallback['content_type'],
+      'payload': mergedPayload.isEmpty ? fallback['payload'] : mergedPayload,
       'from_uid': _value(fallback, ['from_uid']),
       'is_me': fallback['is_me'] == true,
       'status': _boolValue(result['queued']) ? 'queued' : 'sent',
@@ -1584,6 +1725,7 @@ class BusinessImService extends ChangeNotifier {
     final receiverId = packet.channelType == _requireChat().channelTypePerson
         ? _receiverIdFromChannel(canonicalChannelId)
         : '';
+    final fromUser = _userFromPayload(payload);
     return <String, Object?>{
       'message_id': packet.messageId.toString(),
       'client_msg_no': packet.clientMsgNo,
@@ -1609,11 +1751,50 @@ class BusinessImService extends ChangeNotifier {
       'payload': payload,
       'timestamp': _formatTimestamp(packet.messageTime),
       'status': 'sent',
+      if (fromUser.isNotEmpty) 'from_user': fromUser,
       'header': {
         'no_persist': packet.header.noPersist,
         'show_unread': packet.header.showUnread,
         'sync_once': packet.header.syncOnce,
       },
+    };
+  }
+
+  Map<String, Object?> _userFromPayload(Map<String, Object?> payload) {
+    final senderId = _value(payload, [
+      'sender_id',
+      'from_id',
+      'user_id',
+      'userid',
+    ]);
+    final username = _value(payload, [
+      'sender_username',
+      'from_username',
+      'username',
+    ]);
+    final nickname = _value(payload, [
+      'sender_nickname',
+      'from_nickname',
+      'nickname',
+    ]);
+    final avatar = _value(payload, [
+      'sender_avatar',
+      'from_avatar',
+      'usertx',
+      'avatar',
+    ]);
+    if (senderId.isEmpty &&
+        username.isEmpty &&
+        nickname.isEmpty &&
+        avatar.isEmpty) {
+      return const <String, Object?>{};
+    }
+    return <String, Object?>{
+      if (senderId.isNotEmpty) 'id': senderId,
+      if (senderId.isNotEmpty) 'userid': senderId,
+      if (username.isNotEmpty) 'username': username,
+      if (nickname.isNotEmpty) 'nickname': nickname,
+      if (avatar.isNotEmpty) 'usertx': avatar,
     };
   }
 

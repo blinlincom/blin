@@ -8,6 +8,7 @@ import '../core/models.dart';
 import '../core/session_store.dart';
 import '../im/business_im_service.dart';
 import '../im/chat_feature_service.dart';
+import '../im/im_cache_store.dart';
 import '../im/im_message_types.dart';
 
 class SessionController extends ChangeNotifier {
@@ -16,10 +17,12 @@ class SessionController extends ChangeNotifier {
     required SessionStore store,
     required BusinessImService im,
     required ChatFeatureService chat,
+    required ImCacheStore cache,
   }) : _api = api,
        _store = store,
        _im = im,
-       _chat = chat {
+       _chat = chat,
+       _cache = cache {
     _im.addListener(notifyListeners);
   }
 
@@ -27,6 +30,7 @@ class SessionController extends ChangeNotifier {
   final SessionStore _store;
   final BusinessImService _im;
   final ChatFeatureService _chat;
+  final ImCacheStore _cache;
 
   UserSession? _session;
   AppInfo? _appInfo;
@@ -60,6 +64,30 @@ class SessionController extends ChangeNotifier {
   Stream<BusinessImMessageEvent> get messageEvents => _im.messageEvents;
 
   List<Map<String, Object?>> cachedConversations() => _im.cachedConversations();
+
+  List<Map<String, Object?>> cachedFriends() {
+    if (_friendCache.isNotEmpty) {
+      return _copyList(_friendCache);
+    }
+    final uid = _chatUid();
+    if (uid.isEmpty) {
+      return const [];
+    }
+    _friendCache = _cache.readFriendList(uid);
+    return _copyList(_friendCache);
+  }
+
+  List<Map<String, Object?>> cachedGroups() {
+    if (_groupCache.isNotEmpty) {
+      return _copyList(_groupCache);
+    }
+    final uid = _chatUid();
+    if (uid.isEmpty) {
+      return const [];
+    }
+    _groupCache = _cache.readGroupList(uid);
+    return _copyList(_groupCache);
+  }
 
   Map<String, Object?> groupMuteState({
     required String channelId,
@@ -263,6 +291,8 @@ class SessionController extends ChangeNotifier {
     );
     _friendCache = list;
     _friendCacheAt = DateTime.now();
+    _writeFriendCache(list);
+    notifyListeners();
     AppLogger.info(
       'session',
       'load friends success',
@@ -292,6 +322,8 @@ class SessionController extends ChangeNotifier {
     final list = await _groupRequest!.whenComplete(() => _groupRequest = null);
     _groupCache = list;
     _groupCacheAt = DateTime.now();
+    _writeGroupCache(list);
+    notifyListeners();
     AppLogger.info(
       'session',
       'load groups success',
@@ -898,6 +930,11 @@ class SessionController extends ChangeNotifier {
     return _chat.retryMessages(session: current, device: _device, limit: limit);
   }
 
+  Future<void> retryFailedMessage(Map<String, Object?> message) async {
+    _requireSession();
+    await _im.retryBusinessMessage(message);
+  }
+
   Future<Map<String, Object?>> onlineUsers({int page = 1, int limit = 20}) {
     final current = _requireSession();
     return _chat.onlineUsers(
@@ -1052,6 +1089,30 @@ class SessionController extends ChangeNotifier {
       return false;
     }
     return DateTime.now().difference(time) < const Duration(seconds: 30);
+  }
+
+  String _chatUid() => _session?.chat?.uid ?? '';
+
+  List<Map<String, Object?>> _copyList(List<Map<String, Object?>> list) {
+    return list
+        .map((item) => Map<String, Object?>.from(item))
+        .toList(growable: false);
+  }
+
+  void _writeFriendCache(List<Map<String, Object?>> friends) {
+    final uid = _chatUid();
+    if (uid.isEmpty) {
+      return;
+    }
+    _cache.writeFriendList(uid: uid, friends: friends);
+  }
+
+  void _writeGroupCache(List<Map<String, Object?>> groups) {
+    final uid = _chatUid();
+    if (uid.isEmpty) {
+      return;
+    }
+    _cache.writeGroupList(uid: uid, groups: groups);
   }
 
   void _clearListCaches() {

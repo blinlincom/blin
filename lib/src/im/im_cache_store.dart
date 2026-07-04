@@ -11,6 +11,8 @@ class ImCacheStore {
   static const _recentPrefix = 'im_recent_channels';
   static const _conversationPrefix = 'im_conversations';
   static const _messagePrefix = 'im_messages';
+  static const _friendListPrefix = 'im_friend_list';
+  static const _groupListPrefix = 'im_group_list';
   static const _readPrefix = 'im_read_marker';
   static const _clearPrefix = 'im_chat_clear_marker';
   static const _deletedPrefix = 'im_deleted_messages';
@@ -257,6 +259,28 @@ class ImCacheStore {
     required List<Map<String, Object?>> conversations,
   }) {
     _kv.encodeString('$_conversationPrefix:$uid', jsonEncode(conversations));
+  }
+
+  List<Map<String, Object?>> readFriendList(String uid) {
+    return _readMapList('$_friendListPrefix:$uid');
+  }
+
+  void writeFriendList({
+    required String uid,
+    required List<Map<String, Object?>> friends,
+  }) {
+    _kv.encodeString('$_friendListPrefix:$uid', jsonEncode(friends));
+  }
+
+  List<Map<String, Object?>> readGroupList(String uid) {
+    return _readMapList('$_groupListPrefix:$uid');
+  }
+
+  void writeGroupList({
+    required String uid,
+    required List<Map<String, Object?>> groups,
+  }) {
+    _kv.encodeString('$_groupListPrefix:$uid', jsonEncode(groups));
   }
 
   List<Map<String, Object?>> readMessages({

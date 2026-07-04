@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'src/app/bim_app.dart';
 import 'src/app/session_controller.dart';
@@ -12,6 +13,10 @@ import 'src/im/im_cache_store.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await SystemChrome.setPreferredOrientations([
+    DeviceOrientation.portraitUp,
+    DeviceOrientation.portraitDown,
+  ]);
   await AppLogger.initialize();
   final kv = await SecureCache.initialize();
   final store = SessionStore(kv);
@@ -24,6 +29,7 @@ Future<void> main() async {
     store: store,
     im: im,
     chat: chat,
+    cache: imCache,
   );
   runApp(BimApp(controller: controller));
 }

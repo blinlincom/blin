@@ -1,7 +1,11 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:photo_manager/photo_manager.dart';
 
 import '../../app/session_controller.dart';
 import '../../core/app_config.dart';
@@ -177,6 +181,7 @@ class _MessagesTabState extends State<MessagesTab> {
     super.initState();
     _conversationRevision = widget.controller.conversationVersion;
     _conversations = widget.controller.cachedConversations();
+    _precacheConversationAvatars(context, _conversations);
     _loading = _conversations.isEmpty;
     widget.controller.addListener(_onControllerChanged);
     _messageSub = widget.controller.messageEvents.listen(_onMessageEvent);
@@ -229,6 +234,7 @@ class _MessagesTabState extends State<MessagesTab> {
       if (!mounted || token != _loadToken) {
         return;
       }
+      _precacheConversationAvatars(context, list);
       setState(() {
         _conversations = list;
         _loading = false;
@@ -250,6 +256,7 @@ class _MessagesTabState extends State<MessagesTab> {
       return;
     }
     final next = _upsertConversation(_conversations, event.conversation);
+    _precacheConversationAvatars(context, next);
     setState(() {
       _conversations = next;
       _loading = false;
@@ -330,6 +337,7 @@ class _MessagesTabState extends State<MessagesTab> {
       time: time,
       unread: unread,
       isGroup: channelType == _groupChannelType,
+      avatarUrl: _conversationAvatarUrl(item),
       onTap: () {
         if (channelId.isEmpty) {
           return;
@@ -385,151 +393,185 @@ class ContactsTab extends StatefulWidget {
 }
 
 class _ContactsTabState extends State<ContactsTab> {
-  late Future<List<List<Map<String, Object?>>>> _future;
+  List<Map<String, Object?>> _friends = const [];
+  bool _loading = false;
+  String? _error;
 
   @override
   void initState() {
     super.initState();
-    _future = _load();
+    widget.controller.addListener(_onControllerChanged);
+    _friends = widget.controller.cachedFriends();
+    _precacheContactAvatars(context, _friends, const []);
+    _refresh(showLoading: _friends.isEmpty);
   }
 
-  Future<List<List<Map<String, Object?>>>> _load() {
-    return Future.wait([
-      widget.controller.loadFriends(),
-      widget.controller.loadGroups(),
-    ]);
+  @override
+  void dispose() {
+    widget.controller.removeListener(_onControllerChanged);
+    super.dispose();
   }
 
-  void _reload() {
-    setState(() => _future = _load());
+  void _onControllerChanged() {
+    final friends = widget.controller.cachedFriends();
+    if (_sameMapList(_friends, friends)) {
+      return;
+    }
+    _precacheContactAvatars(context, friends, const []);
+    setState(() {
+      _friends = friends;
+      _loading = false;
+      _error = null;
+    });
+  }
+
+  Future<void> _refresh({bool showLoading = true}) async {
+    if (showLoading && mounted) {
+      setState(() {
+        _loading = true;
+        _error = null;
+      });
+    }
+    try {
+      final friends = await widget.controller.loadFriends();
+      if (!mounted) {
+        return;
+      }
+      _precacheContactAvatars(context, friends, const []);
+      setState(() {
+        _friends = friends;
+        _loading = false;
+        _error = null;
+      });
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _loading = false;
+        _error = error.toString();
+      });
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    return FutureBuilder<List<List<Map<String, Object?>>>>(
-      future: _future,
-      builder: (context, snapshot) {
-        if (snapshot.connectionState != ConnectionState.done) {
-          return const Center(child: CircularProgressIndicator());
-        }
-        if (snapshot.hasError) {
-          return _ErrorState(text: snapshot.error.toString(), onRetry: _reload);
-        }
-        final friends = snapshot.data?[0] ?? [];
-        final groups = snapshot.data?[1] ?? [];
-        return Stack(
-          children: [
-            ListView(
-              padding: const EdgeInsets.only(bottom: 20),
-              children: [
-                _SearchBar(
-                  hintText: '搜索',
+    if (_loading && _friends.isEmpty) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (_error != null && _friends.isEmpty) {
+      return _ErrorState(text: _error!, onRetry: () => _refresh());
+    }
+    return Stack(
+      children: [
+        RefreshIndicator(
+          onRefresh: () => _refresh(showLoading: false),
+          child: ListView(
+            padding: const EdgeInsets.only(bottom: 20),
+            children: [
+              _SearchBar(
+                hintText: '搜索',
+                onTap: () =>
+                    _push(context, SearchPage(controller: widget.controller)),
+              ),
+              _MenuTile(
+                icon: Icons.group_add,
+                iconColor: const Color(0xffffa51f),
+                title: '新的朋友',
+                subtitle: '',
+                onTap: () => _push(
+                  context,
+                  FriendRequestsPage(controller: widget.controller),
+                ),
+              ),
+              _MenuTile(
+                icon: Icons.groups,
+                iconColor: const Color(0xff36c56f),
+                title: '群聊',
+                subtitle: '',
+                onTap: () =>
+                    _push(context, MyGroupsPage(controller: widget.controller)),
+              ),
+              _MenuTile(
+                icon: Icons.sell_outlined,
+                iconColor: const Color(0xff2f80ed),
+                title: '标签',
+                subtitle: '',
+                onTap: () => _showSoon(context),
+              ),
+              _MenuTile(
+                icon: Icons.person,
+                iconColor: const Color(0xff3d8bff),
+                title: '公众号',
+                subtitle: '',
+                onTap: () => _showSoon(context),
+              ),
+              const _SectionHeader(text: '我的企业'),
+              _ContactTile(
+                title: '产品设计部',
+                subtitle: '',
+                trailing: '',
+                isGroup: true,
+                avatarColor: const Color(0xff2f80ed),
+                icon: Icons.business_center,
+                onTap: () => _showSoon(context),
+              ),
+              _ContactTile(
+                title: '运营部',
+                subtitle: '',
+                trailing: '',
+                isGroup: true,
+                avatarColor: const Color(0xff2f80ed),
+                icon: Icons.diversity_3,
+                onTap: () => _showSoon(context),
+              ),
+              _ContactTile(
+                title: '技术部',
+                subtitle: '',
+                trailing: '',
+                isGroup: true,
+                avatarColor: const Color(0xff2f80ed),
+                icon: Icons.grid_view,
+                onTap: () => _showSoon(context),
+              ),
+              const _SectionHeader(text: '星标朋友'),
+              if (_friends.isEmpty) const _EmptyRow(text: '暂无好友'),
+              for (final item in _friends)
+                _ContactTile(
+                  title: _friendTitle(item),
+                  subtitle: '',
+                  trailing: '',
+                  isGroup: false,
+                  avatarUrl: _friendAvatarUrl(item),
                   onTap: () =>
-                      _push(context, SearchPage(controller: widget.controller)),
-                ),
-                _MenuTile(
-                  icon: Icons.group_add,
-                  iconColor: const Color(0xffffa51f),
-                  title: '新的朋友',
-                  subtitle: '',
-                  onTap: () => _push(
+                      _openPrivateChat(context, widget.controller, item),
+                  onLongPress: () => _push(
                     context,
-                    FriendRequestsPage(controller: widget.controller),
-                  ),
-                ),
-                _MenuTile(
-                  icon: Icons.groups,
-                  iconColor: const Color(0xff36c56f),
-                  title: '群聊',
-                  subtitle: '',
-                  onTap: () => _push(
-                    context,
-                    MyGroupsPage(controller: widget.controller),
-                  ),
-                ),
-                _MenuTile(
-                  icon: Icons.sell_outlined,
-                  iconColor: const Color(0xff2f80ed),
-                  title: '标签',
-                  subtitle: '',
-                  onTap: () => _showSoon(context),
-                ),
-                _MenuTile(
-                  icon: Icons.person,
-                  iconColor: const Color(0xff3d8bff),
-                  title: '公众号',
-                  subtitle: '',
-                  onTap: () => _showSoon(context),
-                ),
-                const _SectionHeader(text: '我的企业'),
-                _ContactTile(
-                  title: '产品设计部',
-                  subtitle: '',
-                  trailing: '',
-                  isGroup: true,
-                  avatarColor: const Color(0xff2f80ed),
-                  icon: Icons.business_center,
-                  onTap: () => _showSoon(context),
-                ),
-                _ContactTile(
-                  title: '运营部',
-                  subtitle: '',
-                  trailing: '',
-                  isGroup: true,
-                  avatarColor: const Color(0xff2f80ed),
-                  icon: Icons.diversity_3,
-                  onTap: () => _showSoon(context),
-                ),
-                _ContactTile(
-                  title: '技术部',
-                  subtitle: '',
-                  trailing: '',
-                  isGroup: true,
-                  avatarColor: const Color(0xff2f80ed),
-                  icon: Icons.grid_view,
-                  onTap: () => _showSoon(context),
-                ),
-                const _SectionHeader(text: '星标朋友'),
-                if (friends.isEmpty) const _EmptyRow(text: '暂无好友'),
-                for (final item in friends)
-                  _ContactTile(
-                    title: _friendTitle(item),
-                    subtitle: '',
-                    trailing: '',
-                    isGroup: false,
-                    onTap: () =>
-                        _openPrivateChat(context, widget.controller, item),
-                    onLongPress: () => _push(
-                      context,
-                      PrivateChatActionsPage(
-                        controller: widget.controller,
-                        title: _friendTitle(item),
-                        receiverId: _friendUserId(item),
-                        channelId: _friendChannelId(item),
-                      ),
+                    PrivateChatActionsPage(
+                      controller: widget.controller,
+                      title: _friendTitle(item),
+                      receiverId: _friendUserId(item),
+                      channelId: _friendChannelId(item),
                     ),
                   ),
-                if (groups.isNotEmpty) const _SectionHeader(text: '群聊'),
-                for (final item in groups)
-                  _ContactTile(
-                    title: _groupTitle(item),
-                    subtitle: '',
-                    trailing: '',
-                    isGroup: true,
-                    onTap: () =>
-                        _openGroupChat(context, widget.controller, item),
-                  ),
-              ],
-            ),
-            const Positioned(
-              right: 4,
-              top: 96,
-              bottom: 74,
-              child: IgnorePointer(child: _AlphabetIndex()),
-            ),
-          ],
-        );
-      },
+                ),
+            ],
+          ),
+        ),
+        const Positioned(
+          right: 4,
+          top: 96,
+          bottom: 74,
+          child: IgnorePointer(child: _AlphabetIndex()),
+        ),
+        if (_error != null)
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            child: _InfoBar(text: '通讯录刷新失败：$_error'),
+          ),
+      ],
     );
   }
 }
@@ -836,7 +878,9 @@ class SearchPage extends StatefulWidget {
 
 class _SearchPageState extends State<SearchPage> {
   final _keyword = TextEditingController();
-  late Future<List<List<Map<String, Object?>>>> _future;
+  List<Map<String, Object?>> _friends = const [];
+  bool _loading = false;
+  String? _loadError;
   Future<Map<String, Object?>>? _friendSearchFuture;
   String _friendSearchKeyword = '';
   String _message = '';
@@ -846,7 +890,8 @@ class _SearchPageState extends State<SearchPage> {
   @override
   void initState() {
     super.initState();
-    _future = _load();
+    _friends = widget.controller.cachedFriends();
+    _refreshLocal(showLoading: _friends.isEmpty);
   }
 
   @override
@@ -855,15 +900,32 @@ class _SearchPageState extends State<SearchPage> {
     super.dispose();
   }
 
-  Future<List<List<Map<String, Object?>>>> _load() {
-    return Future.wait([
-      widget.controller.loadFriends(),
-      widget.controller.loadGroups(),
-    ]);
-  }
-
-  void _reload() {
-    setState(() => _future = _load());
+  Future<void> _refreshLocal({bool showLoading = true}) async {
+    if (showLoading && mounted) {
+      setState(() {
+        _loading = true;
+        _loadError = null;
+      });
+    }
+    try {
+      final friends = await widget.controller.loadFriends();
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _friends = friends;
+        _loading = false;
+        _loadError = null;
+      });
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _loading = false;
+        _loadError = error.toString();
+      });
+    }
   }
 
   void _searchRemoteFriends() {
@@ -888,104 +950,81 @@ class _SearchPageState extends State<SearchPage> {
     return Scaffold(
       appBar: AppBar(title: const Text('搜索')),
       body: SafeArea(
-        child: FutureBuilder<List<List<Map<String, Object?>>>>(
-          future: _future,
-          builder: (context, snapshot) {
-            if (snapshot.connectionState != ConnectionState.done) {
-              return const Center(child: CircularProgressIndicator());
-            }
-            if (snapshot.hasError) {
-              return _ErrorState(
-                text: snapshot.error.toString(),
-                onRetry: _reload,
-              );
-            }
-            final keyword = _keyword.text.trim().toLowerCase();
-            final friends = (snapshot.data?[0] ?? []).where((item) {
-              return keyword.isEmpty ||
-                  _friendTitle(item).toLowerCase().contains(keyword) ||
-                  _friendUsername(item).toLowerCase().contains(keyword);
-            }).toList();
-            final groups = (snapshot.data?[1] ?? []).where((item) {
-              return keyword.isEmpty ||
-                  _groupTitle(item).toLowerCase().contains(keyword);
-            }).toList();
-            return ListView(
-              children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 6, 16, 10),
-                  child: TextField(
-                    controller: _keyword,
-                    autofocus: true,
-                    textInputAction: TextInputAction.search,
-                    onChanged: (_) => setState(() {}),
-                    onSubmitted: (_) => _searchRemoteFriends(),
-                    decoration: const InputDecoration(
-                      prefixIcon: Icon(Icons.search),
-                      hintText: '好友昵称/用户名，添加朋友用用户名',
-                    ),
-                  ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  child: _ButtonRow(
-                    children: [
-                      FilledButton.icon(
-                        onPressed: _acting ? null : _searchRemoteFriends,
-                        icon: const Icon(Icons.person_search_outlined),
-                        label: const Text('按用户名搜索'),
-                      ),
-                      OutlinedButton.icon(
-                        onPressed: _reload,
-                        icon: const Icon(Icons.refresh),
-                        label: const Text('刷新本地'),
-                      ),
-                    ],
-                  ),
-                ),
-                if (_acting) const _LinearBusy(),
-                _ResultBlock(text: _message),
-                _ErrorBlock(text: _error),
-                const _SectionHeader(text: '添加朋友'),
-                _RemoteFriendSearchBlock(
-                  controller: widget.controller,
-                  keyword: _friendSearchKeyword,
-                  future: _friendSearchFuture,
-                  onOpenChat: _openRemoteFriendChat,
-                  onApply: _applyRemoteFriend,
-                  onHandleIncoming: () => _push(
-                    context,
-                    FriendRequestsPage(controller: widget.controller),
-                  ),
-                ),
-                const _SectionHeader(text: '好友'),
-                if (friends.isEmpty) const _EmptyRow(text: '没有匹配好友'),
-                for (final item in friends)
-                  _ContactTile(
-                    title: _friendTitle(item),
-                    subtitle: _friendSubtitle(item),
-                    trailing: _friendUsername(item),
-                    isGroup: false,
-                    onTap: () =>
-                        _openPrivateChat(context, widget.controller, item),
-                  ),
-                const _SectionHeader(text: '群聊'),
-                if (groups.isEmpty) const _EmptyRow(text: '没有匹配群聊'),
-                for (final item in groups)
-                  _ContactTile(
-                    title: _groupTitle(item),
-                    subtitle: _value(item, ['notice', 'description']),
-                    trailing:
-                        '${_intValue(item, ['member_count', 'members'])}人',
-                    isGroup: true,
-                    onTap: () =>
-                        _openGroupChat(context, widget.controller, item),
-                  ),
-              ],
-            );
-          },
-        ),
+        child: _loading && _friends.isEmpty
+            ? const Center(child: CircularProgressIndicator())
+            : _loadError != null && _friends.isEmpty
+            ? _ErrorState(text: _loadError!, onRetry: () => _refreshLocal())
+            : _buildSearchList(),
       ),
+    );
+  }
+
+  Widget _buildSearchList() {
+    final keyword = _keyword.text.trim().toLowerCase();
+    final friends = _friends.where((item) {
+      return keyword.isEmpty ||
+          _friendTitle(item).toLowerCase().contains(keyword) ||
+          _friendUsername(item).toLowerCase().contains(keyword);
+    }).toList();
+    return ListView(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 6, 16, 10),
+          child: TextField(
+            controller: _keyword,
+            autofocus: true,
+            textInputAction: TextInputAction.search,
+            onChanged: (_) => setState(() {}),
+            onSubmitted: (_) => _searchRemoteFriends(),
+            decoration: const InputDecoration(
+              prefixIcon: Icon(Icons.search),
+              hintText: '好友昵称/用户名，添加朋友用用户名',
+            ),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: _ButtonRow(
+            children: [
+              FilledButton.icon(
+                onPressed: _acting ? null : _searchRemoteFriends,
+                icon: const Icon(Icons.person_search_outlined),
+                label: const Text('按用户名搜索'),
+              ),
+              OutlinedButton.icon(
+                onPressed: () => _refreshLocal(showLoading: false),
+                icon: const Icon(Icons.refresh),
+                label: const Text('刷新本地'),
+              ),
+            ],
+          ),
+        ),
+        if (_acting) const _LinearBusy(),
+        _ResultBlock(text: _message),
+        _ErrorBlock(text: _error),
+        if (_loadError != null) _InfoBar(text: '好友刷新失败：$_loadError'),
+        const _SectionHeader(text: '添加朋友'),
+        _RemoteFriendSearchBlock(
+          controller: widget.controller,
+          keyword: _friendSearchKeyword,
+          future: _friendSearchFuture,
+          onOpenChat: _openRemoteFriendChat,
+          onApply: _applyRemoteFriend,
+          onHandleIncoming: () =>
+              _push(context, FriendRequestsPage(controller: widget.controller)),
+        ),
+        const _SectionHeader(text: '好友'),
+        if (friends.isEmpty) const _EmptyRow(text: '没有匹配好友'),
+        for (final item in friends)
+          _ContactTile(
+            title: _friendTitle(item),
+            subtitle: _friendSubtitle(item),
+            trailing: _friendUsername(item),
+            isGroup: false,
+            avatarUrl: _friendAvatarUrl(item),
+            onTap: () => _openPrivateChat(context, widget.controller, item),
+          ),
+      ],
     );
   }
 
@@ -1905,16 +1944,65 @@ class MyGroupsPage extends StatefulWidget {
 }
 
 class _MyGroupsPageState extends State<MyGroupsPage> {
-  late Future<List<Map<String, Object?>>> _future;
+  List<Map<String, Object?>> _groups = const [];
+  bool _loading = false;
+  String? _error;
 
   @override
   void initState() {
     super.initState();
-    _future = widget.controller.loadGroups();
+    widget.controller.addListener(_onControllerChanged);
+    _groups = widget.controller.cachedGroups();
+    _precacheContactAvatars(context, const [], _groups);
+    _refresh(showLoading: _groups.isEmpty);
   }
 
-  void _reload() {
-    setState(() => _future = widget.controller.loadGroups());
+  @override
+  void dispose() {
+    widget.controller.removeListener(_onControllerChanged);
+    super.dispose();
+  }
+
+  void _onControllerChanged() {
+    final groups = widget.controller.cachedGroups();
+    if (_sameMapList(_groups, groups)) {
+      return;
+    }
+    _precacheContactAvatars(context, const [], groups);
+    setState(() {
+      _groups = groups;
+      _loading = false;
+      _error = null;
+    });
+  }
+
+  Future<void> _refresh({bool showLoading = true}) async {
+    if (showLoading && mounted) {
+      setState(() {
+        _loading = true;
+        _error = null;
+      });
+    }
+    try {
+      final groups = await widget.controller.loadGroups();
+      if (!mounted) {
+        return;
+      }
+      _precacheContactAvatars(context, const [], groups);
+      setState(() {
+        _groups = groups;
+        _loading = false;
+        _error = null;
+      });
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _loading = false;
+        _error = error.toString();
+      });
+    }
   }
 
   @override
@@ -1922,47 +2010,39 @@ class _MyGroupsPageState extends State<MyGroupsPage> {
     return Scaffold(
       appBar: AppBar(title: const Text('我的群聊')),
       body: SafeArea(
-        child: FutureBuilder<List<Map<String, Object?>>>(
-          future: _future,
-          builder: (context, snapshot) {
-            if (snapshot.connectionState != ConnectionState.done) {
-              return const Center(child: CircularProgressIndicator());
-            }
-            if (snapshot.hasError) {
-              return _ErrorState(
-                text: snapshot.error.toString(),
-                onRetry: _reload,
-              );
-            }
-            final groups = snapshot.data ?? [];
-            if (groups.isEmpty) {
-              return const _EmptyState(text: '暂无群聊');
-            }
-            return ListView(
-              children: [
-                for (final item in groups)
-                  _PlainListTile(
-                    icon: Icons.groups_outlined,
-                    title: _groupTitle(item),
-                    subtitle: _value(item, ['notice', 'description']),
-                    trailing:
-                        '${_intValue(item, ['member_count', 'members'])}人',
-                    onTap: () =>
-                        _openGroupChat(context, widget.controller, item),
-                    onLongPress: () => _push(
-                      context,
-                      GroupDetailPage(
-                        controller: widget.controller,
+        child: _loading && _groups.isEmpty
+            ? const Center(child: CircularProgressIndicator())
+            : _error != null && _groups.isEmpty
+            ? _ErrorState(text: _error!, onRetry: () => _refresh())
+            : RefreshIndicator(
+                onRefresh: () => _refresh(showLoading: false),
+                child: ListView(
+                  children: [
+                    if (_groups.isEmpty) const _EmptyRow(text: '暂无群聊'),
+                    for (final item in _groups)
+                      _PlainListTile(
+                        icon: Icons.groups_outlined,
                         title: _groupTitle(item),
-                        groupId: _groupIdFromItem(item),
-                        channelId: _groupChannelId(item),
+                        subtitle: _value(item, ['notice', 'description']),
+                        trailing:
+                            '${_intValue(item, ['member_count', 'members'])}人',
+                        avatarUrl: _groupAvatarUrl(item),
+                        onTap: () =>
+                            _openGroupChat(context, widget.controller, item),
+                        onLongPress: () => _push(
+                          context,
+                          GroupDetailPage(
+                            controller: widget.controller,
+                            title: _groupTitle(item),
+                            groupId: _groupIdFromItem(item),
+                            channelId: _groupChannelId(item),
+                          ),
+                        ),
                       ),
-                    ),
-                  ),
-              ],
-            );
-          },
-        ),
+                    if (_error != null) _InfoBar(text: '群聊刷新失败：$_error'),
+                  ],
+                ),
+              ),
       ),
     );
   }
@@ -2289,6 +2369,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   late int _conversationRevision;
   late int _messageRevision;
   StreamSubscription<BusinessImMessageEvent>? _messageSub;
+  bool _didInitialScroll = false;
 
   bool get _isGroup => widget.channelType == _groupChannelType;
   String get _groupId =>
@@ -2333,8 +2414,8 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   @override
   void didChangeMetrics() {
     super.didChangeMetrics();
-    if (_inputFocusNode.hasFocus) {
-      _scheduleKeyboardScroll();
+    if (_inputFocusNode.hasFocus && _isNearBottom()) {
+      _stickToBottomDuringKeyboard();
     }
   }
 
@@ -2345,7 +2426,9 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     if (_toolsOpen) {
       setState(() => _toolsOpen = false);
     }
-    _scheduleKeyboardScroll();
+    if (_isNearBottom()) {
+      _stickToBottomDuringKeyboard();
+    }
   }
 
   @override
@@ -2363,6 +2446,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       _conversationRevision = widget.controller.conversationVersion;
       _messageRevision = _currentMessageRevision();
       _messages = const [];
+      _didInitialScroll = false;
       _groupMuteState = const {};
       unawaited(
         widget.controller.openConversation(
@@ -2442,13 +2526,16 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         event.channelType != widget.channelType) {
       return;
     }
+    final shouldStickToBottom = _shouldAutoScrollForMessage(event);
     setState(() {
       _messages = _mergeMessageList(_messages, event.message, limit: 200);
       _messagesLoading = false;
       _messageRevision = _currentMessageRevision();
       _conversationRevision = widget.controller.conversationVersion;
     });
-    _scrollToBottom();
+    if (shouldStickToBottom) {
+      _scrollToBottom(animated: event.source != 'send_local');
+    }
     unawaited(
       widget.controller.openConversation(
         channelId: widget.channelId,
@@ -2482,6 +2569,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
 
   Future<void> _loadMessagesIntoState({required bool showLoading}) async {
     final token = ++_messageLoadToken;
+    final wasNearBottom = _isNearBottom();
     if (showLoading && mounted) {
       setState(() {
         _messagesLoading = true;
@@ -2493,11 +2581,21 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       if (!mounted || token != _messageLoadToken) {
         return;
       }
+      _precacheMessageAvatars(
+        context,
+        messages,
+        widget.controller.session?.avatar ?? '',
+      );
       setState(() {
         _messages = messages;
         _messagesLoading = false;
       });
-      _scrollToBottom();
+      if (showLoading && !_didInitialScroll) {
+        _didInitialScroll = true;
+        _scrollToBottom(animated: false);
+      } else if (wasNearBottom) {
+        _scrollToBottom(animated: false);
+      }
     } catch (error) {
       if (!mounted || token != _messageLoadToken) {
         return;
@@ -2563,29 +2661,44 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     return next.sublist(next.length - limit);
   }
 
-  void _scrollToBottom() {
+  bool _shouldAutoScrollForMessage(BusinessImMessageEvent event) {
+    if (event.message['is_me'] == true || event.source.startsWith('send_')) {
+      return true;
+    }
+    return _isNearBottom();
+  }
+
+  bool _isNearBottom({double threshold = 96}) {
+    if (!_scrollController.hasClients) {
+      return true;
+    }
+    final position = _scrollController.position;
+    return position.pixels - position.minScrollExtent <= threshold;
+  }
+
+  void _scrollToBottom({bool animated = true}) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || !_scrollController.hasClients) {
         return;
       }
-      _scrollController.animateTo(
-        _scrollController.position.maxScrollExtent,
-        duration: const Duration(milliseconds: 180),
-        curve: Curves.easeOut,
-      );
+      final bottom = _scrollController.position.minScrollExtent;
+      if (animated) {
+        _scrollController.animateTo(
+          bottom,
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeOut,
+        );
+      } else {
+        _scrollController.jumpTo(bottom);
+      }
     });
   }
 
-  void _scheduleKeyboardScroll() {
-    _scrollToBottom();
-    Future<void>.delayed(const Duration(milliseconds: 80), () {
+  void _stickToBottomDuringKeyboard() {
+    _scrollToBottom(animated: false);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted && _inputFocusNode.hasFocus) {
-        _scrollToBottom();
-      }
-    });
-    Future<void>.delayed(const Duration(milliseconds: 260), () {
-      if (mounted && _inputFocusNode.hasFocus) {
-        _scrollToBottom();
+        _scrollToBottom(animated: false);
       }
     });
   }
@@ -2600,17 +2713,16 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     }
     setState(() => _toolsOpen = opening);
     if (!opening) {
-      _scrollToBottom();
+      _scrollToBottom(animated: false);
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final keyboardInset = MediaQuery.viewInsetsOf(context).bottom;
     final muteText = _groupMuteText(_groupMuteState);
     final composerEnabled = _composerEnabled;
     return Scaffold(
-      resizeToAvoidBottomInset: false,
+      resizeToAvoidBottomInset: true,
       backgroundColor: const Color(0xfff1f2f4),
       appBar: AppBar(
         backgroundColor: Colors.white,
@@ -2644,96 +2756,100 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         ],
       ),
       body: SafeArea(
-        child: AnimatedPadding(
-          duration: const Duration(milliseconds: 180),
-          curve: Curves.easeOut,
-          padding: EdgeInsets.only(bottom: keyboardInset),
-          child: AnimatedBuilder(
-            animation: widget.controller,
-            builder: (context, _) {
-              return Column(
-                children: [
-                  if (_error != null) _ChatError(text: _error!),
-                  if (_message.isNotEmpty) _InfoBar(text: _message),
-                  if (_replyClientMsgNo.isNotEmpty ||
-                      _burnAfterRead ||
-                      _mentionAll ||
-                      _mentionUserIds.isNotEmpty)
-                    _ChatOptionBar(text: _optionText(), onClear: _clearOptions),
-                  if (_selectedClientMsgNo.isNotEmpty)
-                    _SelectedMessageBar(
-                      onReply: () => setState(() {
-                        _replyClientMsgNo = _selectedClientMsgNo;
-                        _selectedClientMsgNo = '';
-                      }),
-                      onReceipt: _queryReceipt,
-                      onRecall: _recallSelected,
-                      onDelete: _deleteSelected,
-                      onBurn: _burnSelected,
-                      onReceiveRedPacket: _receiveSelectedRedPacket,
-                      onReceiveTransfer: _receiveSelectedTransfer,
-                      onClear: () => setState(() {
-                        _selectedClientMsgNo = '';
-                        _selectedPayload = const {};
-                      }),
-                    ),
-                  Expanded(
-                    child: _messagesLoading && _messages.isEmpty
-                        ? const Center(child: CircularProgressIndicator())
-                        : _messages.isEmpty
-                        ? const _EmptyState(text: '暂无消息')
-                        : ListView.builder(
-                            controller: _scrollController,
-                            padding: const EdgeInsets.fromLTRB(14, 14, 14, 20),
-                            itemCount: _messages.length,
-                            itemBuilder: (context, index) {
-                              final item = _messages[index];
-                              return Column(
-                                children: [
-                                  if (_shouldShowTimeDivider(_messages, index))
-                                    _TimeDivider(text: _messageTimeLabel(item)),
-                                  _MessageRow(
-                                    item: item,
-                                    showSenderName: _isGroup,
-                                    onLongPress: () => _selectMessage(item),
-                                  ),
-                                ],
-                              );
-                            },
-                          ),
+        child: AnimatedBuilder(
+          animation: widget.controller,
+          builder: (context, _) {
+            return Column(
+              children: [
+                if (_error != null) _ChatError(text: _error!),
+                if (_message.isNotEmpty) _InfoBar(text: _message),
+                if (_replyClientMsgNo.isNotEmpty ||
+                    _burnAfterRead ||
+                    _mentionAll ||
+                    _mentionUserIds.isNotEmpty)
+                  _ChatOptionBar(text: _optionText(), onClear: _clearOptions),
+                if (_selectedClientMsgNo.isNotEmpty)
+                  _SelectedMessageBar(
+                    onReply: () => setState(() {
+                      _replyClientMsgNo = _selectedClientMsgNo;
+                      _selectedClientMsgNo = '';
+                    }),
+                    onReceipt: _queryReceipt,
+                    onRecall: _recallSelected,
+                    onDelete: _deleteSelected,
+                    onBurn: _burnSelected,
+                    onReceiveRedPacket: _receiveSelectedRedPacket,
+                    onReceiveTransfer: _receiveSelectedTransfer,
+                    onClear: () => setState(() {
+                      _selectedClientMsgNo = '';
+                      _selectedPayload = const {};
+                    }),
                   ),
-                  if (_toolsOpen)
-                    _ChatToolsPanel(
-                      isGroup: _isGroup,
-                      onTextOption: _openTextOptions,
-                      onImage: () => _sendMedia(ChatContentTypes.image),
-                      onEmoji: () => _sendMedia(ChatContentTypes.emoji),
-                      onGif: () => _sendMedia(ChatContentTypes.gif),
-                      onSticker: () => _sendMedia(ChatContentTypes.sticker),
-                      onVoice: () => _sendMedia(ChatContentTypes.voice),
-                      onVideo: () => _sendMedia(ChatContentTypes.video),
-                      onFile: () => _sendMedia(ChatContentTypes.file),
-                      onContactCard: _sendContactCard,
-                      onTransfer: _sendTransfer,
-                      onRedPacket: _sendRedPacket,
-                      onGroupMembers: _isGroup ? _openGroupMembers : null,
-                    ),
-                  _Composer(
-                    controller: _textController,
-                    focusNode: _inputFocusNode,
-                    sending: _sending,
-                    enabled: composerEnabled,
-                    disabledText: muteText,
-                    toolsOpen: _toolsOpen,
-                    onVoice: () => _sendMedia(ChatContentTypes.voice),
+                Expanded(
+                  child: _messagesLoading && _messages.isEmpty
+                      ? const Center(child: CircularProgressIndicator())
+                      : _messages.isEmpty
+                      ? const _EmptyState(text: '暂无消息')
+                      : ListView.builder(
+                          controller: _scrollController,
+                          reverse: true,
+                          padding: const EdgeInsets.fromLTRB(14, 14, 14, 20),
+                          itemCount: _messages.length,
+                          itemBuilder: (context, index) {
+                            final messageIndex = _messages.length - 1 - index;
+                            final item = _messages[messageIndex];
+                            final showTime = _shouldShowTimeDivider(
+                              _messages,
+                              messageIndex,
+                            );
+                            return Column(
+                              children: [
+                                if (showTime)
+                                  _TimeDivider(text: _messageTimeLabel(item)),
+                                _MessageRow(
+                                  item: item,
+                                  showSenderName: _isGroup,
+                                  currentUserAvatarUrl:
+                                      widget.controller.session?.avatar ?? '',
+                                  onLongPress: () => _selectMessage(item),
+                                  onRetry: () => _retryMessage(item),
+                                ),
+                              ],
+                            );
+                          },
+                        ),
+                ),
+                if (_toolsOpen)
+                  _ChatToolsPanel(
+                    isGroup: _isGroup,
+                    onTextOption: _openTextOptions,
+                    onImage: () => _sendMedia(ChatContentTypes.image),
                     onEmoji: () => _sendMedia(ChatContentTypes.emoji),
-                    onTools: _toggleTools,
-                    onSend: _sendText,
+                    onGif: () => _sendMedia(ChatContentTypes.gif),
+                    onSticker: () => _sendMedia(ChatContentTypes.sticker),
+                    onVoice: () => _sendMedia(ChatContentTypes.voice),
+                    onVideo: () => _sendMedia(ChatContentTypes.video),
+                    onFile: () => _sendMedia(ChatContentTypes.file),
+                    onContactCard: _sendContactCard,
+                    onTransfer: _sendTransfer,
+                    onRedPacket: _sendRedPacket,
+                    onGroupMembers: _isGroup ? _openGroupMembers : null,
                   ),
-                ],
-              );
-            },
-          ),
+                _Composer(
+                  controller: _textController,
+                  focusNode: _inputFocusNode,
+                  sending: _sending,
+                  enabled: composerEnabled,
+                  disabledText: muteText,
+                  toolsOpen: _toolsOpen,
+                  onVoice: () => _sendMedia(ChatContentTypes.voice),
+                  onEmoji: () => _sendMedia(ChatContentTypes.emoji),
+                  onTools: _toggleTools,
+                  onSend: _sendText,
+                ),
+              ],
+            );
+          },
         ),
       ),
     );
@@ -2749,6 +2865,9 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   }
 
   Future<void> _sendText() async {
+    if (_sending) {
+      return;
+    }
     if (!_composerEnabled) {
       setState(() => _message = _groupMuteText(_groupMuteState));
       return;
@@ -2757,23 +2876,44 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     if (text.isEmpty) {
       return;
     }
-    await _runSending(() async {
-      await widget.controller.sendTextMessage(
-        channelId: widget.channelId,
-        channelType: widget.channelType,
-        groupId: widget.groupId,
-        text: text,
-        mentionUserIds: _mentionUserIds,
-        mentionAll: _mentionAll,
-        replyClientMsgNo: _replyClientMsgNo,
-        burnAfterRead: _burnAfterRead,
-        burnAfterReadSeconds: _burnSeconds,
-      );
-      _textController.clear();
-      _replyClientMsgNo = '';
-      _mentionUserIds = const [];
-      _mentionAll = false;
-    });
+    final mentionUserIds = List<String>.from(_mentionUserIds);
+    final mentionAll = _mentionAll;
+    final replyClientMsgNo = _replyClientMsgNo;
+    final burnAfterRead = _burnAfterRead;
+    final burnSeconds = _burnSeconds;
+    await _runSending(
+      () async {
+        await widget.controller.sendTextMessage(
+          channelId: widget.channelId,
+          channelType: widget.channelType,
+          groupId: widget.groupId,
+          text: text,
+          mentionUserIds: mentionUserIds,
+          mentionAll: mentionAll,
+          replyClientMsgNo: replyClientMsgNo,
+          burnAfterRead: burnAfterRead,
+          burnAfterReadSeconds: burnSeconds,
+        );
+      },
+      beforeTask: () {
+        _textController.clear();
+        setState(() {
+          _replyClientMsgNo = '';
+          _mentionUserIds = const [];
+          _mentionAll = false;
+        });
+      },
+    );
+  }
+
+  Future<void> _retryMessage(Map<String, Object?> item) async {
+    if (_sending) {
+      return;
+    }
+    if (_messageStatus(item) != 'failed') {
+      return;
+    }
+    await _runSending(() => widget.controller.retryFailedMessage(item));
   }
 
   Future<void> _sendMedia(String contentType) async {
@@ -2781,20 +2921,13 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       setState(() => _message = _groupMuteText(_groupMuteState));
       return;
     }
-    final fields = _mediaFields(contentType);
-    final data = await _openInput(
-      context,
-      title: _mediaTitle(contentType),
-      fields: fields,
-    );
+    final data = await _selectMediaPayload(contentType);
     if (data == null) {
       return;
     }
     final url = data['url'] ?? '';
     final filePath = data['file_path'] ?? '';
-    final params = Map<String, Object?>.from(data)
-      ..remove('url')
-      ..remove('file_path');
+    final params = Map<String, Object?>.from(data)..remove('url');
     if (_burnAfterRead) {
       params['burn_after_read'] = '1';
       if (_burnSeconds > 0) {
@@ -2821,6 +2954,27 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         );
       }
     });
+  }
+
+  Future<Map<String, String>?> _selectMediaPayload(String contentType) {
+    if (contentType == ChatContentTypes.image ||
+        contentType == ChatContentTypes.video) {
+      return Navigator.of(context).push<Map<String, String>>(
+        MaterialPageRoute(
+          builder: (_) => _InAppMediaPickerPage(contentType: contentType),
+        ),
+      );
+    }
+    if (contentType == ChatContentTypes.file) {
+      return Navigator.of(context).push<Map<String, String>>(
+        MaterialPageRoute(builder: (_) => const _InAppFilePickerPage()),
+      );
+    }
+    return _openInput(
+      context,
+      title: _mediaTitle(contentType),
+      fields: _mediaFields(contentType),
+    );
   }
 
   Future<void> _sendContactCard() async {
@@ -3129,13 +3283,20 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     );
   }
 
-  Future<void> _runSending(Future<void> Function() task) async {
+  Future<void> _runSending(
+    Future<void> Function() task, {
+    VoidCallback? beforeTask,
+  }) async {
+    if (_sending) {
+      return;
+    }
     setState(() {
       _sending = true;
       _error = null;
       _message = '';
     });
     try {
+      beforeTask?.call();
       await task();
       if (mounted) {
         setState(() {
@@ -3222,6 +3383,578 @@ class ActionInputPage extends StatefulWidget {
 
   @override
   State<ActionInputPage> createState() => _ActionInputPageState();
+}
+
+class _InAppMediaPickerPage extends StatefulWidget {
+  const _InAppMediaPickerPage({required this.contentType});
+
+  final String contentType;
+
+  @override
+  State<_InAppMediaPickerPage> createState() => _InAppMediaPickerPageState();
+}
+
+class _InAppMediaPickerPageState extends State<_InAppMediaPickerPage> {
+  static const _pageSize = 120;
+
+  List<AssetPathEntity> _albums = const [];
+  List<AssetEntity> _assets = const [];
+  AssetPathEntity? _selectedAlbum;
+  bool _loading = true;
+  bool _loadingAssets = false;
+  String _error = '';
+  String _selectingAssetId = '';
+
+  bool get _isVideo => widget.contentType == ChatContentTypes.video;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_loadAlbums());
+  }
+
+  Future<void> _loadAlbums() async {
+    setState(() {
+      _loading = true;
+      _error = '';
+    });
+    try {
+      final permission = await PhotoManager.requestPermissionExtend();
+      if (!permission.hasAccess) {
+        if (!mounted) {
+          return;
+        }
+        setState(() {
+          _loading = false;
+          _error = '需要授权访问相册后才能选择${_isVideo ? '视频' : '图片'}';
+        });
+        return;
+      }
+      final albums = await PhotoManager.getAssetPathList(
+        type: _isVideo ? RequestType.video : RequestType.image,
+        hasAll: true,
+      );
+      if (!mounted) {
+        return;
+      }
+      if (albums.isEmpty) {
+        setState(() {
+          _loading = false;
+          _albums = const [];
+          _assets = const [];
+          _selectedAlbum = null;
+          _error = '';
+        });
+        return;
+      }
+      final selected = albums.firstWhere(
+        (item) => item.isAll,
+        orElse: () => albums.first,
+      );
+      setState(() {
+        _albums = albums;
+        _selectedAlbum = selected;
+      });
+      await _loadAssets(selected, showPageLoading: false);
+    } catch (error, stackTrace) {
+      AppLogger.error(
+        'chat',
+        'load media picker failed',
+        error: error,
+        stackTrace: stackTrace,
+      );
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _loading = false;
+        _error = '相册读取失败';
+      });
+    }
+  }
+
+  Future<void> _loadAssets(
+    AssetPathEntity album, {
+    bool showPageLoading = true,
+  }) async {
+    if (showPageLoading) {
+      setState(() {
+        _loadingAssets = true;
+        _error = '';
+      });
+    }
+    try {
+      final assets = await album.getAssetListPaged(page: 0, size: _pageSize);
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _selectedAlbum = album;
+        _assets = assets;
+        _loading = false;
+        _loadingAssets = false;
+      });
+    } catch (error, stackTrace) {
+      AppLogger.error(
+        'chat',
+        'load media assets failed',
+        error: error,
+        stackTrace: stackTrace,
+      );
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _loading = false;
+        _loadingAssets = false;
+        _error = '媒体列表读取失败';
+      });
+    }
+  }
+
+  Future<void> _selectAsset(AssetEntity asset) async {
+    if (_selectingAssetId.isNotEmpty) {
+      return;
+    }
+    setState(() => _selectingAssetId = asset.id);
+    try {
+      final file = await asset.originFile ?? await asset.file;
+      if (file == null || file.path.isEmpty) {
+        throw const FileSystemException('asset file is unavailable');
+      }
+      final stat = await file.stat();
+      if (!mounted) {
+        return;
+      }
+      final name = await asset.titleAsync;
+      final payload = <String, String>{
+        'file_path': file.path,
+        'name': name.isNotEmpty ? name : _fileName(file.path),
+        'size': stat.size.toString(),
+        'mime': asset.mimeType ?? _mimeFromPath(file.path, widget.contentType),
+        if (asset.width > 0) 'width': asset.width.toString(),
+        if (asset.height > 0) 'height': asset.height.toString(),
+        if (_isVideo) 'duration': asset.duration.toString(),
+      };
+      Navigator.of(context).pop(payload);
+    } catch (error, stackTrace) {
+      AppLogger.error(
+        'chat',
+        'select media asset failed',
+        error: error,
+        stackTrace: stackTrace,
+        data: {'asset_id': asset.id},
+      );
+      if (!mounted) {
+        return;
+      }
+      setState(() => _selectingAssetId = '');
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('文件读取失败')));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: _pageColor,
+      appBar: AppBar(
+        title: Text(_isVideo ? '选择视频' : '选择图片'),
+        centerTitle: true,
+        backgroundColor: Colors.white,
+        foregroundColor: _textColor,
+        elevation: 0,
+      ),
+      body: _buildBody(),
+    );
+  }
+
+  Widget _buildBody() {
+    if (_loading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (_error.isNotEmpty) {
+      return _ErrorState(
+        text: _error,
+        onRetry: _error.contains('授权')
+            ? () async {
+                await PhotoManager.openSetting();
+                if (mounted) {
+                  await _loadAlbums();
+                }
+              }
+            : _loadAlbums,
+      );
+    }
+    if (_assets.isEmpty) {
+      return _EmptyState(text: _isVideo ? '暂无可发送视频' : '暂无可发送图片');
+    }
+    return Column(
+      children: [
+        _MediaAlbumBar(
+          albums: _albums,
+          selected: _selectedAlbum,
+          onChanged: (album) => _loadAssets(album),
+        ),
+        if (_loadingAssets)
+          const LinearProgressIndicator(minHeight: 2)
+        else
+          const SizedBox(height: 2),
+        Expanded(
+          child: GridView.builder(
+            padding: const EdgeInsets.all(2),
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 4,
+              mainAxisSpacing: 2,
+              crossAxisSpacing: 2,
+            ),
+            itemCount: _assets.length,
+            itemBuilder: (context, index) {
+              final asset = _assets[index];
+              return _MediaAssetTile(
+                asset: asset,
+                selecting: _selectingAssetId == asset.id,
+                onTap: () => _selectAsset(asset),
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _MediaAlbumBar extends StatelessWidget {
+  const _MediaAlbumBar({
+    required this.albums,
+    required this.selected,
+    required this.onChanged,
+  });
+
+  final List<AssetPathEntity> albums;
+  final AssetPathEntity? selected;
+  final ValueChanged<AssetPathEntity> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 46,
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      color: Colors.white,
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<AssetPathEntity>(
+          value: selected,
+          isExpanded: true,
+          icon: const Icon(Icons.keyboard_arrow_down),
+          items: albums
+              .map(
+                (album) => DropdownMenuItem<AssetPathEntity>(
+                  value: album,
+                  child: Text(
+                    album.isAll ? '全部' : album.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              )
+              .toList(),
+          onChanged: (album) {
+            if (album != null) {
+              onChanged(album);
+            }
+          },
+        ),
+      ),
+    );
+  }
+}
+
+class _MediaAssetTile extends StatelessWidget {
+  const _MediaAssetTile({
+    required this.asset,
+    required this.selecting,
+    required this.onTap,
+  });
+
+  final AssetEntity asset;
+  final bool selecting;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          FutureBuilder<Uint8List?>(
+            future: asset.thumbnailDataWithSize(
+              const ThumbnailSize.square(220),
+              quality: 82,
+            ),
+            builder: (context, snapshot) {
+              final bytes = snapshot.data;
+              if (bytes == null) {
+                return Container(
+                  color: const Color(0xffe8eaed),
+                  child: Icon(
+                    asset.type == AssetType.video
+                        ? Icons.videocam_outlined
+                        : Icons.image_outlined,
+                    color: _mutedColor,
+                  ),
+                );
+              }
+              return Image.memory(
+                bytes,
+                fit: BoxFit.cover,
+                gaplessPlayback: true,
+              );
+            },
+          ),
+          if (asset.type == AssetType.video)
+            Positioned(
+              right: 4,
+              bottom: 4,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                color: const Color(0x99000000),
+                child: Text(
+                  _secondsLabel(asset.duration),
+                  style: const TextStyle(color: Colors.white, fontSize: 11),
+                ),
+              ),
+            ),
+          if (selecting)
+            Container(
+              color: const Color(0x66000000),
+              child: const Center(child: CircularProgressIndicator()),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _InAppFilePickerPage extends StatefulWidget {
+  const _InAppFilePickerPage();
+
+  @override
+  State<_InAppFilePickerPage> createState() => _InAppFilePickerPageState();
+}
+
+class _InAppFilePickerPageState extends State<_InAppFilePickerPage> {
+  static const _maxFiles = 300;
+
+  List<_LocalFileItem> _files = const [];
+  bool _loading = true;
+  String _error = '';
+  String _selectingPath = '';
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_loadFiles());
+  }
+
+  Future<void> _loadFiles() async {
+    setState(() {
+      _loading = true;
+      _error = '';
+    });
+    try {
+      final dirs = await _candidateFileDirectories();
+      final files = <_LocalFileItem>[];
+      final seen = <String>{};
+      for (final dir in dirs) {
+        if (files.length >= _maxFiles) {
+          break;
+        }
+        await _scanDirectory(dir, files, seen, depth: 2);
+      }
+      files.sort((a, b) => b.modified.compareTo(a.modified));
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _files = files;
+        _loading = false;
+      });
+    } catch (error, stackTrace) {
+      AppLogger.error(
+        'chat',
+        'load in-app files failed',
+        error: error,
+        stackTrace: stackTrace,
+      );
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _loading = false;
+        _error = '文件列表读取失败';
+      });
+    }
+  }
+
+  Future<void> _scanDirectory(
+    Directory dir,
+    List<_LocalFileItem> files,
+    Set<String> seen, {
+    required int depth,
+  }) async {
+    if (files.length >= _maxFiles || !await dir.exists()) {
+      return;
+    }
+    try {
+      await for (final entity in dir.list(followLinks: false)) {
+        if (files.length >= _maxFiles) {
+          return;
+        }
+        final name = _fileName(entity.path);
+        if (name.startsWith('.')) {
+          continue;
+        }
+        if (entity is File) {
+          if (!seen.add(entity.path)) {
+            continue;
+          }
+          final stat = await entity.stat();
+          if (stat.size <= 0) {
+            continue;
+          }
+          files.add(
+            _LocalFileItem(
+              path: entity.path,
+              name: name,
+              size: stat.size,
+              modified: stat.modified.millisecondsSinceEpoch,
+            ),
+          );
+        } else if (entity is Directory && depth > 0) {
+          await _scanDirectory(entity, files, seen, depth: depth - 1);
+        }
+      }
+    } on FileSystemException {
+      return;
+    }
+  }
+
+  Future<void> _selectFile(_LocalFileItem file) async {
+    if (_selectingPath.isNotEmpty) {
+      return;
+    }
+    setState(() => _selectingPath = file.path);
+    try {
+      final current = File(file.path);
+      final stat = await current.stat();
+      if (!mounted) {
+        return;
+      }
+      Navigator.of(context).pop(<String, String>{
+        'file_path': file.path,
+        'name': file.name,
+        'size': stat.size.toString(),
+        'mime': _mimeFromPath(file.path, ChatContentTypes.file),
+      });
+    } catch (error, stackTrace) {
+      AppLogger.error(
+        'chat',
+        'select in-app file failed',
+        error: error,
+        stackTrace: stackTrace,
+        data: {'path': file.path},
+      );
+      if (!mounted) {
+        return;
+      }
+      setState(() => _selectingPath = '');
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('文件读取失败')));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: _pageColor,
+      appBar: AppBar(
+        title: const Text('选择文件'),
+        centerTitle: true,
+        backgroundColor: Colors.white,
+        foregroundColor: _textColor,
+        elevation: 0,
+        actions: [
+          IconButton(
+            tooltip: '刷新',
+            onPressed: _loadFiles,
+            icon: const Icon(Icons.refresh),
+          ),
+        ],
+      ),
+      body: _buildBody(),
+    );
+  }
+
+  Widget _buildBody() {
+    if (_loading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (_error.isNotEmpty) {
+      return _ErrorState(text: _error, onRetry: _loadFiles);
+    }
+    if (_files.isEmpty) {
+      return const _EmptyState(text: '暂无可发送文件');
+    }
+    return ListView.separated(
+      itemCount: _files.length,
+      separatorBuilder: (_, __) =>
+          const Divider(height: 1, color: _lightBorderColor),
+      itemBuilder: (context, index) {
+        final file = _files[index];
+        final selecting = _selectingPath == file.path;
+        return ListTile(
+          leading: Icon(_fileIcon(file.name), color: _primaryColor),
+          title: Text(
+            file.name,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(color: _textColor, fontSize: 15),
+          ),
+          subtitle: Text(
+            '${_fileSizeLabel(file.size)} · ${_formatTime(file.modified)}',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(color: _mutedColor, fontSize: 12),
+          ),
+          trailing: selecting
+              ? const SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.chevron_right, color: _mutedColor),
+          onTap: () => _selectFile(file),
+        );
+      },
+    );
+  }
+}
+
+class _LocalFileItem {
+  const _LocalFileItem({
+    required this.path,
+    required this.name,
+    required this.size,
+    required this.modified,
+  });
+
+  final String path;
+  final String name;
+  final int size;
+  final int modified;
 }
 
 class _ActionInputPageState extends State<ActionInputPage> {
@@ -3361,11 +4094,13 @@ class _PlainListTile extends StatelessWidget {
     required this.subtitle,
     required this.trailing,
     this.icon,
+    this.avatarUrl = '',
     this.onTap,
     this.onLongPress,
   });
 
   final IconData? icon;
+  final String avatarUrl;
   final String title;
   final String subtitle;
   final String trailing;
@@ -3379,7 +4114,11 @@ class _PlainListTile extends StatelessWidget {
         border: Border(bottom: BorderSide(color: _lightBorderColor)),
       ),
       child: ListTile(
-        leading: icon == null ? null : Icon(icon, color: _mutedColor),
+        leading: avatarUrl.isNotEmpty
+            ? _Avatar(label: title, imageUrl: avatarUrl, size: 38, icon: icon)
+            : icon == null
+            ? null
+            : Icon(icon, color: _mutedColor),
         onTap: onTap,
         onLongPress: onLongPress,
         title: Text(
@@ -3450,6 +4189,7 @@ class _ConversationTile extends StatelessWidget {
     required this.time,
     required this.unread,
     required this.isGroup,
+    required this.avatarUrl,
     required this.onTap,
   });
 
@@ -3458,6 +4198,7 @@ class _ConversationTile extends StatelessWidget {
   final String time;
   final int unread;
   final bool isGroup;
+  final String avatarUrl;
   final VoidCallback onTap;
 
   @override
@@ -3474,6 +4215,7 @@ class _ConversationTile extends StatelessWidget {
           children: [
             _Avatar(
               label: title,
+              imageUrl: avatarUrl,
               size: 48,
               color: isGroup ? const Color(0xff34c759) : _primaryColor,
               icon: isGroup ? Icons.groups : null,
@@ -3547,6 +4289,7 @@ class _ContactTile extends StatelessWidget {
     required this.trailing,
     required this.isGroup,
     required this.onTap,
+    this.avatarUrl = '',
     this.avatarColor,
     this.icon,
     this.onLongPress,
@@ -3557,6 +4300,7 @@ class _ContactTile extends StatelessWidget {
   final String trailing;
   final bool isGroup;
   final VoidCallback onTap;
+  final String avatarUrl;
   final Color? avatarColor;
   final IconData? icon;
   final VoidCallback? onLongPress;
@@ -3576,6 +4320,7 @@ class _ContactTile extends StatelessWidget {
           children: [
             _Avatar(
               label: title,
+              imageUrl: avatarUrl,
               size: 38,
               color:
                   avatarColor ??
@@ -3709,6 +4454,54 @@ class _Avatar extends StatelessWidget {
     this.size = 44,
     this.color = _primaryColor,
     this.icon,
+    this.imageUrl = '',
+  });
+
+  final String label;
+  final double size;
+  final Color color;
+  final IconData? icon;
+  final String imageUrl;
+
+  @override
+  Widget build(BuildContext context) {
+    final fallback = _AvatarFallback(
+      label: label,
+      size: size,
+      color: color,
+      icon: icon,
+    );
+    final url = _normalizeAvatarUrl(imageUrl);
+    if (url.isEmpty) {
+      return fallback;
+    }
+    return Container(
+      width: size,
+      height: size,
+      clipBehavior: Clip.antiAlias,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(size * 0.28),
+      ),
+      child: Image.network(
+        url,
+        width: size,
+        height: size,
+        fit: BoxFit.cover,
+        gaplessPlayback: true,
+        errorBuilder: (_, __, ___) => fallback,
+        loadingBuilder: (context, child, progress) =>
+            progress == null ? child : fallback,
+      ),
+    );
+  }
+}
+
+class _AvatarFallback extends StatelessWidget {
+  const _AvatarFallback({
+    required this.label,
+    required this.size,
+    required this.color,
+    this.icon,
   });
 
   final String label;
@@ -3793,17 +4586,24 @@ class _MessageRow extends StatelessWidget {
   const _MessageRow({
     required this.item,
     required this.showSenderName,
+    required this.currentUserAvatarUrl,
     required this.onLongPress,
+    required this.onRetry,
   });
 
   final Map<String, Object?> item;
   final bool showSenderName;
+  final String currentUserAvatarUrl;
   final VoidCallback onLongPress;
+  final VoidCallback onRetry;
 
   @override
   Widget build(BuildContext context) {
     final isMe = item['is_me'] == true;
     final sender = _messageSenderName(item);
+    final avatarUrl = isMe
+        ? currentUserAvatarUrl
+        : _messageSenderAvatarUrl(item);
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 7),
       child: Row(
@@ -3813,7 +4613,7 @@ class _MessageRow extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           if (!isMe) ...[
-            _Avatar(label: sender, size: 34),
+            _Avatar(label: sender, imageUrl: avatarUrl, size: 34),
             const SizedBox(width: 8),
           ],
           Flexible(
@@ -3842,7 +4642,10 @@ class _MessageRow extends StatelessWidget {
                     ),
                     if (isMe) ...[
                       const SizedBox(width: 5),
-                      _MessageSendStatus(status: _messageStatus(item)),
+                      _MessageSendStatus(
+                        status: _messageStatus(item),
+                        onRetry: onRetry,
+                      ),
                     ],
                   ],
                 ),
@@ -3851,7 +4654,12 @@ class _MessageRow extends StatelessWidget {
           ),
           if (isMe) ...[
             const SizedBox(width: 8),
-            const _Avatar(label: '我', size: 34, color: _primaryColor),
+            _Avatar(
+              label: '我',
+              imageUrl: avatarUrl,
+              size: 34,
+              color: _primaryColor,
+            ),
           ],
         ],
       ),
@@ -3923,12 +4731,7 @@ class _MessageBubbleContent extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return switch (contentType) {
-      ChatContentTypes.image => _MediaPreview(
-        icon: Icons.image_outlined,
-        title: content.isEmpty ? '图片' : content,
-        subtitle: _value(payload, ['url', 'file_path']),
-        isMe: isMe,
-      ),
+      ChatContentTypes.image => _ImageMessagePreview(payload: payload),
       ChatContentTypes.gif => _MediaPreview(
         icon: Icons.gif_box_outlined,
         title: content.isEmpty ? 'GIF' : content,
@@ -3951,7 +4754,7 @@ class _MessageBubbleContent extends StatelessWidget {
       ChatContentTypes.video => _MediaPreview(
         icon: Icons.play_circle_outline,
         title: content.isEmpty ? '视频' : content,
-        subtitle: _durationLabel(payload),
+        subtitle: _videoSubtitle(payload),
         isMe: isMe,
       ),
       ChatContentTypes.file => _FilePreview(payload: payload, content: content),
@@ -4034,6 +4837,40 @@ class _MediaPreview extends StatelessWidget {
   }
 }
 
+class _ImageMessagePreview extends StatelessWidget {
+  const _ImageMessagePreview({required this.payload});
+
+  final Map<String, Object?> payload;
+
+  @override
+  Widget build(BuildContext context) {
+    final localPath = _value(payload, ['file_path']);
+    final url = _normalizeAvatarUrl(
+      _value(payload, [
+        'url',
+        'image_path',
+      ], fallback: _value(_asObjectMap(payload['media']), ['url'])),
+    );
+    final image = localPath.isNotEmpty && File(localPath).existsSync()
+        ? Image.file(File(localPath), fit: BoxFit.cover)
+        : url.isNotEmpty
+        ? Image.network(url, fit: BoxFit.cover, gaplessPlayback: true)
+        : null;
+    if (image == null) {
+      return const _MediaPreview(
+        icon: Icons.image_outlined,
+        title: '图片',
+        subtitle: '',
+        isMe: false,
+      );
+    }
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(3),
+      child: SizedBox(width: 150, height: 150, child: image),
+    );
+  }
+}
+
 class _StickerPreview extends StatelessWidget {
   const _StickerPreview({required this.text});
 
@@ -4095,8 +4932,16 @@ class _FilePreview extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final name = _value(payload, ['name', 'filename'], fallback: content);
-    final size = _value(payload, ['size']);
+    final media = _asObjectMap(payload['media']);
+    final name = _value(payload, [
+      'file_name',
+      'name',
+      'filename',
+    ], fallback: _value(media, ['name'], fallback: content));
+    final size = _value(payload, [
+      'file_size',
+      'size',
+    ], fallback: _value(media, ['size']));
     return SizedBox(
       width: 190,
       child: Row(
@@ -4231,9 +5076,10 @@ class _PaymentPreview extends StatelessWidget {
 }
 
 class _MessageSendStatus extends StatelessWidget {
-  const _MessageSendStatus({required this.status});
+  const _MessageSendStatus({required this.status, required this.onRetry});
 
   final String status;
+  final VoidCallback onRetry;
 
   @override
   Widget build(BuildContext context) {
@@ -4250,10 +5096,17 @@ class _MessageSendStatus extends StatelessWidget {
               color: Color(0xff9aa0aa),
             ),
           ),
-          'failed' => const Icon(
-            Icons.error_outline,
-            size: 17,
-            color: _dangerColor,
+          'failed' => Tooltip(
+            message: '重发',
+            child: InkResponse(
+              onTap: onRetry,
+              radius: 18,
+              child: const Icon(
+                Icons.error_outline,
+                size: 17,
+                color: _dangerColor,
+              ),
+            ),
           ),
           'queued' ||
           'sent' => const Icon(Icons.check, size: 17, color: Color(0xff6f7785)),
@@ -4534,7 +5387,7 @@ class _Composer extends StatelessWidget {
                   focusNode: focusNode,
                   minLines: 1,
                   maxLines: 4,
-                  readOnly: !enabled,
+                  readOnly: sending || !enabled,
                   enabled: enabled,
                   textInputAction: TextInputAction.send,
                   onSubmitted: (_) {
@@ -4543,9 +5396,15 @@ class _Composer extends StatelessWidget {
                     }
                   },
                   decoration: InputDecoration(
-                    hintText: enabled ? '' : disabledText,
+                    hintText: sending
+                        ? '发送中'
+                        : enabled
+                        ? ''
+                        : disabledText,
                     filled: true,
-                    fillColor: enabled ? Colors.white : const Color(0xffeeeeee),
+                    fillColor: sending || !enabled
+                        ? const Color(0xffeeeeee)
+                        : Colors.white,
                     isDense: true,
                     border: const OutlineInputBorder(
                       borderRadius: BorderRadius.zero,
@@ -4581,12 +5440,12 @@ class _Composer extends StatelessWidget {
             _ComposerIconButton(
               tooltip: toolsOpen ? '收起' : '更多',
               icon: toolsOpen ? Icons.close : Icons.add_circle_outline,
-              onPressed: enabled ? onTools : null,
+              onPressed: sending || !enabled ? null : onTools,
             ),
             ValueListenableBuilder<TextEditingValue>(
               valueListenable: controller,
               builder: (context, value, _) {
-                if (!enabled || value.text.trim().isEmpty) {
+                if (!enabled || (!sending && value.text.trim().isEmpty)) {
                   return const SizedBox.shrink();
                 }
                 return Row(
@@ -5076,6 +5935,11 @@ String _messageSenderName(Map<String, Object?> item) {
   );
 }
 
+String _messageSenderAvatarUrl(Map<String, Object?> item) {
+  final fromUser = _asObjectMap(item['from_user']);
+  return _avatarUrlFromMap(fromUser, fallback: _avatarUrlFromMap(item));
+}
+
 String _messageStatus(Map<String, Object?> item) {
   return _value(item, ['status']);
 }
@@ -5115,10 +5979,10 @@ String _paymentAmount(Map<String, Object?> payload) {
   return asset.isEmpty ? money : '$money $asset';
 }
 
-String _fileSizeLabel(String raw) {
-  final bytes = int.tryParse(raw);
+String _fileSizeLabel(Object? raw) {
+  final bytes = raw is int ? raw : int.tryParse(raw?.toString() ?? '');
   if (bytes == null || bytes <= 0) {
-    return raw;
+    return raw?.toString() ?? '';
   }
   if (bytes < 1024) {
     return '${bytes}B';
@@ -5228,6 +6092,13 @@ String _conversationTitle(Map<String, Object?> item) {
   return _value(item, ['nickname', 'username', 'name'], fallback: '私聊');
 }
 
+String _conversationAvatarUrl(Map<String, Object?> item) {
+  if (_channelTypeFromConversation(item) == _groupChannelType) {
+    return _groupAvatarUrl(item);
+  }
+  return _avatarUrlFromMap(item);
+}
+
 String _conversationChannelId(Map<String, Object?> item, int channelType) {
   if (channelType == _privateChannelType) {
     final receiverId = _value(item, [
@@ -5302,6 +6173,11 @@ String _friendSubtitle(Map<String, Object?> item) {
   ].join(' · ');
 }
 
+String _friendAvatarUrl(Map<String, Object?> item) {
+  final profile = _friendProfile(item);
+  return _avatarUrlFromMap(profile, fallback: _avatarUrlFromMap(item));
+}
+
 Map<String, Object?> _friendProfile(Map<String, Object?> item) {
   final friend = _asObjectMap(item['friend']);
   if (friend.isNotEmpty) {
@@ -5331,6 +6207,91 @@ String _searchFriendTitle(Map<String, Object?> item) {
     'username',
     'name',
   ], fallback: _value(item, ['nickname', 'username', 'name'], fallback: '用户'));
+}
+
+String _groupAvatarUrl(Map<String, Object?> item) {
+  return _avatarUrlFromMap(item);
+}
+
+String _avatarUrlFromMap(Map<String, Object?> item, {String fallback = ''}) {
+  return _normalizeAvatarUrl(
+    _value(item, [
+      'avatar',
+      'usertx',
+      'user_avatar',
+      'group_avatar',
+      'headimg',
+      'head_img',
+      'photo',
+      'portrait',
+    ], fallback: fallback),
+  );
+}
+
+String _normalizeAvatarUrl(String raw) {
+  final value = raw.trim();
+  if (value.isEmpty || value.startsWith('data:')) {
+    return value;
+  }
+  final uri = Uri.tryParse(value);
+  if (uri != null && uri.hasScheme) {
+    return value;
+  }
+  final base = Uri.tryParse(AppConfig.apiBaseUrl);
+  if (base == null || !base.hasScheme || base.host.isEmpty) {
+    return value;
+  }
+  final origin = base.replace(path: '/', query: '', fragment: '');
+  if (value.startsWith('/')) {
+    return origin.resolve(value).toString();
+  }
+  return origin.resolve(value).toString();
+}
+
+void _precacheConversationAvatars(
+  BuildContext context,
+  Iterable<Map<String, Object?>> conversations,
+) {
+  _precacheAvatarUrls(context, conversations.map(_conversationAvatarUrl));
+}
+
+void _precacheContactAvatars(
+  BuildContext context,
+  Iterable<Map<String, Object?>> friends,
+  Iterable<Map<String, Object?>> groups,
+) {
+  _precacheAvatarUrls(context, [
+    ...friends.map(_friendAvatarUrl),
+    ...groups.map(_groupAvatarUrl),
+  ]);
+}
+
+void _precacheMessageAvatars(
+  BuildContext context,
+  Iterable<Map<String, Object?>> messages,
+  String currentUserAvatarUrl,
+) {
+  _precacheAvatarUrls(context, [
+    if (currentUserAvatarUrl.isNotEmpty) currentUserAvatarUrl,
+    ...messages.map(_messageSenderAvatarUrl),
+  ]);
+}
+
+void _precacheAvatarUrls(BuildContext context, Iterable<String> urls) {
+  final unique = <String>{};
+  for (final url in urls.map(_normalizeAvatarUrl)) {
+    if (url.isEmpty || !unique.add(url)) {
+      continue;
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!context.mounted) {
+        return;
+      }
+      unawaited(
+        precacheImage(NetworkImage(url), context).catchError((Object _) {}),
+      );
+    });
+  }
 }
 
 String _searchFriendSubtitle(Map<String, Object?> item) {
@@ -5572,6 +6533,21 @@ List<Map<String, Object?>> _listFromResult(Map<String, Object?> result) {
   return const [];
 }
 
+bool _sameMapList(
+  List<Map<String, Object?>> left,
+  List<Map<String, Object?>> right,
+) {
+  if (left.length != right.length) {
+    return false;
+  }
+  for (var index = 0; index < left.length; index++) {
+    if (jsonEncode(left[index]) != jsonEncode(right[index])) {
+      return false;
+    }
+  }
+  return true;
+}
+
 List<String> _idsFromText(String text) {
   return text
       .split(RegExp(r'[,，\s]+'))
@@ -5628,6 +6604,127 @@ String _mediaTitle(String contentType) {
     ChatContentTypes.file => '发送文件',
     _ => '发送媒体',
   };
+}
+
+String _mimeFromPath(String path, String contentType) {
+  final ext = path.split('.').last.toLowerCase();
+  if (contentType == ChatContentTypes.image) {
+    return switch (ext) {
+      'jpg' || 'jpeg' => 'image/jpeg',
+      'png' => 'image/png',
+      'gif' => 'image/gif',
+      'webp' => 'image/webp',
+      _ => 'image/*',
+    };
+  }
+  if (contentType == ChatContentTypes.video) {
+    return switch (ext) {
+      'mp4' => 'video/mp4',
+      'mov' => 'video/quicktime',
+      'm4v' => 'video/x-m4v',
+      'webm' => 'video/webm',
+      _ => 'video/*',
+    };
+  }
+  return switch (ext) {
+    'pdf' => 'application/pdf',
+    'txt' => 'text/plain',
+    'zip' => 'application/zip',
+    'doc' => 'application/msword',
+    'docx' =>
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'xls' => 'application/vnd.ms-excel',
+    'xlsx' =>
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    _ => 'application/octet-stream',
+  };
+}
+
+String _videoSubtitle(Map<String, Object?> payload) {
+  final name = _value(_asObjectMap(payload['media']), [
+    'name',
+  ], fallback: _value(payload, ['name', 'file_name']));
+  final duration = _durationLabel(payload);
+  if (name.isNotEmpty && duration.isNotEmpty) {
+    return '$name · $duration';
+  }
+  return name.isNotEmpty ? name : duration;
+}
+
+String _fileName(String path) {
+  final normalized = path.replaceAll('\\', '/');
+  final parts = normalized.split('/');
+  return parts.isEmpty || parts.last.isEmpty ? normalized : parts.last;
+}
+
+String _secondsLabel(int seconds) {
+  final safe = seconds < 0 ? 0 : seconds;
+  final minutes = safe ~/ 60;
+  final rest = safe % 60;
+  return '$minutes:${rest.toString().padLeft(2, '0')}';
+}
+
+IconData _fileIcon(String name) {
+  final ext = name.split('.').last.toLowerCase();
+  return switch (ext) {
+    'jpg' || 'jpeg' || 'png' || 'gif' || 'webp' => Icons.image_outlined,
+    'mp4' || 'mov' || 'm4v' || 'webm' => Icons.videocam_outlined,
+    'pdf' => Icons.picture_as_pdf_outlined,
+    'doc' || 'docx' => Icons.description_outlined,
+    'xls' || 'xlsx' => Icons.table_chart_outlined,
+    'zip' || 'rar' || '7z' => Icons.folder_zip_outlined,
+    _ => Icons.insert_drive_file_outlined,
+  };
+}
+
+Future<List<Directory>> _candidateFileDirectories() async {
+  final dirs = <Directory>[];
+  final seen = <String>{};
+
+  Future<void> add(Directory? dir) async {
+    if (dir == null || dir.path.isEmpty || !seen.add(dir.path)) {
+      return;
+    }
+    if (await dir.exists()) {
+      dirs.add(dir);
+    }
+  }
+
+  Future<void> addRequired(Future<Directory> future) async {
+    try {
+      await add(await future);
+    } on Object {
+      return;
+    }
+  }
+
+  Future<void> addOptional(Future<Directory?> future) async {
+    try {
+      await add(await future);
+    } on Object {
+      return;
+    }
+  }
+
+  Future<void> addPath(String path) => add(Directory(path));
+
+  await addRequired(getApplicationDocumentsDirectory());
+  await addRequired(getApplicationSupportDirectory());
+  await addRequired(getTemporaryDirectory());
+  await addOptional(getDownloadsDirectory());
+
+  if (Platform.isAndroid) {
+    for (final path in const [
+      '/storage/emulated/0/Download',
+      '/storage/emulated/0/Documents',
+      '/storage/emulated/0/Pictures',
+      '/storage/emulated/0/Movies',
+    ]) {
+      await addPath(path);
+    }
+  }
+
+  return dirs;
 }
 
 List<ActionInputField> _mediaFields(String contentType) {

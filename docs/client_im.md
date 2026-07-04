@@ -16,10 +16,12 @@ flutter run \
 多平台配置要点：
 
 - Android：包名 `bimotc.com`，需要网络权限；缓存加密 key 通过 Android Keystore 保护。
-- iOS/macOS：需要允许访问业务 API 和 WSS/WS 地址；缓存加密 key 通过 Keychain 插件通道获取。若业务端仍使用 HTTP/WS，需要按平台网络安全策略放行对应域名。
+- Android 媒体权限：聊天内图片/视频选择使用应用内相册网格，需要 `READ_EXTERNAL_STORAGE`、`READ_MEDIA_IMAGES`、`READ_MEDIA_VIDEO`；不申请 `MANAGE_EXTERNAL_STORAGE`。
+- iOS/macOS：需要允许访问业务 API 和 WSS/WS 地址；聊天内图片/视频选择需要相册权限说明 `NSPhotoLibraryUsageDescription`；缓存加密 key 通过 Keychain 插件通道获取。若业务端仍使用 HTTP/WS，需要按平台网络安全策略放行对应域名。
 - Windows/Linux：当前使用应用私有目录下的 `.bim_data` 初始化 MMKV，运行环境必须允许写入应用数据目录；缓存加密 key 由本地安全文件兜底保存，发布时应配合系统账户权限保护目录。
 - Web：当前实时层和 MMKV 缓存不是 Web 适配方案，不能直接按移动端配置运行；如要支持 Web，需要补 WebSocket-only 实时层和 Web 安全存储实现。
 - 实时地址：业务端配置 `wss_addr` 时客户端必走 WSS；没有 WSS 时才按 `websocket_addr`、`ws_addr`、`tcp_addr` 依次降级。客户未配置 HTTPS/TLS 时可以使用 HTTP/WS/TCP。
+- 屏幕方向：Android、iOS 入口固定竖屏，多端布局仍按不同屏幕宽度自适应。
 
 ## 当前实时架构
 
@@ -75,6 +77,8 @@ flutter run \
 消息内容不再以明文表单字段提交。客户端把 `content`、`money`、`asset_type`、`remark`、`url`、`card_user_id`、`mention_user_ids`、`reply_client_msg_no`、`burn_after_read` 等业务字段归一化后放入 `secure_payload`，再按业务端文档使用 AES-128-CBC 加密。签名只覆盖外层字段和密文，不覆盖明文字段。
 
 图片、语音、视频、文件等本地附件不会用明文 `file` 字段上传。客户端先把原文件字节加密到临时密文文件，通过 multipart 字段 `secure_file` 上传，并提交 `secure_file_name`、`secure_file_size`、`secure_file_sha256` 等外层字段。请求完成后会删除本地临时密文文件。
+
+图片和视频选择不调用系统文件管理器。聊天页点击图片/视频后进入客户端自己的相册网格，通过 `photo_manager` 读取用户授权的相册、展示缩略图，选中后立即把本地消息写成“发送中”，后台上传完成后再按同一个 `client_msg_no` 合并为“已发送”。文件发送也不打开系统文件夹，客户端展示应用内文件中心：Android 会扫描应用可访问目录和公开 `Download/Documents/Pictures/Movies`，iOS/macOS/桌面只展示应用沙盒、下载目录等当前平台允许读取的目录。所有本地 `file_path` 只保存在 MMKV 本地消息里用于预览和失败重发，不进入 `secure_payload` 上行参数。
 
 会话摘要和历史消息也不允许明文返回。客户端请求 `im_conversations`、`im_person_messages`、`im_group_messages` 时固定带 `secure_response=1` 并参与签名；业务端不再接受未声明密文响应的历史读取请求。业务端返回 `data.secure_payload`，客户端使用同一次请求的 `appid/appkey/usertoken/device/timestamp/nonce` 解密。响应 IV 规则为 `md5(device|response|timestamp|nonce).substring(0, 16)`，抓包只能看到 Base64 密文。
 
