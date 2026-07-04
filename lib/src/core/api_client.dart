@@ -324,6 +324,57 @@ class ApiClient {
     );
   }
 
+  Future<Map<String, Object?>> deletePrivateConversation({
+    required UserSession session,
+    required String device,
+    required String receiverId,
+  }) {
+    return imBusinessAction(
+      action: 'im_person_conversation_delete',
+      session: session,
+      device: device,
+      params: {'receiver_id': receiverId},
+    );
+  }
+
+  Future<Map<String, Object?>> deleteGroupConversation({
+    required UserSession session,
+    required String device,
+    required String groupId,
+  }) {
+    return imBusinessAction(
+      action: 'im_group_conversation_delete',
+      session: session,
+      device: device,
+      params: {'group_id': groupId},
+    );
+  }
+
+  Future<Map<String, Object?>> clearAllChatRecords({
+    required UserSession session,
+    required String device,
+  }) {
+    return imBusinessAction(
+      action: 'im_chat_records_clear_all',
+      session: session,
+      device: device,
+      params: const {},
+    );
+  }
+
+  Future<Map<String, Object?>> deleteMessageForSelf({
+    required UserSession session,
+    required String device,
+    required String targetClientMsgNo,
+  }) {
+    return imBusinessAction(
+      action: 'im_message_delete',
+      session: session,
+      device: device,
+      params: {'target_client_msg_no': targetClientMsgNo},
+    );
+  }
+
   Future<List<Map<String, Object?>>> friends({
     required UserSession session,
     required String device,

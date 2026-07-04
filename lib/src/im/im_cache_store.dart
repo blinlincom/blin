@@ -12,6 +12,8 @@ class ImCacheStore {
   static const _conversationPrefix = 'im_conversations';
   static const _messagePrefix = 'im_messages';
   static const _readPrefix = 'im_read_marker';
+  static const _clearPrefix = 'im_chat_clear_marker';
+  static const _deletedPrefix = 'im_deleted_messages';
 
   String readDraft({required String channelId, required int channelType}) {
     return _kv.decodeString(_draftKey(channelId, channelType)) ?? '';
@@ -32,6 +34,192 @@ class ImCacheStore {
 
   void clearDraft({required String channelId, required int channelType}) {
     _kv.removeValue(_draftKey(channelId, channelType));
+  }
+
+  int readGlobalClearMarker(String uid) {
+    return _kv.decodeInt(_globalClearKey(uid));
+  }
+
+  void writeGlobalClearMarker({required String uid, required int timestampMs}) {
+    _kv.encodeInt(_globalClearKey(uid), timestampMs);
+  }
+
+  int readChannelClearMarker({
+    required String uid,
+    required String channelId,
+    required int channelType,
+  }) {
+    final global = readGlobalClearMarker(uid);
+    final channel = _kv.decodeInt(
+      _channelClearKey(uid, channelId, channelType),
+    );
+    return global > channel ? global : channel;
+  }
+
+  void writeChannelClearMarker({
+    required String uid,
+    required String channelId,
+    required int channelType,
+    required int timestampMs,
+  }) {
+    _kv.encodeInt(_channelClearKey(uid, channelId, channelType), timestampMs);
+  }
+
+  Set<String> readDeletedMessages({
+    required String uid,
+    required String channelId,
+    required int channelType,
+  }) {
+    final raw = _kv.decodeString(_deletedKey(uid, channelId, channelType));
+    if (raw == null || raw.isEmpty) {
+      return const {};
+    }
+    final decoded = jsonDecode(raw);
+    if (decoded is! List) {
+      return const {};
+    }
+    return decoded.map((item) => item.toString()).toSet();
+  }
+
+  void rememberDeletedMessage({
+    required String uid,
+    required String channelId,
+    required int channelType,
+    required String clientMsgNo,
+  }) {
+    if (clientMsgNo.isEmpty) {
+      return;
+    }
+    final deleted = readDeletedMessages(
+      uid: uid,
+      channelId: channelId,
+      channelType: channelType,
+    ).toSet();
+    deleted.add(clientMsgNo);
+    _kv.encodeString(
+      _deletedKey(uid, channelId, channelType),
+      jsonEncode(deleted.toList(growable: false)),
+    );
+  }
+
+  List<Map<String, Object?>> clearAllChatRecords({
+    required String uid,
+    required int timestampMs,
+  }) {
+    final channels = knownChannels(uid);
+    writeGlobalClearMarker(uid: uid, timestampMs: timestampMs);
+    final prefixes = [
+      '$_conversationPrefix:$uid',
+      '$_recentPrefix:$uid',
+      '$_messagePrefix:$uid:',
+      '$_readPrefix:$uid:',
+      '$_deletedPrefix:$uid:',
+    ];
+    final keys = _kv.allKeys
+        .where((key) => prefixes.any(key.startsWith))
+        .toList(growable: false);
+    if (keys.isNotEmpty) {
+      _kv.removeValues(keys);
+    }
+    for (final channel in channels) {
+      final channelId = channel['channel_id']?.toString() ?? '';
+      final channelType =
+          int.tryParse(channel['channel_type']?.toString() ?? '') ?? 0;
+      if (channelId.isEmpty || channelType <= 0) {
+        continue;
+      }
+      clearDraft(channelId: channelId, channelType: channelType);
+    }
+    return channels;
+  }
+
+  void clearChannelChatRecords({
+    required String uid,
+    required String channelId,
+    required int channelType,
+    required int timestampMs,
+  }) {
+    writeChannelClearMarker(
+      uid: uid,
+      channelId: channelId,
+      channelType: channelType,
+      timestampMs: timestampMs,
+    );
+    _kv.removeValues([
+      _messageKey(uid, channelId, channelType),
+      _readMarkerKey(uid, channelId, channelType),
+      _deletedKey(uid, channelId, channelType),
+      _draftKey(channelId, channelType),
+    ]);
+    final conversations = readConversations(uid)
+        .where(
+          (item) =>
+              item['channel_id']?.toString() != channelId ||
+              (int.tryParse(item['channel_type']?.toString() ?? '') ?? 0) !=
+                  channelType,
+        )
+        .toList(growable: false);
+    writeConversations(uid: uid, conversations: conversations);
+    final recent = readRecentChannels(uid)
+        .where((item) => item != '$channelType:$channelId')
+        .toList(growable: false);
+    _kv.encodeString('$_recentPrefix:$uid', jsonEncode(recent));
+  }
+
+  void deleteMessage({
+    required String uid,
+    required String channelId,
+    required int channelType,
+    required String clientMsgNo,
+  }) {
+    rememberDeletedMessage(
+      uid: uid,
+      channelId: channelId,
+      channelType: channelType,
+      clientMsgNo: clientMsgNo,
+    );
+    final messages =
+        readMessages(uid: uid, channelId: channelId, channelType: channelType)
+            .where((item) => item['client_msg_no']?.toString() != clientMsgNo)
+            .toList();
+    writeMessages(
+      uid: uid,
+      channelId: channelId,
+      channelType: channelType,
+      messages: messages,
+    );
+  }
+
+  List<Map<String, Object?>> knownChannels(String uid) {
+    final channels = <String, Map<String, Object?>>{};
+    for (final conversation in readConversations(uid)) {
+      final channelId = conversation['channel_id']?.toString() ?? '';
+      final channelType =
+          int.tryParse(conversation['channel_type']?.toString() ?? '') ?? 0;
+      if (channelId.isEmpty || channelType <= 0) {
+        continue;
+      }
+      channels['$channelType:$channelId'] = {
+        'channel_id': channelId,
+        'channel_type': channelType,
+      };
+    }
+    for (final recent in readRecentChannels(uid)) {
+      final separator = recent.indexOf(':');
+      if (separator <= 0 || separator >= recent.length - 1) {
+        continue;
+      }
+      final channelType = int.tryParse(recent.substring(0, separator)) ?? 0;
+      final channelId = recent.substring(separator + 1);
+      if (channelId.isEmpty || channelType <= 0) {
+        continue;
+      }
+      channels['$channelType:$channelId'] = {
+        'channel_id': channelId,
+        'channel_type': channelType,
+      };
+    }
+    return channels.values.toList(growable: false);
   }
 
   List<String> readRecentChannels(String uid) {
@@ -122,6 +310,18 @@ class ImCacheStore {
 
   String _readMarkerKey(String uid, String channelId, int channelType) {
     return '$_readPrefix:$uid:$channelType:$channelId';
+  }
+
+  String _globalClearKey(String uid) {
+    return '$_clearPrefix:$uid:all';
+  }
+
+  String _channelClearKey(String uid, String channelId, int channelType) {
+    return '$_clearPrefix:$uid:$channelType:$channelId';
+  }
+
+  String _deletedKey(String uid, String channelId, int channelType) {
+    return '$_deletedPrefix:$uid:$channelType:$channelId';
   }
 
   Map<String, Object?> _readMap(String key) {

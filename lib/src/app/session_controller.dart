@@ -415,6 +415,26 @@ class SessionController extends ChangeNotifier {
     );
   }
 
+  Future<Map<String, Object?>> deleteMessageForSelf({
+    required String targetClientMsgNo,
+    required String channelId,
+    required int channelType,
+  }) async {
+    final current = _requireSession();
+    final result = await _chat.deleteMessageForSelf(
+      session: current,
+      device: _device,
+      targetClientMsgNo: targetClientMsgNo,
+    );
+    await _im.deleteLocalMessage(
+      channelID: channelId,
+      channelType: channelType,
+      clientMsgNo: targetClientMsgNo,
+    );
+    notifyListeners();
+    return result;
+  }
+
   Future<Map<String, Object?>> readReceipt({
     required String targetClientMsgNo,
     int messageSeq = 0,
@@ -890,15 +910,51 @@ class SessionController extends ChangeNotifier {
 
   Future<Map<String, Object?>> deletePrivateConversation({
     required String receiverId,
-    bool deletePeer = false,
-  }) {
+    required String channelId,
+  }) async {
     final current = _requireSession();
-    return _chat.privateConversationDelete(
+    final result = await _chat.privateConversationDelete(
       session: current,
       device: _device,
       receiverId: receiverId,
-      deletePeer: deletePeer,
     );
+    final chat = current.chat;
+    await _im.clearChannelChatRecords(
+      channelID: channelId,
+      channelType: chat?.channelTypePerson ?? 1,
+    );
+    notifyListeners();
+    return result;
+  }
+
+  Future<Map<String, Object?>> deleteGroupConversation({
+    required String groupId,
+    required String channelId,
+  }) async {
+    final current = _requireSession();
+    final result = await _chat.groupConversationDelete(
+      session: current,
+      device: _device,
+      groupId: groupId,
+    );
+    final chat = current.chat;
+    await _im.clearChannelChatRecords(
+      channelID: channelId,
+      channelType: chat?.channelTypeGroup ?? 2,
+    );
+    notifyListeners();
+    return result;
+  }
+
+  Future<Map<String, Object?>> clearAllChatRecords() async {
+    final current = _requireSession();
+    final result = await _chat.clearAllChatRecords(
+      session: current,
+      device: _device,
+    );
+    await _im.clearAllChatRecords();
+    notifyListeners();
+    return result;
   }
 
   Future<void> logout() async {

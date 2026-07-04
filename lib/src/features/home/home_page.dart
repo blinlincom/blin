@@ -1161,10 +1161,45 @@ class ConnectionInfoPage extends StatelessWidget {
               subtitle: '查看接口请求和连接错误',
               onTap: () => _push(context, const DiagnosticsLogPage()),
             ),
+            _MenuTile(
+              icon: Icons.delete_sweep_outlined,
+              iconColor: _dangerColor,
+              title: '清空聊天记录',
+              subtitle: '只清空本账号单聊、群聊和会话列表',
+              onTap: () => _confirmClearAllChats(context),
+            ),
           ],
         ),
       ),
     );
+  }
+
+  Future<void> _confirmClearAllChats(BuildContext context) async {
+    final confirmed = await _confirmDanger(
+      context,
+      title: '清空聊天记录',
+      content: '将清空本账号在本机和服务端历史同步中的单聊、群聊记录，不影响好友、群资料和其他用户。',
+      confirmText: '清空',
+    );
+    if (!confirmed || !context.mounted) {
+      return;
+    }
+    try {
+      await controller.clearAllChatRecords();
+      if (!context.mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('聊天记录已清空')));
+    } catch (error) {
+      if (!context.mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(error.toString())));
+    }
   }
 }
 
@@ -1721,6 +1756,13 @@ class _GroupDetailPageState extends State<GroupDetailPage> {
               onTap: () =>
                   _run(() => widget.controller.deleteGroup(widget.groupId)),
             ),
+            _PlainListTile(
+              icon: Icons.delete_sweep_outlined,
+              title: '清空聊天',
+              subtitle: '只清空自己看到的群聊记录',
+              trailing: '',
+              onTap: _clearGroupConversation,
+            ),
             _ResultBlock(text: _message),
             _ErrorBlock(text: _error),
             const _SectionHeader(text: '群成员'),
@@ -1817,6 +1859,24 @@ class _GroupDetailPageState extends State<GroupDetailPage> {
       () => widget.controller.addGroupMembers(
         groupId: widget.groupId,
         memberIds: ids,
+      ),
+    );
+  }
+
+  Future<void> _clearGroupConversation() async {
+    final confirmed = await _confirmDanger(
+      context,
+      title: '清空群聊记录',
+      content: '将清空你自己看到的这个群聊记录和会话，不影响其他群成员。',
+      confirmText: '清空',
+    );
+    if (!confirmed) {
+      return;
+    }
+    await _run(
+      () => widget.controller.deleteGroupConversation(
+        groupId: widget.groupId,
+        channelId: widget.channelId,
       ),
     );
   }
@@ -2120,9 +2180,9 @@ class _PrivateChatActionsPageState extends State<PrivateChatActionsPage> {
             _PlainListTile(
               icon: Icons.delete_outline,
               title: '清空聊天',
-              subtitle: '删除当前设备上的单聊会话',
+              subtitle: '只清空自己看到的单聊记录',
               trailing: '',
-              onTap: () => _deleteConversation(false),
+              onTap: _deleteConversation,
             ),
             _PlainListTile(
               icon: Icons.person_remove_outlined,
@@ -2155,11 +2215,20 @@ class _PrivateChatActionsPageState extends State<PrivateChatActionsPage> {
     await _run(() => widget.controller.deleteFriend(widget.receiverId));
   }
 
-  Future<void> _deleteConversation(bool deletePeer) async {
+  Future<void> _deleteConversation() async {
+    final confirmed = await _confirmDanger(
+      context,
+      title: '清空聊天记录',
+      content: '将清空你自己看到的这个单聊记录和会话，不影响对方。',
+      confirmText: '清空',
+    );
+    if (!confirmed) {
+      return;
+    }
     await _run(
       () => widget.controller.deletePrivateConversation(
         receiverId: widget.receiverId,
-        deletePeer: deletePeer,
+        channelId: widget.channelId,
       ),
     );
   }
@@ -2599,6 +2668,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                       }),
                       onReceipt: _queryReceipt,
                       onRecall: _recallSelected,
+                      onDelete: _deleteSelected,
                       onBurn: _burnSelected,
                       onReceiveRedPacket: _receiveSelectedRedPacket,
                       onReceiveTransfer: _receiveSelectedTransfer,
@@ -2969,6 +3039,36 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         targetClientMsgNo: _selectedClientMsgNo,
       );
       _message = _friendlyResult(result, successText: '消息已撤回');
+    });
+  }
+
+  Future<void> _deleteSelected() async {
+    if (_selectedClientMsgNo.isEmpty) {
+      return;
+    }
+    final confirmed = await _confirmDanger(
+      context,
+      title: '删除消息',
+      content: '只删除你自己看到的这条消息，不影响其他人。',
+      confirmText: '删除',
+    );
+    if (!confirmed) {
+      return;
+    }
+    await _runAction(() async {
+      final target = _selectedClientMsgNo;
+      final result = await widget.controller.deleteMessageForSelf(
+        targetClientMsgNo: target,
+        channelId: widget.channelId,
+        channelType: widget.channelType,
+      );
+      _messages = _messages
+          .where((item) => _value(item, ['client_msg_no']) != target)
+          .toList(growable: false);
+      _selectedClientMsgNo = '';
+      _selectedMessageSeq = 0;
+      _selectedPayload = const {};
+      _message = _friendlyResult(result, successText: '消息已删除');
     });
   }
 
@@ -4193,6 +4293,7 @@ class _SelectedMessageBar extends StatelessWidget {
     required this.onReply,
     required this.onReceipt,
     required this.onRecall,
+    required this.onDelete,
     required this.onBurn,
     required this.onReceiveRedPacket,
     required this.onReceiveTransfer,
@@ -4202,6 +4303,7 @@ class _SelectedMessageBar extends StatelessWidget {
   final VoidCallback onReply;
   final VoidCallback onReceipt;
   final VoidCallback onRecall;
+  final VoidCallback onDelete;
   final VoidCallback onBurn;
   final VoidCallback onReceiveRedPacket;
   final VoidCallback onReceiveTransfer;
@@ -4225,6 +4327,7 @@ class _SelectedMessageBar extends StatelessWidget {
           _MiniButton(label: '引用', onTap: onReply),
           _MiniButton(label: '已读', onTap: onReceipt),
           _MiniButton(label: '撤回', onTap: onRecall),
+          _MiniButton(label: '删除', onTap: onDelete),
           _MiniButton(label: '焚毁', onTap: onBurn),
           _MiniButton(label: '领红包', onTap: onReceiveRedPacket),
           _MiniButton(label: '收转账', onTap: onReceiveTransfer),
@@ -4835,6 +4938,32 @@ Future<void> _push(BuildContext context, Widget page) {
   return Navigator.of(
     context,
   ).push(MaterialPageRoute<void>(builder: (_) => page));
+}
+
+Future<bool> _confirmDanger(
+  BuildContext context, {
+  required String title,
+  required String content,
+  required String confirmText,
+}) async {
+  final result = await showDialog<bool>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: Text(title),
+      content: Text(content),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(false),
+          child: const Text('取消'),
+        ),
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(true),
+          child: Text(confirmText),
+        ),
+      ],
+    ),
+  );
+  return result == true;
 }
 
 void _openPrivateChat(

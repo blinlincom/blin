@@ -69,6 +69,7 @@ class BusinessImService extends ChangeNotifier {
       _latestConversations = _cache
           .readConversations(chat.uid)
           .map(_normalizeConversation)
+          .where(_conversationVisibleAfterClear)
           .toList();
     }
     return _latestConversations
@@ -151,7 +152,11 @@ class BusinessImService extends ChangeNotifier {
     _device = device;
     _groupMuteStates.clear();
     _historySyncedChannels.clear();
-    _latestConversations = _cache.readConversations(chat.uid);
+    _latestConversations = _cache
+        .readConversations(chat.uid)
+        .map(_normalizeConversation)
+        .where(_conversationVisibleAfterClear)
+        .toList();
     _bumpConversations('cache_loaded', notify: false);
     AppLogger.info(
       'im',
@@ -228,6 +233,7 @@ class BusinessImService extends ChangeNotifier {
     _latestConversations = _cache
         .readConversations(chat.uid)
         .map(_normalizeConversation)
+        .where(_conversationVisibleAfterClear)
         .toList();
     _seedConversationTailMessages(
       _latestConversations,
@@ -286,12 +292,124 @@ class BusinessImService extends ChangeNotifier {
     }
   }
 
+  Future<void> clearAllChatRecords() async {
+    final chat = _requireChat();
+    final timestampMs = DateTime.now().millisecondsSinceEpoch;
+    final channels = _cache.clearAllChatRecords(
+      uid: chat.uid,
+      timestampMs: timestampMs,
+    );
+    _latestConversations = const [];
+    _historySyncedChannels.clear();
+    _syncingChannels.clear();
+    for (final channel in channels) {
+      final channelId = channel['channel_id']?.toString() ?? '';
+      final channelType =
+          int.tryParse(channel['channel_type']?.toString() ?? '') ?? 0;
+      if (channelId.isEmpty || channelType <= 0) {
+        continue;
+      }
+      _markMessageChannel(
+        source: 'clear_all_chats',
+        channelId: channelId,
+        channelType: channelType,
+      );
+    }
+    _bumpConversations('clear_all_chats');
+    AppLogger.info(
+      'im',
+      'all local chat records cleared',
+      data: {'channel_count': channels.length},
+    );
+  }
+
+  Future<void> clearChannelChatRecords({
+    required String channelID,
+    required int channelType,
+  }) async {
+    final chat = _requireChat();
+    channelID = _canonicalChannelId(channelID, channelType);
+    final timestampMs = DateTime.now().millisecondsSinceEpoch;
+    _cache.clearChannelChatRecords(
+      uid: chat.uid,
+      channelId: channelID,
+      channelType: channelType,
+      timestampMs: timestampMs,
+    );
+    _latestConversations = _cache
+        .readConversations(chat.uid)
+        .map(_normalizeConversation)
+        .where(_conversationVisibleAfterClear)
+        .toList(growable: false);
+    _historySyncedChannels.remove(_messageKey(channelID, channelType));
+    _syncingChannels.remove(_messageKey(channelID, channelType));
+    _markMessageChannel(
+      source: 'clear_channel_chat',
+      channelId: channelID,
+      channelType: channelType,
+    );
+    _bumpConversations('clear_channel_chat');
+    AppLogger.info(
+      'im',
+      'channel local chat records cleared',
+      data: {'channel_id': channelID, 'channel_type': channelType},
+    );
+  }
+
+  Future<void> deleteLocalMessage({
+    required String channelID,
+    required int channelType,
+    required String clientMsgNo,
+  }) async {
+    if (clientMsgNo.isEmpty) {
+      return;
+    }
+    final chat = _requireChat();
+    channelID = _canonicalChannelId(channelID, channelType);
+    _cache.deleteMessage(
+      uid: chat.uid,
+      channelId: channelID,
+      channelType: channelType,
+      clientMsgNo: clientMsgNo,
+    );
+    _markMessageChannel(
+      source: 'delete_local_message',
+      channelId: channelID,
+      channelType: channelType,
+    );
+    final messages = _readMessagesForChannel(channelID, channelType);
+    if (messages.isNotEmpty) {
+      _replaceConversationTailFromMessage(
+        channelID,
+        channelType,
+        messages.last,
+      );
+    } else {
+      _latestConversations = _cache
+          .readConversations(chat.uid)
+          .map(_normalizeConversation)
+          .where(
+            (item) =>
+                item['channel_id']?.toString() != channelID ||
+                _intValue(item, ['channel_type']) != channelType,
+          )
+          .where(_conversationVisibleAfterClear)
+          .toList(growable: false);
+      _cache.writeConversations(
+        uid: chat.uid,
+        conversations: _latestConversations,
+      );
+      _bumpConversations('delete_last_local_message');
+    }
+  }
+
   Future<List<Map<String, Object?>>> syncConversationsFromServer() async {
     final session = _requireSession();
     final chat = _requireChat();
     final local = _cache
         .readConversations(chat.uid)
         .map(_normalizeConversation)
+        .where(_conversationVisibleAfterClear)
         .toList();
     if (!chat.privateHistorySyncEnabled && !chat.groupHistorySyncEnabled) {
       _latestConversations = local;
@@ -320,6 +438,7 @@ class BusinessImService extends ChangeNotifier {
               chat,
             ),
           )
+          .where(_conversationVisibleAfterClear)
           .toList();
       final localOnlyConversations = local
           .where(
@@ -328,6 +447,7 @@ class BusinessImService extends ChangeNotifier {
               chat,
             ),
           )
+          .where(_conversationVisibleAfterClear)
           .toList();
       _latestConversations = _mergeConversationLists(
         serverConversations,
@@ -499,6 +619,8 @@ class BusinessImService extends ChangeNotifier {
             ),
           )
           .where((item) => item.isNotEmpty)
+          .where(_messageVisibleAfterClear)
+          .where(_messageNotDeleted)
           .toList();
       final merged = _mergeMessages(
         _readMessagesForChannel(channelID, channelType),
@@ -1768,6 +1890,9 @@ class BusinessImService extends ChangeNotifier {
     int channelType,
     Map<String, Object?> message,
   ) {
+    if (!_messageVisibleAfterClear(message) || !_messageNotDeleted(message)) {
+      return;
+    }
     final messages = _readMessagesForChannel(channelId, channelType).toList();
     final clientMsgNo = message['client_msg_no']?.toString() ?? '';
     final messageSeq = _intValue(message, ['message_seq']);
@@ -1821,6 +1946,9 @@ class BusinessImService extends ChangeNotifier {
     if (tail.isEmpty) {
       return current;
     }
+    if (!_messageVisibleAfterClear(tail) || !_messageNotDeleted(tail)) {
+      return current;
+    }
     final merged = _mergeMessages(current, [tail]);
     final sorted = _sortAndLimit(merged, 200);
     if (_tailMessageMissing(tail, current) ||
@@ -1853,25 +1981,30 @@ class BusinessImService extends ChangeNotifier {
         )
         .toList();
     if (channelType == chat.channelTypeGroup) {
-      return _readAliasMessagesForChannel(
-        channelId: channelId,
-        channelType: channelType,
-        primary: primary,
-        belongsToAlias: (message) => _messageBelongsToGroup(message, channelId),
-        logSource: 'group message cache migrated',
+      return _filterVisibleMessages(
+        _readAliasMessagesForChannel(
+          channelId: channelId,
+          channelType: channelType,
+          primary: primary,
+          belongsToAlias: (message) =>
+              _messageBelongsToGroup(message, channelId),
+          logSource: 'group message cache migrated',
+        ),
       );
     }
     if (channelType != chat.channelTypePerson) {
-      return primary;
+      return _filterVisibleMessages(primary);
     }
 
-    return _readAliasMessagesForChannel(
-      channelId: channelId,
-      channelType: channelType,
-      primary: primary,
-      belongsToAlias: (message) =>
-          _messageBelongsToPrivatePeer(message, channelId),
-      logSource: 'private message cache migrated',
+    return _filterVisibleMessages(
+      _readAliasMessagesForChannel(
+        channelId: channelId,
+        channelType: channelType,
+        primary: primary,
+        belongsToAlias: (message) =>
+            _messageBelongsToPrivatePeer(message, channelId),
+        logSource: 'private message cache migrated',
+      ),
     );
   }
 
@@ -2038,11 +2171,12 @@ class BusinessImService extends ChangeNotifier {
     int channelType,
     List<Map<String, Object?>> messages,
   ) {
+    final visible = _filterVisibleMessages(messages);
     _cache.writeMessages(
       uid: _requireChat().uid,
       channelId: channelId,
       channelType: channelType,
-      messages: messages,
+      messages: visible,
     );
   }
 
@@ -2109,9 +2243,13 @@ class BusinessImService extends ChangeNotifier {
     if (channelId.isEmpty || channelType <= 0) {
       return;
     }
+    if (!_messageVisibleAfterClear(message) || !_messageNotDeleted(message)) {
+      return;
+    }
     final conversations = _cache
         .readConversations(chat.uid)
         .map(_normalizeConversation)
+        .where(_conversationVisibleAfterClear)
         .toList();
     final index = conversations.indexWhere(
       (item) =>
@@ -2165,6 +2303,63 @@ class BusinessImService extends ChangeNotifier {
     _bumpConversations('message_upsert');
   }
 
+  void _replaceConversationTailFromMessage(
+    String channelId,
+    int channelType,
+    Map<String, Object?> message,
+  ) {
+    final chat = _requireChat();
+    final conversations = _cache
+        .readConversations(chat.uid)
+        .map(_normalizeConversation)
+        .where(_conversationVisibleAfterClear)
+        .toList();
+    final index = conversations.indexWhere(
+      (item) =>
+          item['channel_id']?.toString() == channelId &&
+          _intValue(item, ['channel_type']) == channelType,
+    );
+    final payload = _asMap(message['payload']);
+    final previousUnread = index >= 0
+        ? _intValue(conversations[index], ['unread_quantity'])
+        : 0;
+    final next = <String, Object?>{
+      if (index >= 0) ...conversations[index],
+      'conversation_type': channelType == chat.channelTypeGroup
+          ? 'group'
+          : 'private',
+      if (channelType == chat.channelTypeGroup) ...{
+        'group_id': _value(payload, ['group_id'], fallback: channelId),
+        'name': _value(payload, ['group_name'], fallback: '群聊'),
+        'group_name': _value(payload, ['group_name'], fallback: '群聊'),
+      },
+      if (channelType == chat.channelTypePerson)
+        'receiver_id': _receiverIdFromMessage(message, channelId),
+      'channel_id': channelId,
+      'channel_type': channelType,
+      'content': message['content']?.toString() ?? _payloadContent(payload),
+      'content_type': message['content_type']?.toString() ?? '',
+      'payload': payload,
+      'msg_time': message['timestamp']?.toString() ?? '',
+      'last_client_msg_no': message['client_msg_no']?.toString() ?? '',
+      'last_msg_seq': message['message_seq'] ?? 0,
+      'unread_quantity': previousUnread,
+    };
+    if (index >= 0) {
+      conversations[index] = next;
+    } else {
+      conversations.insert(0, next);
+    }
+    conversations.sort(
+      (a, b) => (b['msg_time']?.toString() ?? '').compareTo(
+        a['msg_time']?.toString() ?? '',
+      ),
+    );
+    _latestConversations = conversations;
+    _cache.writeConversations(uid: chat.uid, conversations: conversations);
+    _bumpConversations('replace_conversation_tail');
+  }
+
   Map<String, Object?> _conversationForChannel(
     String channelId,
     int channelType,
@@ -2174,7 +2369,11 @@ class BusinessImService extends ChangeNotifier {
       if (item['channel_id']?.toString() == channelId &&
           (int.tryParse(item['channel_type']?.toString() ?? '') ?? 0) ==
               channelType) {
-        return _normalizeConversation(item);
+        final normalized = _normalizeConversation(item);
+        if (!_conversationVisibleAfterClear(normalized)) {
+          return const <String, Object?>{};
+        }
+        return normalized;
       }
     }
     return const <String, Object?>{};
@@ -2189,6 +2388,7 @@ class BusinessImService extends ChangeNotifier {
     final conversations = _cache
         .readConversations(chat.uid)
         .map(_normalizeConversation)
+        .where(_conversationVisibleAfterClear)
         .toList();
     final index = conversations.indexWhere(
       (item) =>
@@ -2348,6 +2548,131 @@ class BusinessImService extends ChangeNotifier {
         (entry) => entry.value != null && entry.value.toString().isNotEmpty,
       ),
     );
+  }
+
+  List<Map<String, Object?>> _filterVisibleMessages(
+    List<Map<String, Object?>> messages,
+  ) {
+    return messages
+        .where(_messageVisibleAfterClear)
+        .where(_messageNotDeleted)
+        .toList(growable: false);
+  }
+
+  bool _conversationVisibleAfterClear(Map<String, Object?> conversation) {
+    final chat = _session?.chat;
+    if (chat == null) {
+      return true;
+    }
+    final channelId = _value(conversation, ['channel_id']);
+    final channelType = _intValue(conversation, ['channel_type']);
+    if (channelId.isEmpty || channelType <= 0) {
+      return false;
+    }
+    final boundary = _cache.readChannelClearMarker(
+      uid: chat.uid,
+      channelId: channelId,
+      channelType: channelType,
+    );
+    if (boundary <= 0) {
+      return true;
+    }
+    final timestamp = _objectTimestampMs(conversation, [
+      'msg_time',
+      'timestamp',
+      'create_time',
+    ]);
+    return timestamp > boundary;
+  }
+
+  bool _messageVisibleAfterClear(Map<String, Object?> message) {
+    final chat = _session?.chat;
+    if (chat == null) {
+      return true;
+    }
+    final channelId = _value(message, ['channel_id']);
+    final channelType = _intValue(message, ['channel_type']);
+    if (channelId.isEmpty || channelType <= 0) {
+      return false;
+    }
+    final boundary = _cache.readChannelClearMarker(
+      uid: chat.uid,
+      channelId: channelId,
+      channelType: channelType,
+    );
+    if (boundary <= 0) {
+      return true;
+    }
+    final timestamp = _objectTimestampMs(message, [
+      'timestamp',
+      'create_time',
+      'msg_time',
+    ]);
+    return timestamp > boundary;
+  }
+
+  bool _messageNotDeleted(Map<String, Object?> message) {
+    final chat = _session?.chat;
+    if (chat == null) {
+      return true;
+    }
+    final clientMsgNo = _value(message, ['client_msg_no']);
+    if (clientMsgNo.isEmpty) {
+      return true;
+    }
+    final channelId = _value(message, ['channel_id']);
+    final channelType = _intValue(message, ['channel_type']);
+    if (channelId.isEmpty || channelType <= 0) {
+      return false;
+    }
+    final deleted = _cache.readDeletedMessages(
+      uid: chat.uid,
+      channelId: channelId,
+      channelType: channelType,
+    );
+    return !deleted.contains(clientMsgNo);
+  }
+
+  int _objectTimestampMs(Map<String, Object?> item, List<String> keys) {
+    for (final key in keys) {
+      final timestamp = _timestampMs(item[key]);
+      if (timestamp > 0) {
+        return timestamp;
+      }
+    }
+    final payload = _asMap(item['payload']);
+    for (final key in [
+      'create_time',
+      'client_timestamp',
+      'timestamp',
+      'msg_time',
+    ]) {
+      final timestamp = _timestampMs(payload[key]);
+      if (timestamp > 0) {
+        return timestamp;
+      }
+    }
+    return 0;
+  }
+
+  int _timestampMs(Object? value) {
+    if (value == null) {
+      return 0;
+    }
+    if (value is num) {
+      final number = value.toInt();
+      return number > 100000000000 ? number : number * 1000;
+    }
+    final text = value.toString().trim();
+    if (text.isEmpty) {
+      return 0;
+    }
+    final numeric = int.tryParse(text);
+    if (numeric != null) {
+      return numeric > 100000000000 ? numeric : numeric * 1000;
+    }
+    final parsed = DateTime.tryParse(text.replaceFirst(' ', 'T'));
+    return parsed?.millisecondsSinceEpoch ?? 0;
   }
 
   String _payloadContent(Map<String, Object?> payload) {

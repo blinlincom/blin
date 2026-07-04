@@ -336,13 +336,42 @@ class ChatFeatureService {
     required UserSession session,
     required String device,
     required String receiverId,
-    bool deletePeer = false,
   }) {
-    return action(
-      action: 'im_person_conversation_delete',
+    return _api.deletePrivateConversation(
       session: session,
       device: device,
-      params: {'receiver_id': receiverId, if (deletePeer) 'delete_peer': '1'},
+      receiverId: receiverId,
+    );
+  }
+
+  Future<Map<String, Object?>> groupConversationDelete({
+    required UserSession session,
+    required String device,
+    required String groupId,
+  }) {
+    return _api.deleteGroupConversation(
+      session: session,
+      device: device,
+      groupId: groupId,
+    );
+  }
+
+  Future<Map<String, Object?>> clearAllChatRecords({
+    required UserSession session,
+    required String device,
+  }) {
+    return _api.clearAllChatRecords(session: session, device: device);
+  }
+
+  Future<Map<String, Object?>> deleteMessageForSelf({
+    required UserSession session,
+    required String device,
+    required String targetClientMsgNo,
+  }) {
+    return _api.deleteMessageForSelf(
+      session: session,
+      device: device,
+      targetClientMsgNo: targetClientMsgNo,
     );
   }
 
