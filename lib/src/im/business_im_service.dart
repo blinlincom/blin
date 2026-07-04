@@ -50,6 +50,7 @@ class BusinessImService extends ChangeNotifier {
   final Map<String, Future<List<Map<String, Object?>>>> _syncingChannels =
       <String, Future<List<Map<String, Object?>>>>{};
   final Set<String> _historySyncedChannels = <String>{};
+  final Map<String, DateTime> _historyRetryAfter = <String, DateTime>{};
   final Set<String> _openMessageChannels = <String>{};
   final Map<String, Map<String, Object?>> _groupMuteStates =
       <String, Map<String, Object?>>{};
@@ -152,6 +153,7 @@ class BusinessImService extends ChangeNotifier {
     _device = device;
     _groupMuteStates.clear();
     _historySyncedChannels.clear();
+    _historyRetryAfter.clear();
     _latestConversations = _cache
         .readConversations(chat.uid)
         .map(_normalizeConversation)
@@ -301,6 +303,7 @@ class BusinessImService extends ChangeNotifier {
     );
     _latestConversations = const [];
     _historySyncedChannels.clear();
+    _historyRetryAfter.clear();
     _syncingChannels.clear();
     for (final channel in channels) {
       final channelId = channel['channel_id']?.toString() ?? '';
@@ -342,6 +345,7 @@ class BusinessImService extends ChangeNotifier {
         .where(_conversationVisibleAfterClear)
         .toList(growable: false);
     _historySyncedChannels.remove(_messageKey(channelID, channelType));
+    _historyRetryAfter.remove(_messageKey(channelID, channelType));
     _syncingChannels.remove(_messageKey(channelID, channelType));
     _markMessageChannel(
       source: 'clear_channel_chat',
@@ -505,22 +509,39 @@ class BusinessImService extends ChangeNotifier {
       },
     );
     final key = _messageKey(channelID, channelType);
-    final missingTailBeforeSync = _conversationTailMissing(
-      channelID,
-      channelType,
-      cached,
-    );
-    if (missingTailBeforeSync) {
-      _historySyncedChannels.remove(key);
-    }
-    final needsHistorySync =
-        !_historySyncedChannels.contains(key) || missingTailBeforeSync;
+    final historySynced = _historySyncedChannels.contains(key);
+    final missingTailBeforeSync =
+        !historySynced &&
+        _conversationTailMissing(channelID, channelType, cached);
+    final retryAfter = _historyRetryAfter[key];
+    final retryBlocked =
+        retryAfter != null && DateTime.now().isBefore(retryAfter);
+    final needsHistorySync = !historySynced && !retryBlocked;
     if (needsHistorySync) {
+      AppLogger.info(
+        'im',
+        'channel history sync requested',
+        data: {
+          'channel_id': channelID,
+          'channel_type': channelType,
+          'tail_missing': missingTailBeforeSync,
+        },
+      );
       cached = await syncChannelMessages(
         channelID: channelID,
         channelType: channelType,
         groupId: groupId,
         limit: limit,
+      );
+    } else if (retryBlocked) {
+      AppLogger.info(
+        'im',
+        'channel history sync throttled',
+        data: {
+          'channel_id': channelID,
+          'channel_type': channelType,
+          'retry_after': retryAfter.toIso8601String(),
+        },
       );
     }
     cached = _seedConversationTailMessageForChannel(
@@ -628,6 +649,7 @@ class BusinessImService extends ChangeNotifier {
       );
       _writeMessages(channelID, channelType, _sortAndLimit(merged, 200));
       _historySyncedChannels.add(_messageKey(channelID, channelType));
+      _historyRetryAfter.remove(_messageKey(channelID, channelType));
       _markMessageChannel(
         source: 'history_sync',
         channelId: channelID,
@@ -642,6 +664,8 @@ class BusinessImService extends ChangeNotifier {
         stackTrace: stackTrace,
         data: {'channel_id': channelID, 'channel_type': channelType},
       );
+      _historyRetryAfter[_messageKey(channelID, channelType)] = DateTime.now()
+          .add(const Duration(seconds: 20));
       return _readMessagesForChannel(channelID, channelType);
     }
   }
@@ -1954,11 +1978,6 @@ class BusinessImService extends ChangeNotifier {
     if (_tailMessageMissing(tail, current) ||
         !_sameMessageList(current, sorted)) {
       _writeMessages(normalizedChannelId, channelType, sorted);
-      if (_historySyncEnabledForType(channelType, _requireChat())) {
-        _historySyncedChannels.remove(
-          _messageKey(normalizedChannelId, channelType),
-        );
-      }
       _markMessageChannel(
         source: 'conversation_tail_$source',
         channelId: normalizedChannelId,

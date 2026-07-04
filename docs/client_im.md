@@ -76,6 +76,8 @@ flutter run \
 
 图片、语音、视频、文件等本地附件不会用明文 `file` 字段上传。客户端先把原文件字节加密到临时密文文件，通过 multipart 字段 `secure_file` 上传，并提交 `secure_file_name`、`secure_file_size`、`secure_file_sha256` 等外层字段。请求完成后会删除本地临时密文文件。
 
+会话摘要和历史消息也不允许明文返回。客户端请求 `im_conversations`、`im_person_messages`、`im_group_messages` 时固定带 `secure_response=1` 并参与签名；业务端不再接受未声明密文响应的历史读取请求。业务端返回 `data.secure_payload`，客户端使用同一次请求的 `appid/appkey/usertoken/device/timestamp/nonce` 解密。响应 IV 规则为 `md5(device|response|timestamp|nonce).substring(0, 16)`，抓包只能看到 Base64 密文。
+
 支持的 `content_type`：
 
 - `text`：`content`
@@ -151,6 +153,8 @@ MMKV 存储：
 - 群聊：`im_group_messages`
 
 这些同步由用户打开会话触发，不会使用定时器反复请求历史消息，也不会用业务接口代替实时收消息。若历史接口返回错误，本次启动不会标记为已完成，后续再次打开仍可补偿；实时收发仍以 WSS/WS/TCP 长连接为准。
+
+同一个会话页生命周期内只允许一个历史同步任务在跑。成功返回空列表也会标记本次已同步，避免聊天页因为会话摘要尾消息和本地缓存暂时不一致而反复请求 `im_person_messages` 或 `im_group_messages`；接口异常会短暂退避后再允许重新打开会话补偿。
 
 业务端 `im_connect` 会返回 `private_history_sync_enabled`、`group_history_sync_enabled`、`server_history_sync_enabled`。这些字段只控制用户端是否拉取服务端历史，不代表服务端是否保存消息；后台仍可基于发送记录审计消息。某类同步关闭时，客户端不请求该类历史接口，也不会用服务端空会话覆盖本地 MMKV 中该类会话；用户端只显示本地缓存，卸载或清除应用数据后历史为空。某类同步开启时，客户端会从服务端恢复该类会话和历史，卸载重装后仍可拉取。
 

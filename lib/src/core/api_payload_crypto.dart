@@ -38,6 +38,34 @@ class ApiPayloadCrypto {
     };
   }
 
+  static Map<String, Object?> decryptResponse({
+    required Map<String, Object?> payload,
+    required String appId,
+    required String appKey,
+    required String userToken,
+    required String device,
+    required String timestamp,
+    required String nonce,
+  }) {
+    final cipherText = payload['secure_payload']?.toString() ?? '';
+    if (cipherText.isEmpty) {
+      return payload;
+    }
+    if (payload['secure_payload_alg']?.toString() != 'AES-128-CBC') {
+      throw const FormatException('secure_payload_alg不支持');
+    }
+    final key = _key(appId: appId, appKey: appKey, userToken: userToken);
+    final iv = _responseIv(device: device, timestamp: timestamp, nonce: nonce);
+    final plain = Encrypter(
+      AES(Key(Uint8List.fromList(key.codeUnits)), mode: AESMode.cbc),
+    ).decrypt64(cipherText, iv: IV(Uint8List.fromList(iv.codeUnits)));
+    final decoded = jsonDecode(plain);
+    if (decoded is Map) {
+      return decoded.cast<String, Object?>();
+    }
+    throw const FormatException('secure_payload格式错误');
+  }
+
   static Future<EncryptedApiFile> encryptFile({
     required String filePath,
     required String device,
@@ -97,6 +125,17 @@ class ApiPayloadCrypto {
   }) {
     return md5
         .convert(utf8.encode('$device|$clientMsgNo|$timestamp|$nonce'))
+        .toString()
+        .substring(0, 16);
+  }
+
+  static String _responseIv({
+    required String device,
+    required String timestamp,
+    required String nonce,
+  }) {
+    return md5
+        .convert(utf8.encode('$device|response|$timestamp|$nonce'))
         .toString()
         .substring(0, 16);
   }

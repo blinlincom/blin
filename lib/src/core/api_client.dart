@@ -152,6 +152,7 @@ class ApiClient {
       session: session,
       device: device,
       params: {'page': page.toString(), 'limit': limit.toString()},
+      secureResponse: true,
     );
     if (!result.isSuccess) {
       throw ApiException(result.message, code: result.code);
@@ -207,6 +208,7 @@ class ApiClient {
       'im_person_messages',
       session: session,
       device: device,
+      secureResponse: true,
       params: {
         'receiver_id': receiverId,
         'start_message_seq': startMessageSeq.toString(),
@@ -262,6 +264,7 @@ class ApiClient {
       'im_group_messages',
       session: session,
       device: device,
+      secureResponse: true,
       params: {
         'group_id': groupId,
         'start_message_seq': startMessageSeq.toString(),
@@ -537,18 +540,34 @@ class ApiClient {
     required String device,
     required Map<String, Object?> params,
     String filePath = '',
+    bool secureResponse = false,
   }) {
+    final timestamp = _timestamp();
+    final nonce = _nonce();
     final payload = <String, Object?>{
       ...params,
       'usertoken': session.userToken,
       'device': device,
       'device_flag': AppConfig.imDeviceFlagApp.toString(),
       'device_level': AppConfig.imDeviceLevelMaster.toString(),
-      'timestamp': _timestamp(),
-      'nonce': _nonce(),
+      'timestamp': timestamp,
+      'nonce': nonce,
+      if (secureResponse) 'secure_response': '1',
     };
     payload['sign'] = _signer.sign({'appid': appId, ...payload});
-    return post<T>(action, payload, filePath: filePath);
+    return post<T>(
+      action,
+      payload,
+      filePath: filePath,
+      secureResponse: secureResponse
+          ? _SecureResponseContext(
+              session: session,
+              device: device,
+              timestamp: timestamp,
+              nonce: nonce,
+            )
+          : null,
+    );
   }
 
   Future<ApiResult<T>> post<T>(
@@ -556,6 +575,7 @@ class ApiClient {
     Map<String, Object?> params, {
     String filePath = '',
     String fileFieldName = 'file',
+    _SecureResponseContext? secureResponse,
   }) async {
     final stopwatch = Stopwatch()..start();
     AppLogger.info(
@@ -577,7 +597,7 @@ class ApiClient {
         action,
         data: FormData.fromMap(requestData),
       );
-      final result = _parse<T>(response.data);
+      final result = _parse<T>(response.data, secureResponse: secureResponse);
       AppLogger.info(
         'api',
         'post success',
@@ -603,7 +623,7 @@ class ApiClient {
         },
       );
       if (response != null) {
-        final result = _parse<T>(response);
+        final result = _parse<T>(response, secureResponse: secureResponse);
         AppLogger.warn(
           'api',
           'post error response',
@@ -629,18 +649,40 @@ class ApiClient {
     }
   }
 
-  ApiResult<T> _parse<T>(Object? body) {
+  ApiResult<T> _parse<T>(
+    Object? body, {
+    _SecureResponseContext? secureResponse,
+  }) {
     if (body is! Map) {
       throw ApiException('接口返回格式不正确');
     }
     final map = body.cast<String, Object?>();
+    final code = int.tryParse(map['code']?.toString() ?? '') ?? 0;
     final data = map['data'];
     Object? normalizedData = data;
+    if (secureResponse != null && code == 1) {
+      if (data is! Map) {
+        throw ApiException('接口密文返回格式不正确');
+      }
+      final rawData = data.cast<String, Object?>();
+      if ((rawData['secure_payload']?.toString() ?? '').isEmpty) {
+        throw ApiException('接口未返回密文数据');
+      }
+      normalizedData = ApiPayloadCrypto.decryptResponse(
+        payload: rawData,
+        appId: appId,
+        appKey: _signer.appKey,
+        userToken: secureResponse.session.userToken,
+        device: secureResponse.device,
+        timestamp: secureResponse.timestamp,
+        nonce: secureResponse.nonce,
+      );
+    }
     if (T.toString().contains('Map') && data is! Map) {
       normalizedData = <String, Object?>{};
     }
     return ApiResult<T>(
-      code: int.tryParse(map['code']?.toString() ?? '') ?? 0,
+      code: code,
       message: map['msg']?.toString() ?? '',
       data: normalizedData as T,
       timestamp: int.tryParse(map['timestamp']?.toString() ?? '') ?? 0,
@@ -680,4 +722,18 @@ class ApiClient {
             : entry.value,
     };
   }
+}
+
+class _SecureResponseContext {
+  const _SecureResponseContext({
+    required this.session,
+    required this.device,
+    required this.timestamp,
+    required this.nonce,
+  });
+
+  final UserSession session;
+  final String device;
+  final String timestamp;
+  final String nonce;
 }
