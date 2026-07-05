@@ -142,6 +142,68 @@ String _messageContentText(
   return _value(payload, ['content', 'text', 'remark'], fallback: content);
 }
 
+bool _isSystemNoticeMessage(Map<String, Object?> item) {
+  final contentType = _messageContentType(item);
+  return contentType == ChatContentTypes.redPacketReceived ||
+      contentType == ChatContentTypes.transferReceived ||
+      _boolValue(item['is_system']) ||
+      _boolValue(_asObjectMap(item['payload'])['is_system']);
+}
+
+String _systemNoticeText(Map<String, Object?> item) {
+  final payload = _asObjectMap(item['payload']);
+  final content = _messageContentText(item, payload);
+  if (content.isNotEmpty &&
+      content != '[消息]' &&
+      content != '[领取红包]' &&
+      content != '[已收款]') {
+    return content;
+  }
+  final contentType = _messageContentType(item);
+  if (contentType == ChatContentTypes.redPacketReceived) {
+    return _paymentNoticeText(
+      payload,
+      action: ChatContentTypes.redPacketReceived,
+    );
+  }
+  if (contentType == ChatContentTypes.transferReceived) {
+    return _paymentNoticeText(
+      payload,
+      action: ChatContentTypes.transferReceived,
+    );
+  }
+  return content.isEmpty ? '[系统消息]' : content;
+}
+
+String _paymentNoticeText(
+  Map<String, Object?> payload, {
+  required String action,
+}) {
+  final actorIsMe = _boolValue(payload['actor_is_me']);
+  final senderIsMe = _boolValue(payload['sender_is_me']);
+  final actorName = _value(payload, ['actor_name'], fallback: '对方');
+  final senderName = _value(payload, ['sender_name'], fallback: '对方');
+  if (action == ChatContentTypes.redPacketReceived) {
+    if (actorIsMe) {
+      return '你领取了$senderName的红包';
+    }
+    if (senderIsMe) {
+      return '$actorName领取了你的红包';
+    }
+    return '$actorName领取了$senderName的红包';
+  }
+  if (action == ChatContentTypes.transferReceived) {
+    if (actorIsMe) {
+      return '你已收取$senderName的转账';
+    }
+    if (senderIsMe) {
+      return '$actorName已收取你的转账';
+    }
+    return '$actorName已收取$senderName的转账';
+  }
+  return actorIsMe ? '你完成了操作' : '$actorName完成了操作';
+}
+
 String _durationLabel(Map<String, Object?> payload) {
   final seconds = _value(payload, ['duration']);
   if (seconds.isEmpty) {

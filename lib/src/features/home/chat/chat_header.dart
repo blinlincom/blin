@@ -10,6 +10,8 @@ class _ChatHeader extends StatelessWidget {
     required this.groupPresenceLoading,
     required this.onBack,
     required this.onDetail,
+    required this.onVoiceCall,
+    required this.onVideoCall,
   });
 
   final String title;
@@ -20,14 +22,19 @@ class _ChatHeader extends StatelessWidget {
   final bool groupPresenceLoading;
   final VoidCallback onBack;
   final VoidCallback onDetail;
+  final VoidCallback onVoiceCall;
+  final VoidCallback onVideoCall;
 
   @override
   Widget build(BuildContext context) {
     if (isGroup) {
       return Container(
-        height: 64,
-        color: _chatPageColor,
-        padding: const EdgeInsets.fromLTRB(8, 4, 10, 5),
+        height: 58,
+        decoration: const BoxDecoration(
+          color: _surfaceColor,
+          border: Border(bottom: BorderSide(color: _lightBorderColor)),
+        ),
+        padding: const EdgeInsets.fromLTRB(6, 3, 8, 3),
         child: Stack(
           alignment: Alignment.center,
           children: [
@@ -43,8 +50,8 @@ class _ChatHeader extends StatelessWidget {
               ),
             ),
             Positioned.fill(
-              left: 86,
-              right: 118,
+              left: 72,
+              right: 54,
               child: Center(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
@@ -55,13 +62,13 @@ class _ChatHeader extends StatelessWidget {
                       overflow: TextOverflow.ellipsis,
                       textAlign: TextAlign.center,
                       style: const TextStyle(
-                        color: Colors.black,
-                        fontSize: 17,
+                        color: _textColor,
+                        fontSize: 16.5,
                         fontWeight: FontWeight.w800,
                         height: 1.05,
                       ),
                     ),
-                    const SizedBox(height: 5),
+                    const SizedBox(height: 4),
                     Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
@@ -71,7 +78,7 @@ class _ChatHeader extends StatelessWidget {
                             height: 8,
                             child: CircularProgressIndicator(
                               strokeWidth: 1.4,
-                              color: Color(0xff8c939d),
+                              color: _secondaryTextColor,
                             ),
                           ),
                           const SizedBox(width: 5),
@@ -82,7 +89,7 @@ class _ChatHeader extends StatelessWidget {
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: const TextStyle(
-                              color: Color(0xff8c939d),
+                              color: _secondaryTextColor,
                               fontSize: 11.5,
                               fontWeight: FontWeight.w500,
                               height: 1,
@@ -103,18 +110,6 @@ class _ChatHeader extends StatelessWidget {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   _HeaderIconButton(
-                    tooltip: '语音通话',
-                    icon: Icons.call_outlined,
-                    onPressed: () {},
-                  ),
-                  const SizedBox(width: 5),
-                  _HeaderIconButton(
-                    tooltip: '视频通话',
-                    icon: Icons.videocam_outlined,
-                    onPressed: () {},
-                  ),
-                  const SizedBox(width: 5),
-                  _HeaderIconButton(
                     tooltip: '群设置',
                     icon: Icons.more_horiz,
                     onPressed: onDetail,
@@ -127,9 +122,12 @@ class _ChatHeader extends StatelessWidget {
       );
     }
     return Container(
-      height: 64,
-      color: _chatPageColor,
-      padding: const EdgeInsets.fromLTRB(8, 4, 10, 5),
+      height: 58,
+      decoration: const BoxDecoration(
+        color: _surfaceColor,
+        border: Border(bottom: BorderSide(color: _lightBorderColor)),
+      ),
+      padding: const EdgeInsets.fromLTRB(6, 3, 8, 3),
       child: Row(
         children: [
           _HeaderIconButton(
@@ -142,11 +140,11 @@ class _ChatHeader extends StatelessWidget {
           _Avatar(
             label: title,
             imageUrl: avatarUrl,
-            size: 40,
+            size: 36,
             color: isGroup ? const Color(0xff34c759) : _primaryColor,
             circle: true,
           ),
-          const SizedBox(width: 10),
+          const SizedBox(width: 9),
           Expanded(
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
@@ -157,13 +155,13 @@ class _ChatHeader extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
-                    color: Colors.black,
-                    fontSize: 19,
+                    color: _textColor,
+                    fontSize: 17.5,
                     fontWeight: FontWeight.w800,
                     height: 1.05,
                   ),
                 ),
-                const SizedBox(height: 5),
+                const SizedBox(height: 4),
                 Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
@@ -183,7 +181,7 @@ class _ChatHeader extends StatelessWidget {
                     Text(
                       statusText,
                       style: const TextStyle(
-                        color: Color(0xff8c939d),
+                        color: _secondaryTextColor,
                         fontSize: 11.5,
                         fontWeight: FontWeight.w500,
                         height: 1,
@@ -197,13 +195,13 @@ class _ChatHeader extends StatelessWidget {
           _HeaderIconButton(
             tooltip: '语音通话',
             icon: Icons.call_outlined,
-            onPressed: () {},
+            onPressed: onVoiceCall,
           ),
           const SizedBox(width: 5),
           _HeaderIconButton(
             tooltip: '视频通话',
             icon: Icons.videocam_outlined,
-            onPressed: () {},
+            onPressed: onVideoCall,
           ),
           const SizedBox(width: 5),
           _HeaderIconButton(
@@ -234,13 +232,13 @@ class _HeaderIconButton extends StatelessWidget {
   Widget build(BuildContext context) {
     return SizedBox(
       width: 34,
-      height: 42,
+      height: 44,
       child: IconButton(
         tooltip: tooltip,
         padding: EdgeInsets.zero,
         splashRadius: 20,
         onPressed: onPressed,
-        icon: Icon(icon, color: Colors.black, size: iconSize),
+        icon: Icon(icon, color: _textColor, size: iconSize),
       ),
     );
   }

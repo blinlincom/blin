@@ -376,6 +376,7 @@ class BusinessImService extends ChangeNotifier {
     }
     final targets = messages
         .where((item) => item['is_me'] != true)
+        .where((item) => !_isSystemActionMessage(item))
         .where((item) => _value(item, ['client_msg_no']).isNotEmpty)
         .toList(growable: false);
     if (targets.isEmpty) {
@@ -667,11 +668,32 @@ class BusinessImService extends ChangeNotifier {
       'content': _payloadContent(updatedPayload),
     };
     _upsertMessage(channelID, channelType, updated);
+    final receiptMessage = _paymentActionReceiptMessage(
+      channelId: channelID,
+      channelType: channelType,
+      targetMessage: updated,
+      action: nestedKey == 'red_packet'
+          ? ChatContentTypes.redPacketReceived
+          : ChatContentTypes.transferReceived,
+      nestedKey: nestedKey,
+      idKey: idKey,
+      idValue: idValue,
+      receipt: updatedNested,
+      actorIsCurrentUser: true,
+    );
+    _upsertMessage(channelID, channelType, receiptMessage);
+    _upsertConversationFromMessage(receiptMessage);
     _publishMessageEvent(
       source: source,
       channelId: channelID,
       channelType: channelType,
       message: updated,
+    );
+    _publishMessageEvent(
+      source: '${source}_receipt',
+      channelId: channelID,
+      channelType: channelType,
+      message: receiptMessage,
     );
     _markMessageChannel(
       source: source,
@@ -3034,11 +3056,37 @@ class BusinessImService extends ChangeNotifier {
         'content': _payloadContent(updatedPayload),
       };
       _upsertMessage(receiptChannelId, channelType, updated);
+      final receiptMessage = _paymentActionReceiptMessage(
+        channelId: receiptChannelId,
+        channelType: channelType,
+        targetMessage: updated,
+        action: action,
+        nestedKey: nestedKey,
+        idKey: action == ChatContentTypes.redPacketReceived
+            ? 'red_packet_id'
+            : 'transfer_id',
+        idValue: _value(updatedNested, [
+          action == ChatContentTypes.redPacketReceived
+              ? 'red_packet_id'
+              : 'transfer_id',
+          'id',
+        ]),
+        receipt: receipt,
+        actorIsCurrentUser: _actionReceiptFromCurrentUser(receipt),
+      );
+      _upsertMessage(receiptChannelId, channelType, receiptMessage);
+      _upsertConversationFromMessage(receiptMessage);
       _publishMessageEvent(
         source: 'gateway_action_receipt',
         channelId: receiptChannelId,
         channelType: channelType,
         message: updated,
+      );
+      _publishMessageEvent(
+        source: 'gateway_action_receipt_notice',
+        channelId: receiptChannelId,
+        channelType: channelType,
+        message: receiptMessage,
       );
       handled = true;
     }
@@ -3098,10 +3146,230 @@ class BusinessImService extends ChangeNotifier {
 
   bool _actionReceiptFromCurrentUser(Map<String, Object?> receipt) {
     final currentUserId = _requireSession().userId.toString();
-    final operatorId = _value(receipt, ['operator_id', 'reader_id']);
-    final operatorUid = _value(receipt, ['operator_uid', 'reader_uid']);
+    final operatorId = _value(receipt, [
+      'operator_id',
+      'reader_id',
+      'receiver_id',
+      'actor_id',
+      'user_id',
+      'userid',
+    ]);
+    final operatorUid = _value(receipt, [
+      'operator_uid',
+      'reader_uid',
+      'receiver_uid',
+      'actor_uid',
+      'uid',
+    ]);
     return (operatorId.isNotEmpty && operatorId == currentUserId) ||
         (operatorUid.isNotEmpty && _isCurrentUserChannel(operatorUid));
+  }
+
+  bool _isSystemActionMessage(Map<String, Object?> item) {
+    final contentType = _value(item, [
+      'content_type',
+    ], fallback: _value(_asMap(item['payload']), ['content_type']));
+    return contentType == ChatContentTypes.redPacketReceived ||
+        contentType == ChatContentTypes.transferReceived ||
+        _boolValue(item['is_system']) ||
+        _boolValue(_asMap(item['payload'])['is_system']);
+  }
+
+  Map<String, Object?> _paymentActionReceiptMessage({
+    required String channelId,
+    required int channelType,
+    required Map<String, Object?> targetMessage,
+    required String action,
+    required String nestedKey,
+    required String idKey,
+    required String idValue,
+    required Map<String, Object?> receipt,
+    required bool actorIsCurrentUser,
+  }) {
+    final session = _requireSession();
+    final chat = _requireChat();
+    final targetPayload = _asMap(targetMessage['payload']);
+    final targetNested = _asMap(targetPayload[nestedKey]);
+    final actorId = actorIsCurrentUser
+        ? session.userId.toString()
+        : _value(receipt, [
+            'operator_id',
+            'reader_id',
+            'receiver_id',
+            'actor_id',
+            'user_id',
+            'userid',
+          ]);
+    final actorUid = actorIsCurrentUser
+        ? chat.uid
+        : _value(receipt, [
+            'operator_uid',
+            'reader_uid',
+            'receiver_uid',
+            'actor_uid',
+            'uid',
+          ]);
+    final actorName = actorIsCurrentUser
+        ? _currentUserDisplayName()
+        : _displayNameFromSources([
+            receipt,
+            _asMap(receipt['operator']),
+            _asMap(receipt['reader']),
+            _asMap(receipt['receiver']),
+            _asMap(receipt['user']),
+          ], fallback: _profileDisplayName(actorId, fallback: '对方'));
+    final senderIsCurrentUser = targetMessage['is_me'] == true;
+    final senderId = _value(targetMessage, [
+      'sender_id',
+      'from_id',
+      'user_id',
+      'userid',
+    ], fallback: _value(targetPayload, ['sender_id', 'from_id']));
+    final senderName = senderIsCurrentUser
+        ? '你'
+        : _displayNameFromSources(
+            [
+              _asMap(targetMessage['from_user']),
+              targetMessage,
+              targetPayload,
+              targetNested,
+            ],
+            fallback: _profileDisplayName(
+              senderId,
+              fallback: channelType == chat.channelTypeGroup ? '成员' : '对方',
+            ),
+          );
+    final content = _paymentActionReceiptText(
+      action: action,
+      actorIsCurrentUser: actorIsCurrentUser,
+      actorName: actorName,
+      senderIsCurrentUser: senderIsCurrentUser,
+      senderName: senderName,
+    );
+    final targetClientMsgNo = _value(targetMessage, ['client_msg_no']);
+    final actorKey = actorId.isNotEmpty
+        ? actorId
+        : actorUid.isNotEmpty
+        ? actorUid
+        : actorName;
+    final clientMsgNo = 'receipt_${action}_${targetClientMsgNo}_$actorKey'
+        .replaceAll(RegExp(r'[^a-zA-Z0-9_]+'), '_');
+    final payload = _cleanPayload({
+      'protocol': 'blin.chat.v1',
+      'content_type': action,
+      'action': action,
+      'content': content,
+      'target_client_msg_no': targetClientMsgNo,
+      if (idValue.isNotEmpty) idKey: idValue,
+      'actor_id': actorId,
+      'actor_uid': actorUid,
+      'actor_name': actorName,
+      'actor_is_me': actorIsCurrentUser ? '1' : '0',
+      'sender_name': senderName,
+      'sender_is_me': senderIsCurrentUser ? '1' : '0',
+      nestedKey: {
+        ...targetNested,
+        ...receipt,
+        if (idValue.isNotEmpty) idKey: idValue,
+      },
+      if (channelType == chat.channelTypeGroup)
+        'group_id': _value(targetPayload, ['group_id'], fallback: channelId),
+    });
+    return _cleanPayload({
+      'message_id': '',
+      'client_msg_no': clientMsgNo,
+      'message_seq': 0,
+      'channel_id': channelId,
+      'channel_type': channelType,
+      if (channelType == chat.channelTypePerson)
+        'receiver_id': _receiverIdFromMessage(targetMessage, channelId),
+      'from_uid': actorIsCurrentUser ? chat.uid : actorUid,
+      'is_me': actorIsCurrentUser,
+      'is_system': '1',
+      'content': content,
+      'content_type': action,
+      'payload': payload,
+      'timestamp': _formatTimestamp(
+        DateTime.now().millisecondsSinceEpoch ~/ 1000,
+      ),
+      'status': 'sent',
+    });
+  }
+
+  String _paymentActionReceiptText({
+    required String action,
+    required bool actorIsCurrentUser,
+    required String actorName,
+    required bool senderIsCurrentUser,
+    required String senderName,
+  }) {
+    if (action == ChatContentTypes.redPacketReceived) {
+      if (actorIsCurrentUser) {
+        return '你领取了$senderName的红包';
+      }
+      if (senderIsCurrentUser) {
+        return '$actorName领取了你的红包';
+      }
+      return '$actorName领取了$senderName的红包';
+    }
+    if (action == ChatContentTypes.transferReceived) {
+      if (actorIsCurrentUser) {
+        return '你已收取$senderName的转账';
+      }
+      if (senderIsCurrentUser) {
+        return '$actorName已收取你的转账';
+      }
+      return '$actorName已收取$senderName的转账';
+    }
+    return actorIsCurrentUser ? '你完成了操作' : '$actorName完成了操作';
+  }
+
+  String _currentUserDisplayName() {
+    final current = _requireSession();
+    if (current.nickname.trim().isNotEmpty) {
+      return current.nickname.trim();
+    }
+    if (current.username.trim().isNotEmpty) {
+      return current.username.trim();
+    }
+    return '你';
+  }
+
+  String _displayNameFromSources(
+    List<Map<String, Object?>> sources, {
+    required String fallback,
+  }) {
+    for (final source in sources) {
+      final value = _value(source, [
+        'nickname',
+        'name',
+        'username',
+        'remark_name',
+        'display_name',
+        'sender_nickname',
+        'from_nickname',
+        'operator_nickname',
+        'reader_nickname',
+        'receiver_nickname',
+        'actor_name',
+      ]);
+      if (value.trim().isNotEmpty) {
+        return value.trim();
+      }
+    }
+    return fallback;
+  }
+
+  String _profileDisplayName(String userId, {required String fallback}) {
+    if (userId.isEmpty) {
+      return fallback;
+    }
+    final chat = _session?.chat;
+    if (chat == null) {
+      return fallback;
+    }
+    final profile = _cache.readProfile(uid: chat.uid, userId: userId);
+    return _displayNameFromSources([profile], fallback: fallback);
   }
 
   bool _applyReadReceiptPayload(
@@ -4186,8 +4454,14 @@ class BusinessImService extends ChangeNotifier {
       ChatContentTypes.contactCard => '[名片]',
       ChatContentTypes.transfer => _transferContent(payload),
       ChatContentTypes.redPacket => _redPacketContent(payload),
-      ChatContentTypes.redPacketReceived => '[领取红包]',
-      ChatContentTypes.transferReceived => '[已收款]',
+      ChatContentTypes.redPacketReceived => _paymentReceiptContent(
+        payload,
+        action: ChatContentTypes.redPacketReceived,
+      ),
+      ChatContentTypes.transferReceived => _paymentReceiptContent(
+        payload,
+        action: ChatContentTypes.transferReceived,
+      ),
       _ => '',
     };
   }
@@ -4266,6 +4540,30 @@ class BusinessImService extends ChangeNotifier {
 
   String _transferContent(Map<String, Object?> payload) {
     return '[转账]请收款';
+  }
+
+  String _paymentReceiptContent(
+    Map<String, Object?> payload, {
+    required String action,
+  }) {
+    final content = payload['content']?.toString().trim() ?? '';
+    if (content.isNotEmpty &&
+        content != '[消息]' &&
+        content != '[领取红包]' &&
+        content != '[已收款]') {
+      return content;
+    }
+    final actorIsCurrentUser = _boolValue(payload['actor_is_me']);
+    final senderIsCurrentUser = _boolValue(payload['sender_is_me']);
+    final actorName = _value(payload, ['actor_name'], fallback: '对方');
+    final senderName = _value(payload, ['sender_name'], fallback: '对方');
+    return _paymentActionReceiptText(
+      action: action,
+      actorIsCurrentUser: actorIsCurrentUser,
+      actorName: actorName,
+      senderIsCurrentUser: senderIsCurrentUser,
+      senderName: senderName,
+    );
   }
 
   Map<String, Object?> _asMap(Object? value) {

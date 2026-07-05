@@ -131,26 +131,32 @@ class _SearchBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ColoredBox(
-      color: Colors.white,
+      color: _surfaceColor,
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
+        padding: const EdgeInsets.fromLTRB(14, 8, 14, 10),
         child: InkWell(
           onTap: onTap,
-          borderRadius: BorderRadius.circular(4),
+          borderRadius: BorderRadius.circular(6),
           child: Container(
-            height: 36,
+            height: 34,
             padding: const EdgeInsets.symmetric(horizontal: 12),
             decoration: BoxDecoration(
-              color: const Color(0xfff0f1f3),
-              borderRadius: BorderRadius.circular(4),
+              color: _fillColor,
+              borderRadius: BorderRadius.circular(6),
             ),
             child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              mainAxisSize: MainAxisSize.max,
               children: [
-                const Icon(Icons.search, color: _mutedColor, size: 18),
+                const Icon(Icons.search, color: _mutedColor, size: 17),
                 const SizedBox(width: 8),
                 Text(
                   hintText,
-                  style: const TextStyle(color: _mutedColor, fontSize: 14),
+                  style: const TextStyle(
+                    color: _mutedColor,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500,
+                  ),
                 ),
               ],
             ),
@@ -170,6 +176,7 @@ class _ConversationTile extends StatelessWidget {
     required this.isGroup,
     required this.avatarUrl,
     required this.onTap,
+    super.key,
   });
 
   final String title;
@@ -185,9 +192,10 @@ class _ConversationTile extends StatelessWidget {
     return InkWell(
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        constraints: const BoxConstraints(minHeight: 72),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
         decoration: const BoxDecoration(
-          color: Colors.white,
+          color: _surfaceColor,
           border: Border(bottom: BorderSide(color: _lightBorderColor)),
         ),
         child: Row(
@@ -202,6 +210,7 @@ class _ConversationTile extends StatelessWidget {
             const SizedBox(width: 12),
             Expanded(
               child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
@@ -210,7 +219,7 @@ class _ConversationTile extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
                       color: _textColor,
-                      fontSize: 16,
+                      fontSize: 15,
                       fontWeight: FontWeight.w700,
                     ),
                   ),
@@ -222,6 +231,7 @@ class _ConversationTile extends StatelessWidget {
             const SizedBox(width: 8),
             Column(
               crossAxisAlignment: CrossAxisAlignment.end,
+              mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 Text(
                   time,
@@ -306,6 +316,7 @@ class _ContactTile extends StatelessWidget {
     this.avatarColor,
     this.icon,
     this.onLongPress,
+    super.key,
   });
 
   final String title;
@@ -324,9 +335,10 @@ class _ContactTile extends StatelessWidget {
       onTap: onTap,
       onLongPress: onLongPress,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        constraints: const BoxConstraints(minHeight: 56),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         decoration: const BoxDecoration(
-          color: Colors.white,
+          color: _surfaceColor,
           border: Border(bottom: BorderSide(color: _lightBorderColor)),
         ),
         child: Row(
@@ -343,6 +355,7 @@ class _ContactTile extends StatelessWidget {
             const SizedBox(width: 12),
             Expanded(
               child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
@@ -351,7 +364,8 @@ class _ContactTile extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
                       color: _textColor,
-                      fontWeight: FontWeight.w700,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
                     ),
                   ),
                   if (subtitle.isNotEmpty)
@@ -406,20 +420,21 @@ class _MenuTile extends StatelessWidget {
     return InkWell(
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        constraints: const BoxConstraints(minHeight: 52),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         decoration: const BoxDecoration(
-          color: Colors.white,
+          color: _surfaceColor,
           border: Border(bottom: BorderSide(color: _lightBorderColor)),
         ),
         child: Row(
           children: [
             Container(
-              width: 34,
-              height: 34,
+              width: 32,
+              height: 32,
               alignment: Alignment.center,
               decoration: BoxDecoration(
                 color: iconColor.withValues(alpha: 0.12),
-                borderRadius: BorderRadius.circular(10),
+                borderRadius: BorderRadius.circular(7),
               ),
               child: Icon(icon, color: iconColor, size: 20),
             ),
@@ -433,7 +448,7 @@ class _MenuTile extends StatelessWidget {
                     style: const TextStyle(
                       color: _textColor,
                       fontSize: 15,
-                      fontWeight: FontWeight.w700,
+                      fontWeight: FontWeight.w600,
                     ),
                   ),
                   if (subtitle.isNotEmpty)

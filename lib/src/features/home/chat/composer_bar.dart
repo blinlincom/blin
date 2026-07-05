@@ -28,9 +28,17 @@ class _Composer extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      color: _chatPageColor,
+      decoration: const BoxDecoration(
+        color: _surfaceColor,
+        border: Border(top: BorderSide(color: _lightBorderColor)),
+      ),
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(14, 8, 14, 10),
+        padding: EdgeInsets.fromLTRB(
+          10,
+          7,
+          10,
+          MediaQuery.viewPaddingOf(context).bottom > 0 ? 7 : 8,
+        ),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
@@ -44,8 +52,8 @@ class _Composer extends StatelessWidget {
               child: Container(
                 constraints: const BoxConstraints(minHeight: 40),
                 decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(20),
+                  color: _fillColor,
+                  borderRadius: BorderRadius.circular(6),
                 ),
                 child: TextField(
                   controller: controller,
@@ -71,24 +79,22 @@ class _Composer extends StatelessWidget {
                       fontSize: 15,
                     ),
                     filled: true,
-                    fillColor: !enabled
-                        ? const Color(0xffeeeeee)
-                        : Colors.white,
+                    fillColor: !enabled ? const Color(0xffeeeeee) : _fillColor,
                     isDense: true,
                     border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(20),
+                      borderRadius: BorderRadius.circular(6),
                       borderSide: BorderSide.none,
                     ),
                     enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(20),
+                      borderRadius: BorderRadius.circular(6),
                       borderSide: BorderSide.none,
                     ),
                     disabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(20),
+                      borderRadius: BorderRadius.circular(6),
                       borderSide: BorderSide.none,
                     ),
                     focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(20),
+                      borderRadius: BorderRadius.circular(6),
                       borderSide: BorderSide.none,
                     ),
                     contentPadding: const EdgeInsets.symmetric(
@@ -131,7 +137,7 @@ class _Composer extends StatelessWidget {
                           padding: const EdgeInsets.symmetric(horizontal: 8),
                           minimumSize: const Size(40, 36),
                           shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(18),
+                            borderRadius: BorderRadius.circular(6),
                           ),
                         ),
                         child: const Text(
@@ -168,7 +174,7 @@ class _ComposerIconButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      width: 34,
+      width: 40,
       height: 40,
       child: IconButton(
         tooltip: tooltip,
@@ -176,8 +182,8 @@ class _ComposerIconButton extends StatelessWidget {
         padding: EdgeInsets.zero,
         icon: Icon(
           icon,
-          size: 27,
-          color: onPressed == null ? _mutedColor : Colors.black,
+          size: 25,
+          color: onPressed == null ? _mutedColor : _textColor,
         ),
       ),
     );
@@ -195,8 +201,12 @@ class _MiniButton extends StatelessWidget {
     return OutlinedButton(
       onPressed: onTap,
       style: OutlinedButton.styleFrom(
-        minimumSize: const Size(56, 36),
-        padding: const EdgeInsets.symmetric(horizontal: 10),
+        foregroundColor: _textColor,
+        side: const BorderSide(color: _borderColor),
+        minimumSize: const Size(52, 32),
+        padding: const EdgeInsets.symmetric(horizontal: 9),
+        textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
       ),
       child: Text(label),
     );

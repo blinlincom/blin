@@ -1,6 +1,6 @@
 part of 'package:bim/src/features/home/home_page.dart';
 
-class _ChatToolsPanel extends StatelessWidget {
+class _ChatToolsPanel extends StatefulWidget {
   const _ChatToolsPanel({
     required this.isGroup,
     required this.onTextOption,
@@ -14,6 +14,8 @@ class _ChatToolsPanel extends StatelessWidget {
     required this.onContactCard,
     required this.onTransfer,
     required this.onRedPacket,
+    required this.onGroupVoiceCall,
+    required this.onGroupVideoCall,
     this.onGroupMembers,
   });
 
@@ -29,7 +31,29 @@ class _ChatToolsPanel extends StatelessWidget {
   final VoidCallback onContactCard;
   final VoidCallback onTransfer;
   final VoidCallback onRedPacket;
+  final VoidCallback onGroupVoiceCall;
+  final VoidCallback onGroupVideoCall;
   final VoidCallback? onGroupMembers;
+
+  @override
+  State<_ChatToolsPanel> createState() => _ChatToolsPanelState();
+}
+
+class _ChatToolsPanelState extends State<_ChatToolsPanel> {
+  late final PageController _pageController;
+  var _pageIndex = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _pageController = PageController();
+  }
+
+  @override
+  void dispose() {
+    _pageController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -37,76 +61,88 @@ class _ChatToolsPanel extends StatelessWidget {
       _ToolItem(
         Icons.photo_library_rounded,
         '相册',
-        onImage,
+        widget.onImage,
         const Color(0xff8e6df7),
       ),
       _ToolItem(
-        Icons.photo_camera_rounded,
-        '拍摄',
-        onImage,
-        const Color(0xff2f7df6),
-      ),
-      _ToolItem(
         Icons.videocam_rounded,
-        '视频通话',
-        onVideo,
+        '视频',
+        widget.onVideo,
         const Color(0xff2fc86f),
       ),
       _ToolItem(
-        Icons.location_on_rounded,
-        '位置',
-        onTextOption,
-        const Color(0xffffa21a),
+        Icons.folder_rounded,
+        '文件',
+        widget.onFile,
+        const Color(0xff2f7df6),
       ),
-      _ToolItem(Icons.folder_rounded, '文件', onFile, const Color(0xff2f7df6)),
+      if (widget.isGroup) ...[
+        _ToolItem(
+          Icons.call_rounded,
+          '语音通话',
+          widget.onGroupVoiceCall,
+          const Color(0xff34c759),
+        ),
+        _ToolItem(
+          Icons.video_call_rounded,
+          '视频通话',
+          widget.onGroupVideoCall,
+          const Color(0xff1677ff),
+        ),
+      ],
       _ToolItem(
         Icons.attach_money_rounded,
         '转账',
-        onTransfer,
+        widget.onTransfer,
         const Color(0xff28b957),
       ),
       _ToolItem(
         Icons.redeem_rounded,
         '红包',
-        onRedPacket,
+        widget.onRedPacket,
         const Color(0xffff543c),
       ),
       _ToolItem(
         Icons.contact_page_rounded,
         '名片',
-        onContactCard,
+        widget.onContactCard,
         const Color(0xff347cff),
       ),
       _ToolItem(
         Icons.emoji_emotions_rounded,
         '表情',
-        onEmoji,
+        widget.onEmoji,
         const Color(0xffffc043),
       ),
-      _ToolItem(Icons.gif_box_rounded, 'GIF', onGif, const Color(0xff20c997)),
+      _ToolItem(
+        Icons.gif_box_rounded,
+        'GIF',
+        widget.onGif,
+        const Color(0xff20c997),
+      ),
       _ToolItem(
         Icons.sticky_note_2_rounded,
         '贴纸',
-        onSticker,
+        widget.onSticker,
         const Color(0xff7c5cff),
       ),
       _ToolItem(
         Icons.keyboard_voice_rounded,
         '语音',
-        onVoice,
+        widget.onVoice,
         const Color(0xff5ac8fa),
       ),
       _ToolItem(
         Icons.tune_rounded,
         '文本选项',
-        onTextOption,
+        widget.onTextOption,
         const Color(0xff8e99a8),
       ),
-      if (isGroup && onGroupMembers != null)
+      if (widget.isGroup && widget.onGroupMembers != null)
         _ToolItem(
           Icons.groups_rounded,
           '群成员',
-          onGroupMembers!,
+          widget.onGroupMembers!,
           const Color(0xff34c759),
         ),
     ];
@@ -115,34 +151,63 @@ class _ChatToolsPanel extends StatelessWidget {
       pages.add(items.sublist(index, (index + 8).clamp(0, items.length)));
     }
     return Container(
-      height: 174,
-      color: _chatPageColor,
-      padding: const EdgeInsets.fromLTRB(14, 0, 14, 10),
-      child: DecoratedBox(
-        decoration: const BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.all(Radius.circular(16)),
-        ),
-        child: PageView.builder(
-          itemCount: pages.length,
-          physics: const BouncingScrollPhysics(),
-          itemBuilder: (context, pageIndex) {
-            final pageItems = pages[pageIndex];
-            return GridView.builder(
-              padding: const EdgeInsets.fromLTRB(18, 13, 18, 12),
-              physics: const NeverScrollableScrollPhysics(),
-              itemCount: pageItems.length,
-              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 4,
-                mainAxisExtent: 66,
-                crossAxisSpacing: 10,
-                mainAxisSpacing: 8,
+      height: 172,
+      decoration: const BoxDecoration(
+        color: _surfaceColor,
+        border: Border(top: BorderSide(color: _lightBorderColor)),
+      ),
+      child: Column(
+        children: [
+          Expanded(
+            child: PageView.builder(
+              controller: _pageController,
+              itemCount: pages.length,
+              physics: const BouncingScrollPhysics(),
+              onPageChanged: (value) => setState(() => _pageIndex = value),
+              itemBuilder: (context, pageIndex) {
+                final pageItems = pages[pageIndex];
+                return GridView.builder(
+                  padding: const EdgeInsets.fromLTRB(18, 13, 18, 8),
+                  physics: const NeverScrollableScrollPhysics(),
+                  itemCount: pageItems.length,
+                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: 4,
+                    mainAxisExtent: 62,
+                    crossAxisSpacing: 10,
+                    mainAxisSpacing: 6,
+                  ),
+                  itemBuilder: (context, index) =>
+                      _ToolButton(item: pageItems[index]),
+                );
+              },
+            ),
+          ),
+          if (pages.length > 1)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  for (var index = 0; index < pages.length; index++)
+                    AnimatedContainer(
+                      duration: const Duration(milliseconds: 180),
+                      curve: Curves.easeOut,
+                      width: _pageIndex == index ? 13 : 5,
+                      height: 5,
+                      margin: const EdgeInsets.symmetric(horizontal: 3),
+                      decoration: BoxDecoration(
+                        color: _pageIndex == index
+                            ? const Color(0xff8f96a3)
+                            : const Color(0xffd5d9df),
+                        borderRadius: BorderRadius.circular(3),
+                      ),
+                    ),
+                ],
               ),
-              itemBuilder: (context, index) =>
-                  _ToolButton(item: pageItems[index]),
-            );
-          },
-        ),
+            )
+          else
+            const SizedBox(height: 10),
+        ],
       ),
     );
   }
@@ -166,21 +231,21 @@ class _ToolButton extends StatelessWidget {
   Widget build(BuildContext context) {
     return InkWell(
       onTap: item.onTap,
-      borderRadius: BorderRadius.circular(10),
+      borderRadius: BorderRadius.circular(8),
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           Container(
-            width: 30,
-            height: 30,
+            width: 36,
+            height: 36,
             alignment: Alignment.center,
             decoration: BoxDecoration(
               color: item.color,
               borderRadius: BorderRadius.circular(
-                item.icon == Icons.attach_money_rounded ? 16 : 6,
+                item.icon == Icons.attach_money_rounded ? 18 : 8,
               ),
             ),
-            child: Icon(item.icon, size: 20, color: Colors.white),
+            child: Icon(item.icon, size: 22, color: Colors.white),
           ),
           const SizedBox(height: 7),
           Text(

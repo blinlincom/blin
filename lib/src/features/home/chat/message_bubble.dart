@@ -34,12 +34,12 @@ class _MessageBubble extends StatelessWidget {
     );
     return Container(
       constraints: BoxConstraints(
-        maxWidth: MediaQuery.sizeOf(context).width * 0.64,
+        maxWidth: MediaQuery.sizeOf(context).width * 0.68,
       ),
       padding: _bubblePadding(contentType),
       decoration: BoxDecoration(
         color: _bubbleColor(contentType),
-        borderRadius: BorderRadius.circular(isImageLike ? 8 : 10),
+        borderRadius: BorderRadius.circular(isImageLike ? 8 : 9),
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -81,10 +81,10 @@ class _MessageBubble extends StatelessWidget {
       ChatContentTypes.video ||
       ChatContentTypes.contactCard ||
       ChatContentTypes.transfer => const EdgeInsets.symmetric(
-        horizontal: 12,
-        vertical: 10,
+        horizontal: 11,
+        vertical: 9,
       ),
-      _ => const EdgeInsets.fromLTRB(14, 10, 10, 7),
+      _ => const EdgeInsets.fromLTRB(12, 8, 9, 7),
     };
   }
 }
@@ -111,7 +111,7 @@ class _MessageMeta extends StatelessWidget {
           time,
           style: TextStyle(
             color: isMe ? const Color(0xff73946f) : const Color(0xff9198a2),
-            fontSize: 12,
+            fontSize: 11,
             fontWeight: FontWeight.w500,
             height: 1,
           ),
@@ -571,13 +571,13 @@ class _TimeDivider extends StatelessWidget {
       return const SizedBox.shrink();
     }
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 10),
+      padding: const EdgeInsets.symmetric(vertical: 8),
       child: Text(
         text,
         style: const TextStyle(
           color: Color(0xff8f96a3),
-          fontSize: 14,
-          fontWeight: FontWeight.w700,
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
         ),
       ),
     );
@@ -607,17 +607,27 @@ class _SelectedMessageBar extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+      padding: const EdgeInsets.fromLTRB(10, 6, 6, 6),
       decoration: const BoxDecoration(
-        color: _fillColor,
-        border: Border(bottom: BorderSide(color: _borderColor)),
+        color: _surfaceColor,
+        border: Border(bottom: BorderSide(color: _lightBorderColor)),
       ),
       child: Wrap(
-        spacing: 8,
+        spacing: 6,
         runSpacing: 6,
         crossAxisAlignment: WrapCrossAlignment.center,
         children: [
-          const Text('已选中消息'),
+          const Padding(
+            padding: EdgeInsets.only(right: 2),
+            child: Text(
+              '已选中消息',
+              style: TextStyle(
+                color: _secondaryTextColor,
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
           _MiniButton(label: '引用', onTap: onReply),
           _MiniButton(label: '已读', onTap: onReceipt),
           _MiniButton(label: '撤回', onTap: onRecall),
@@ -645,25 +655,37 @@ class _ChatOptionBar extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      padding: const EdgeInsets.fromLTRB(12, 7, 8, 7),
       decoration: const BoxDecoration(
-        color: Color(0xfffffbeb),
-        border: Border(bottom: BorderSide(color: _borderColor)),
+        color: _surfaceColor,
+        border: Border(bottom: BorderSide(color: _lightBorderColor)),
       ),
       child: Row(
         children: [
+          const Icon(Icons.info_outline, size: 16, color: Color(0xffb87f00)),
+          const SizedBox(width: 6),
           Expanded(
             child: Text(
               text,
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(color: Color(0xff785800)),
+              style: const TextStyle(
+                color: Color(0xff785800),
+                fontSize: 12.5,
+                fontWeight: FontWeight.w600,
+                height: 1.25,
+              ),
             ),
           ),
-          IconButton(
-            tooltip: '清除选项',
-            onPressed: onClear,
-            icon: const Icon(Icons.close),
+          SizedBox(
+            width: 36,
+            height: 36,
+            child: IconButton(
+              tooltip: '清除选项',
+              padding: EdgeInsets.zero,
+              onPressed: onClear,
+              icon: const Icon(Icons.close, size: 18),
+            ),
           ),
         ],
       ),

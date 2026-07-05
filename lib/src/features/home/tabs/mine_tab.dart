@@ -7,143 +7,195 @@ class MineTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final session = controller.session;
     return AnimatedBuilder(
       animation: controller,
       builder: (context, _) {
-        return ListView(
-          padding: const EdgeInsets.fromLTRB(0, 12, 0, 20),
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(24, 28, 20, 26),
-              child: Row(
-                children: [
-                  _Avatar(
-                    label: _avatarText(session),
-                    size: 68,
-                    color: const Color(0xff8e99a8),
-                  ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          session?.nickname.isNotEmpty == true
-                              ? session!.nickname
-                              : session?.username ?? '',
-                          style: const TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        Row(
-                          children: const [
-                            Icon(
-                              Icons.check_circle,
-                              size: 13,
-                              color: Color(0xff36c56f),
-                            ),
-                            SizedBox(width: 4),
+        final session = controller.session;
+        return ColoredBox(
+          color: _pageColor,
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(0, 0, 0, 20),
+            children: [
+              ColoredBox(
+                color: _surfaceColor,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(24, 28, 18, 24),
+                  child: Row(
+                    children: [
+                      _Avatar(
+                        label: _avatarText(session),
+                        imageUrl: session?.avatar ?? '',
+                        size: 68,
+                        color: const Color(0xff8e99a8),
+                        circle: true,
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
                             Text(
-                              '在线',
-                              style: TextStyle(
+                              _sessionDisplayName(session),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: _textColor,
+                                fontSize: 20,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                            const SizedBox(height: 6),
+                            _MineStatusLine(controller: controller),
+                            const SizedBox(height: 6),
+                            Text(
+                              '账号：${session?.username ?? ''}',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
                                 color: _mutedColor,
-                                fontSize: 12,
+                                fontSize: 13,
                               ),
                             ),
                           ],
                         ),
-                        const SizedBox(height: 4),
-                        Text(
-                          '账号：${session?.username ?? ''}',
-                          style: const TextStyle(color: _mutedColor),
+                      ),
+                      IconButton(
+                        tooltip: '二维码',
+                        onPressed: () => _showSoon(context),
+                        icon: const Icon(
+                          Icons.qr_code_2,
+                          color: _secondaryTextColor,
+                          size: 24,
                         ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
-                  IconButton(
-                    tooltip: '二维码',
-                    onPressed: () => _showSoon(context),
-                    icon: const Icon(Icons.qr_code_2),
-                  ),
-                ],
+                ),
               ),
-            ),
-            _MenuTile(
-              icon: Icons.security_outlined,
-              iconColor: const Color(0xff20c997),
-              title: '服务',
-              subtitle: '',
-              onTap: () => _showSoon(context),
-            ),
-            const _GroupGap(),
-            _MenuTile(
-              icon: Icons.bookmark_border,
-              iconColor: const Color(0xffff3b30),
-              title: '收藏',
-              subtitle: '',
-              onTap: () => _showSoon(context),
-            ),
-            _MenuTile(
-              icon: Icons.photo_library_outlined,
-              iconColor: const Color(0xff34c759),
-              title: '朋友圈',
-              subtitle: '',
-              onTap: () => _showSoon(context),
-            ),
-            _MenuTile(
-              icon: Icons.wallet_outlined,
-              iconColor: _primaryColor,
-              title: '卡包',
-              subtitle: '',
-              onTap: () => _showSoon(context),
-            ),
-            _MenuTile(
-              icon: Icons.emoji_emotions_outlined,
-              iconColor: const Color(0xffffc043),
-              title: '表情',
-              subtitle: '',
-              onTap: () => _showSoon(context),
-            ),
-            const _GroupGap(),
-            _MenuTile(
-              icon: Icons.settings_outlined,
-              iconColor: _mutedColor,
-              title: '设置',
-              subtitle: '',
-              onTap: () =>
-                  _push(context, ConnectionInfoPage(controller: controller)),
-            ),
-            if (controller.imError != null)
+              const _GroupGap(),
               _MenuTile(
-                icon: Icons.error_outline,
-                iconColor: _dangerColor,
-                title: '连接异常',
-                subtitle: controller.imError!,
-                onTap: controller.clearError,
+                icon: Icons.security_outlined,
+                iconColor: const Color(0xff20c997),
+                title: '服务',
+                subtitle: '',
+                onTap: () => _showSoon(context),
               ),
-            Padding(
-              padding: const EdgeInsets.all(20),
-              child: OutlinedButton(
-                onPressed: controller.logout,
-                child: const Text('退出登录'),
+              const _GroupGap(),
+              _MenuTile(
+                icon: Icons.bookmark_border,
+                iconColor: const Color(0xffff3b30),
+                title: '收藏',
+                subtitle: '',
+                onTap: () => _showSoon(context),
               ),
-            ),
-          ],
+              _MenuTile(
+                icon: Icons.photo_library_outlined,
+                iconColor: const Color(0xff34c759),
+                title: '朋友圈',
+                subtitle: '',
+                onTap: () => _showSoon(context),
+              ),
+              _MenuTile(
+                icon: Icons.wallet_outlined,
+                iconColor: _primaryColor,
+                title: '卡包',
+                subtitle: '',
+                onTap: () => _showSoon(context),
+              ),
+              _MenuTile(
+                icon: Icons.emoji_emotions_outlined,
+                iconColor: const Color(0xffffc043),
+                title: '表情',
+                subtitle: '',
+                onTap: () => _showSoon(context),
+              ),
+              const _GroupGap(),
+              _MenuTile(
+                icon: Icons.settings_outlined,
+                iconColor: _mutedColor,
+                title: '设置',
+                subtitle: '',
+                onTap: () =>
+                    _push(context, ConnectionInfoPage(controller: controller)),
+              ),
+              if (controller.imError != null)
+                _MenuTile(
+                  icon: Icons.error_outline,
+                  iconColor: _dangerColor,
+                  title: '连接异常',
+                  subtitle: controller.imError!,
+                  onTap: controller.clearError,
+                ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+                child: SizedBox(
+                  height: 44,
+                  child: OutlinedButton(
+                    onPressed: controller.logout,
+                    child: const Text('退出登录'),
+                  ),
+                ),
+              ),
+            ],
+          ),
         );
       },
     );
   }
 
   String _avatarText(UserSession? session) {
-    final name = session?.nickname.isNotEmpty == true
-        ? session!.nickname
-        : session?.username ?? '';
+    final name = _sessionDisplayName(session);
     if (name.isEmpty) {
       return 'B';
     }
     return name.characters.first;
+  }
+}
+
+class _MineStatusLine extends StatelessWidget {
+  const _MineStatusLine({required this.controller});
+
+  final SessionController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final text = _statusText;
+    final connected = text == '在线';
+    return Row(
+      children: [
+        Icon(
+          Icons.circle,
+          size: 8,
+          color: connected ? _chatOnlineColor : _mutedColor,
+        ),
+        const SizedBox(width: 6),
+        Text(
+          text,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(color: _mutedColor, fontSize: 12),
+        ),
+      ],
+    );
+  }
+
+  String get _statusText {
+    if (controller.imError != null) {
+      return '连接异常';
+    }
+    final status = controller.imStatusText;
+    if (status == '已连接') {
+      return '在线';
+    }
+    if (status == '连接中') {
+      return '连接中...';
+    }
+    if (status == '重连中') {
+      return '重连中...';
+    }
+    if (status == '同步中') {
+      return '同步中...';
+    }
+    return status.isEmpty ? '离线' : status;
   }
 }

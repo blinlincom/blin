@@ -78,17 +78,14 @@ class _ContactsTabState extends State<ContactsTab> {
 
   @override
   Widget build(BuildContext context) {
-    if (_loading && _friends.isEmpty) {
-      return const Center(child: CircularProgressIndicator());
-    }
-    if (_error != null && _friends.isEmpty) {
-      return _ErrorState(text: _error!, onRetry: () => _refresh());
-    }
     return Stack(
       children: [
         RefreshIndicator(
           onRefresh: () => _refresh(showLoading: false),
           child: ListView(
+            physics: const AlwaysScrollableScrollPhysics(
+              parent: ClampingScrollPhysics(),
+            ),
             padding: const EdgeInsets.only(bottom: 20),
             children: [
               _SearchBar(
@@ -157,9 +154,23 @@ class _ContactsTabState extends State<ContactsTab> {
                 onTap: () => _showSoon(context),
               ),
               const _SectionHeader(text: '星标朋友'),
-              if (_friends.isEmpty) const _EmptyRow(text: '暂无好友'),
+              if (_loading && _friends.isEmpty)
+                const SizedBox(
+                  height: 160,
+                  child: Center(child: CircularProgressIndicator()),
+                )
+              else if (_error != null && _friends.isEmpty)
+                SizedBox(
+                  height: 180,
+                  child: _ErrorState(text: _error!, onRetry: () => _refresh()),
+                )
+              else if (_friends.isEmpty)
+                const _EmptyRow(text: '暂无好友'),
               for (final item in _friends)
                 _ContactTile(
+                  key: ValueKey(
+                    'friend-${_friendUserId(item)}-${_friendChannelId(item)}',
+                  ),
                   title: _friendTitle(item),
                   subtitle: _friendSubtitle(item),
                   trailing: '',
@@ -186,7 +197,7 @@ class _ContactsTabState extends State<ContactsTab> {
           bottom: 74,
           child: IgnorePointer(child: _AlphabetIndex()),
         ),
-        if (_error != null)
+        if (_error != null && _friends.isNotEmpty)
           Positioned(
             left: 0,
             right: 0,

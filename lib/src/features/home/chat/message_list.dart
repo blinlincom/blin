@@ -21,13 +21,16 @@ class _MessageRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (_isSystemNoticeMessage(item)) {
+      return _SystemNoticeRow(text: _systemNoticeText(item));
+    }
     final isMe = item['is_me'] == true;
     final sender = _messageSenderName(item);
     final avatarUrl = isMe
         ? currentUserAvatarUrl
         : _messageSenderAvatarUrl(item);
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 7),
+      padding: const EdgeInsets.symmetric(vertical: 5),
       child: Row(
         mainAxisAlignment: isMe
             ? MainAxisAlignment.end
@@ -35,8 +38,8 @@ class _MessageRow extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           if (!isMe) ...[
-            _Avatar(label: sender, imageUrl: avatarUrl, size: 38, circle: true),
-            const SizedBox(width: 8),
+            _Avatar(label: sender, imageUrl: avatarUrl, size: 36, circle: true),
+            const SizedBox(width: 7),
           ],
           Flexible(
             child: Column(
@@ -51,7 +54,11 @@ class _MessageRow extends StatelessWidget {
                       sender,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(color: _mutedColor, fontSize: 11),
+                      style: const TextStyle(
+                        color: _mutedColor,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w500,
+                      ),
                     ),
                   ),
                 Row(
@@ -75,16 +82,58 @@ class _MessageRow extends StatelessWidget {
             ),
           ),
           if (isMe) ...[
-            const SizedBox(width: 8),
+            const SizedBox(width: 7),
             _Avatar(
               label: '我',
               imageUrl: avatarUrl,
-              size: 38,
+              size: 36,
               color: _primaryColor,
               circle: true,
             ),
           ],
         ],
+      ),
+    );
+  }
+}
+
+class _SystemNoticeRow extends StatelessWidget {
+  const _SystemNoticeRow({required this.text});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    if (text.isEmpty) {
+      return const SizedBox.shrink();
+    }
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 7),
+      child: Center(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxWidth: MediaQuery.sizeOf(context).width * 0.74,
+          ),
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: const Color(0xffeceff3),
+              borderRadius: BorderRadius.circular(5),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+              child: Text(
+                text,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: _secondaryTextColor,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  height: 1.25,
+                ),
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }

@@ -702,6 +702,8 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   Widget build(BuildContext context) {
     final muteText = _groupMuteText(_groupMuteState);
     final composerEnabled = _composerEnabled;
+    final toastText = _error ?? _message;
+    final toastIsError = _error != null;
     return Scaffold(
       resizeToAvoidBottomInset: true,
       backgroundColor: _chatPageColor,
@@ -709,110 +711,149 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         child: AnimatedBuilder(
           animation: widget.controller,
           builder: (context, _) {
-            return Column(
+            return Stack(
               children: [
-                _ChatHeader(
-                  title: _chatHeaderTitle(),
-                  avatarUrl: _headerAvatarUrl(),
-                  isGroup: _isGroup,
-                  statusText: _chatHeaderStatusText(),
-                  online: !_isGroup && _peerOnline,
-                  groupPresenceLoading: _groupPresenceLoading,
-                  onBack: () => Navigator.of(context).maybePop(),
-                  onDetail: _openChatDetail,
+                Column(
+                  children: [
+                    _ChatHeader(
+                      title: _chatHeaderTitle(),
+                      avatarUrl: _headerAvatarUrl(),
+                      isGroup: _isGroup,
+                      statusText: _chatHeaderStatusText(),
+                      online: !_isGroup && _peerOnline,
+                      groupPresenceLoading: _groupPresenceLoading,
+                      onBack: () => Navigator.of(context).maybePop(),
+                      onDetail: _openChatDetail,
+                      onVoiceCall: () => _showCallPending('语音通话'),
+                      onVideoCall: () => _showCallPending('视频通话'),
+                    ),
+                    if (_replyClientMsgNo.isNotEmpty ||
+                        _burnAfterRead ||
+                        _mentionAll ||
+                        _mentionUserIds.isNotEmpty)
+                      _ChatOptionBar(
+                        text: _optionText(),
+                        onClear: _clearOptions,
+                      ),
+                    if (_selectedClientMsgNo.isNotEmpty)
+                      _SelectedMessageBar(
+                        onReply: () => setState(() {
+                          _replyClientMsgNo = _selectedClientMsgNo;
+                          _selectedClientMsgNo = '';
+                        }),
+                        onReceipt: _queryReceipt,
+                        onRecall: _recallSelected,
+                        onDelete: _deleteSelected,
+                        onBurn: _burnSelected,
+                        onReceiveTransfer: _receiveSelectedTransfer,
+                        onClear: () => setState(() {
+                          _selectedClientMsgNo = '';
+                          _selectedPayload = const {};
+                        }),
+                      ),
+                    Expanded(
+                      child: _messagesLoading && _messages.isEmpty
+                          ? const Center(child: CircularProgressIndicator())
+                          : _messages.isEmpty
+                          ? const _EmptyState(text: '暂无消息')
+                          : ListView.builder(
+                              controller: _scrollController,
+                              reverse: true,
+                              padding: const EdgeInsets.fromLTRB(
+                                14,
+                                10,
+                                14,
+                                16,
+                              ),
+                              itemCount: _messages.length,
+                              itemBuilder: (context, index) {
+                                final messageIndex =
+                                    _messages.length - 1 - index;
+                                final item = _messages[messageIndex];
+                                final showTime = _shouldShowTimeDivider(
+                                  _messages,
+                                  messageIndex,
+                                );
+                                return Column(
+                                  children: [
+                                    if (showTime)
+                                      _TimeDivider(
+                                        text: _messageTimeLabel(item),
+                                      ),
+                                    _MessageRow(
+                                      item: item,
+                                      showSenderName: _isGroup,
+                                      currentUserAvatarUrl:
+                                          widget.controller.session?.avatar ??
+                                          '',
+                                      onLongPress: () => _selectMessage(item),
+                                      onTap:
+                                          _messageContentType(item) ==
+                                              ChatContentTypes.redPacket
+                                          ? () => _receiveRedPacket(item)
+                                          : null,
+                                      redPacketReceiving: _redPacketIsReceiving(
+                                        item,
+                                      ),
+                                      onRetry: () => _retryMessage(item),
+                                    ),
+                                  ],
+                                );
+                              },
+                            ),
+                    ),
+                    _Composer(
+                      controller: _textController,
+                      focusNode: _inputFocusNode,
+                      sending: _sending,
+                      enabled: composerEnabled,
+                      disabledText: muteText,
+                      toolsOpen: _toolsOpen,
+                      onVoice: () => _sendMedia(ChatContentTypes.voice),
+                      onEmoji: () => _sendMedia(ChatContentTypes.emoji),
+                      onTools: _toggleTools,
+                      onSend: _sendText,
+                    ),
+                    if (_toolsOpen)
+                      _ChatToolsPanel(
+                        isGroup: _isGroup,
+                        onTextOption: _openTextOptions,
+                        onImage: () => _sendMedia(ChatContentTypes.image),
+                        onEmoji: () => _sendMedia(ChatContentTypes.emoji),
+                        onGif: () => _sendMedia(ChatContentTypes.gif),
+                        onSticker: () => _sendMedia(ChatContentTypes.sticker),
+                        onVoice: () => _sendMedia(ChatContentTypes.voice),
+                        onVideo: () => _sendMedia(ChatContentTypes.video),
+                        onFile: () => _sendMedia(ChatContentTypes.file),
+                        onContactCard: _sendContactCard,
+                        onTransfer: _sendTransfer,
+                        onRedPacket: _sendRedPacket,
+                        onGroupVoiceCall: () => _showCallPending('群语音通话'),
+                        onGroupVideoCall: () => _showCallPending('群视频通话'),
+                        onGroupMembers: _isGroup ? _openGroupMembers : null,
+                      ),
+                  ],
                 ),
-                if (_error != null) _ChatError(text: _error!),
-                if (_message.isNotEmpty) _InfoBar(text: _message),
-                if (_replyClientMsgNo.isNotEmpty ||
-                    _burnAfterRead ||
-                    _mentionAll ||
-                    _mentionUserIds.isNotEmpty)
-                  _ChatOptionBar(text: _optionText(), onClear: _clearOptions),
-                if (_selectedClientMsgNo.isNotEmpty)
-                  _SelectedMessageBar(
-                    onReply: () => setState(() {
-                      _replyClientMsgNo = _selectedClientMsgNo;
-                      _selectedClientMsgNo = '';
-                    }),
-                    onReceipt: _queryReceipt,
-                    onRecall: _recallSelected,
-                    onDelete: _deleteSelected,
-                    onBurn: _burnSelected,
-                    onReceiveTransfer: _receiveSelectedTransfer,
-                    onClear: () => setState(() {
-                      _selectedClientMsgNo = '';
-                      _selectedPayload = const {};
-                    }),
-                  ),
-                Expanded(
-                  child: _messagesLoading && _messages.isEmpty
-                      ? const Center(child: CircularProgressIndicator())
-                      : _messages.isEmpty
-                      ? const _EmptyState(text: '暂无消息')
-                      : ListView.builder(
-                          controller: _scrollController,
-                          reverse: true,
-                          padding: const EdgeInsets.fromLTRB(18, 12, 18, 18),
-                          itemCount: _messages.length,
-                          itemBuilder: (context, index) {
-                            final messageIndex = _messages.length - 1 - index;
-                            final item = _messages[messageIndex];
-                            final showTime = _shouldShowTimeDivider(
-                              _messages,
-                              messageIndex,
-                            );
-                            return Column(
-                              children: [
-                                if (showTime)
-                                  _TimeDivider(text: _messageTimeLabel(item)),
-                                _MessageRow(
-                                  item: item,
-                                  showSenderName: _isGroup,
-                                  currentUserAvatarUrl:
-                                      widget.controller.session?.avatar ?? '',
-                                  onLongPress: () => _selectMessage(item),
-                                  onTap:
-                                      _messageContentType(item) ==
-                                          ChatContentTypes.redPacket
-                                      ? () => _receiveRedPacket(item)
-                                      : null,
-                                  redPacketReceiving: _redPacketIsReceiving(
-                                    item,
-                                  ),
-                                  onRetry: () => _retryMessage(item),
-                                ),
-                              ],
-                            );
-                          },
-                        ),
-                ),
-                _Composer(
-                  controller: _textController,
-                  focusNode: _inputFocusNode,
-                  sending: _sending,
-                  enabled: composerEnabled,
-                  disabledText: muteText,
-                  toolsOpen: _toolsOpen,
-                  onVoice: () => _sendMedia(ChatContentTypes.voice),
-                  onEmoji: () => _sendMedia(ChatContentTypes.emoji),
-                  onTools: _toggleTools,
-                  onSend: _sendText,
-                ),
-                if (_toolsOpen)
-                  _ChatToolsPanel(
-                    isGroup: _isGroup,
-                    onTextOption: _openTextOptions,
-                    onImage: () => _sendMedia(ChatContentTypes.image),
-                    onEmoji: () => _sendMedia(ChatContentTypes.emoji),
-                    onGif: () => _sendMedia(ChatContentTypes.gif),
-                    onSticker: () => _sendMedia(ChatContentTypes.sticker),
-                    onVoice: () => _sendMedia(ChatContentTypes.voice),
-                    onVideo: () => _sendMedia(ChatContentTypes.video),
-                    onFile: () => _sendMedia(ChatContentTypes.file),
-                    onContactCard: _sendContactCard,
-                    onTransfer: _sendTransfer,
-                    onRedPacket: _sendRedPacket,
-                    onGroupMembers: _isGroup ? _openGroupMembers : null,
+                if (toastText.isNotEmpty)
+                  Positioned(
+                    top: 72,
+                    left: 28,
+                    right: 28,
+                    child: _ChatToast(
+                      key: ValueKey('$toastIsError:$toastText'),
+                      text: toastText,
+                      error: toastIsError,
+                      onDismiss: () {
+                        if (!mounted) {
+                          return;
+                        }
+                        if (toastIsError && _error == toastText) {
+                          setState(() => _error = null);
+                        } else if (!toastIsError && _message == toastText) {
+                          setState(() => _message = '');
+                        }
+                      },
+                    ),
                   ),
               ],
             );
@@ -828,6 +869,13 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       _selectedMessageSeq = _intValue(item, ['message_seq']);
       _selectedPayload = _asObjectMap(item['payload']);
       _message = _selectedClientMsgNo.isEmpty ? '当前消息暂不可操作' : '已选中消息';
+    });
+  }
+
+  void _showCallPending(String name) {
+    setState(() {
+      _error = null;
+      _message = '$name功能开发中';
     });
   }
 
@@ -1711,5 +1759,98 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       parts.add(_burnSeconds > 0 ? '阅后即焚 ${_burnSeconds}s' : '阅后即焚');
     }
     return parts.join(' · ');
+  }
+}
+
+class _ChatToast extends StatefulWidget {
+  const _ChatToast({
+    required this.text,
+    required this.error,
+    required this.onDismiss,
+    super.key,
+  });
+
+  final String text;
+  final bool error;
+  final VoidCallback onDismiss;
+
+  @override
+  State<_ChatToast> createState() => _ChatToastState();
+}
+
+class _ChatToastState extends State<_ChatToast> {
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _startTimer();
+  }
+
+  @override
+  void didUpdateWidget(_ChatToast oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.text != widget.text || oldWidget.error != widget.error) {
+      _startTimer();
+    }
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  void _startTimer() {
+    _timer?.cancel();
+    final seconds = widget.text.length > 32 ? 4 : 2;
+    _timer = Timer(Duration(seconds: seconds), widget.onDismiss);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      liveRegion: true,
+      child: Material(
+        color: Colors.transparent,
+        child: GestureDetector(
+          onTap: widget.onDismiss,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 160),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+            decoration: BoxDecoration(
+              color: widget.error
+                  ? const Color(0xffd93025)
+                  : const Color(0xe61f2329),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  widget.error ? Icons.error_outline : Icons.check_circle,
+                  color: Colors.white,
+                  size: 18,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    widget.text,
+                    maxLines: 3,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      height: 1.25,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }

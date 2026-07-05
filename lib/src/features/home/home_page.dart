@@ -47,10 +47,12 @@ part 'common/media_helpers.dart';
 
 const _primaryColor = Color(0xff1677ff);
 const _pageColor = Color(0xfff5f6f8);
+const _surfaceColor = Color(0xffffffff);
 const _borderColor = Color(0xffe7e8ec);
 const _lightBorderColor = Color(0xfff0f1f4);
 const _fillColor = Color(0xfff4f5f7);
 const _mutedColor = Color(0xff9aa0aa);
+const _secondaryTextColor = Color(0xff6f7785);
 const _textColor = Color(0xff202124);
 const _dangerColor = Color(0xffa40000);
 const _chatPageColor = Color(0xfff7f8fa);
@@ -113,7 +115,16 @@ class _HomePageState extends State<HomePage> {
           : AppBar(
               title: Text(_title),
               centerTitle: true,
-              backgroundColor: Colors.white,
+              toolbarHeight: 50,
+              elevation: 0,
+              scrolledUnderElevation: 0,
+              backgroundColor: _surfaceColor,
+              foregroundColor: _textColor,
+              titleTextStyle: const TextStyle(
+                color: _textColor,
+                fontSize: 17,
+                fontWeight: FontWeight.w700,
+              ),
               actions: _actions(),
             ),
       backgroundColor: _pageColor,
@@ -126,6 +137,16 @@ class _HomePageState extends State<HomePage> {
         child: BottomNavigationBar(
           currentIndex: _index,
           onTap: (value) => setState(() => _index = value),
+          type: BottomNavigationBarType.fixed,
+          elevation: 0,
+          backgroundColor: _surfaceColor,
+          selectedItemColor: _primaryColor,
+          unselectedItemColor: const Color(0xff5f6772),
+          selectedFontSize: 11,
+          unselectedFontSize: 11,
+          selectedLabelStyle: const TextStyle(fontWeight: FontWeight.w700),
+          unselectedLabelStyle: const TextStyle(fontWeight: FontWeight.w500),
+          iconSize: 24,
           items: const [
             BottomNavigationBarItem(
               icon: Icon(Icons.sms_outlined),
@@ -156,7 +177,7 @@ class _HomePageState extends State<HomePage> {
           tooltip: '更多',
           onPressed: () =>
               _open(QuickActionsPage(controller: widget.controller)),
-          icon: const Icon(Icons.add_circle_outline),
+          icon: const Icon(Icons.add_circle_outline, size: 23),
         ),
     ];
   }

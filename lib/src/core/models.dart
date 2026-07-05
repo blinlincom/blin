@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 class ApiResult<T> {
   const ApiResult({
     required this.code,
@@ -244,12 +246,255 @@ class UserSession {
   }
 }
 
+class ImageCaptcha {
+  const ImageCaptcha({this.image = '', this.token = ''});
+
+  final String image;
+  final String token;
+
+  bool get hasImage => image.trim().isNotEmpty;
+
+  factory ImageCaptcha.fromJson(Object? value) {
+    if (value is String) {
+      return ImageCaptcha(image: value);
+    }
+    final map = _objectMap(value);
+    final nested = _objectMap(map['data']);
+    return ImageCaptcha(
+      image:
+          _stringFromKeys(map, const [
+            'image',
+            'img',
+            'url',
+            'captcha',
+            'captcha_img',
+            'captcha_image',
+            'image_base64',
+            'base64',
+          ]) ??
+          _stringFromKeys(nested, const [
+            'image',
+            'img',
+            'url',
+            'captcha',
+            'captcha_img',
+            'captcha_image',
+            'image_base64',
+            'base64',
+          ]) ??
+          '',
+      token:
+          _stringFromKeys(map, const [
+            'token',
+            'captcha_token',
+            'key',
+            'captcha_key',
+            'captcha_id',
+          ]) ??
+          _stringFromKeys(nested, const [
+            'token',
+            'captcha_token',
+            'key',
+            'captcha_key',
+            'captcha_id',
+          ]) ??
+          '',
+    );
+  }
+}
+
+class AppAuthConfig {
+  const AppAuthConfig({
+    this.passwordLoginEnabled = true,
+    this.mobileLoginEnabled = false,
+    this.loginCaptchaEnabled = false,
+    this.registerEnabled = true,
+    this.usernameRegisterEnabled = true,
+    this.mobileRegisterEnabled = false,
+    this.emailRegisterEnabled = false,
+    this.registerCaptchaEnabled = false,
+    this.inviteCodeEnabled = false,
+    this.inviteCodeRequired = false,
+  });
+
+  static const defaults = AppAuthConfig();
+
+  final bool passwordLoginEnabled;
+  final bool mobileLoginEnabled;
+  final bool loginCaptchaEnabled;
+  final bool registerEnabled;
+  final bool usernameRegisterEnabled;
+  final bool mobileRegisterEnabled;
+  final bool emailRegisterEnabled;
+  final bool registerCaptchaEnabled;
+  final bool inviteCodeEnabled;
+  final bool inviteCodeRequired;
+
+  bool get hasAnyLoginMode => passwordLoginEnabled || mobileLoginEnabled;
+  bool get hasAnyRegisterMode =>
+      usernameRegisterEnabled || mobileRegisterEnabled || emailRegisterEnabled;
+
+  factory AppAuthConfig.fromAppInfoMap(Map<String, Object?> map) {
+    final sources = <Map<String, Object?>>[];
+    void collect(Object? value, [int depth = 0]) {
+      if (depth > 4) {
+        return;
+      }
+      final object = _objectMap(value);
+      if (object.isEmpty) {
+        return;
+      }
+      sources.add(object);
+      for (final key in const [
+        'auth',
+        'auth_config',
+        'login',
+        'login_config',
+        'register',
+        'register_config',
+        'account',
+        'account_config',
+        'user',
+        'user_config',
+        'app_exten_info',
+        'extend',
+        'extra',
+      ]) {
+        collect(object[key], depth + 1);
+      }
+    }
+
+    collect(map);
+    final registerEnabled = _boolFromSources(sources, const [
+      'register_enabled',
+      'enable_register',
+      'user_register_enabled',
+      'registration_enabled',
+      'allow_register',
+      'is_register',
+    ], defaultValue: true);
+    final inviteEnabled = _boolFromSources(sources, const [
+      'invite_code_enabled',
+      'invitecode_enabled',
+      'enable_invite_code',
+      'register_invite_enabled',
+      'is_invite_code',
+      'invite_code',
+      'invitecode',
+    ]);
+    return AppAuthConfig(
+      passwordLoginEnabled: _boolFromSources(sources, const [
+        'password_login_enabled',
+        'enable_password_login',
+        'login_password_enabled',
+        'account_login_enabled',
+        'username_login_enabled',
+        'password_login',
+        'account_login',
+        'username_login',
+      ], defaultValue: true),
+      mobileLoginEnabled: _boolFromSources(sources, const [
+        'mobile_login_enabled',
+        'phone_login_enabled',
+        'sms_login_enabled',
+        'enable_mobile_login',
+        'enable_phone_login',
+        'is_mobile_login',
+        'is_phone_login',
+        'mobile_login',
+        'phone_login',
+        'sms_login',
+      ]),
+      loginCaptchaEnabled: _boolFromSources(sources, const [
+        'login_captcha_enabled',
+        'login_image_captcha_enabled',
+        'enable_login_captcha',
+        'enable_login_image_captcha',
+        'is_login_captcha',
+        'login_captcha',
+        'login_img_code',
+        'login_image_code',
+      ]),
+      registerEnabled: registerEnabled,
+      usernameRegisterEnabled:
+          registerEnabled &&
+          _boolFromSources(sources, const [
+            'username_register_enabled',
+            'account_register_enabled',
+            'enable_username_register',
+            'enable_account_register',
+            'is_username_register',
+            'username_register',
+            'account_register',
+          ], defaultValue: true),
+      mobileRegisterEnabled:
+          registerEnabled &&
+          _boolFromSources(sources, const [
+            'mobile_register_enabled',
+            'phone_register_enabled',
+            'sms_register_enabled',
+            'enable_mobile_register',
+            'enable_phone_register',
+            'is_mobile_register',
+            'is_phone_register',
+            'mobile_register',
+            'phone_register',
+            'sms_register',
+          ]),
+      emailRegisterEnabled:
+          registerEnabled &&
+          _boolFromSources(sources, const [
+            'email_register_enabled',
+            'enable_email_register',
+            'is_email_register',
+            'email_register',
+          ]),
+      registerCaptchaEnabled:
+          registerEnabled &&
+          _boolFromSources(sources, const [
+            'register_captcha_enabled',
+            'register_image_captcha_enabled',
+            'enable_register_captcha',
+            'enable_register_image_captcha',
+            'is_register_captcha',
+            'register_captcha',
+            'register_img_code',
+            'register_image_code',
+          ]),
+      inviteCodeEnabled: registerEnabled && inviteEnabled,
+      inviteCodeRequired:
+          registerEnabled &&
+          _boolFromSources(
+            sources,
+            const [
+              'invite_code_required',
+              'invitecode_required',
+              'require_invite_code',
+              'required_invite_code',
+            ],
+            defaultValue:
+                inviteEnabled &&
+                _boolFromSources(sources, const [
+                  'invite_code_must',
+                  'invitecode_must',
+                ]),
+          ),
+    );
+  }
+}
+
 class AppInfo {
-  const AppInfo({required this.name, this.icon = '', this.introduction = ''});
+  const AppInfo({
+    required this.name,
+    this.icon = '',
+    this.introduction = '',
+    this.auth = AppAuthConfig.defaults,
+  });
 
   final String name;
   final String icon;
   final String introduction;
+  final AppAuthConfig auth;
 
   factory AppInfo.fromJson(Object? value) {
     final map = value is Map
@@ -259,6 +504,109 @@ class AppInfo {
       name: map['appname']?.toString() ?? 'BIM',
       icon: map['appicon']?.toString() ?? '',
       introduction: map['application_introduction']?.toString() ?? '',
+      auth: AppAuthConfig.fromAppInfoMap(map),
     );
   }
+}
+
+Map<String, Object?> _objectMap(Object? value) {
+  if (value is Map) {
+    return value.map((key, value) => MapEntry(key.toString(), value));
+  }
+  if (value is String && value.trim().isNotEmpty) {
+    try {
+      final decoded = jsonDecode(value);
+      if (decoded is Map) {
+        return decoded.map((key, value) => MapEntry(key.toString(), value));
+      }
+    } catch (_) {
+      return const {};
+    }
+  }
+  return const {};
+}
+
+String? _stringFromKeys(Map<String, Object?> map, List<String> keys) {
+  for (final key in keys) {
+    final value = _valueForKey(map, key);
+    if (value != null &&
+        value is! Map &&
+        value is! Iterable &&
+        value.toString().trim().isNotEmpty) {
+      return value.toString();
+    }
+  }
+  return null;
+}
+
+bool _boolFromSources(
+  List<Map<String, Object?>> sources,
+  List<String> keys, {
+  bool defaultValue = false,
+}) {
+  for (final source in sources) {
+    for (final key in keys) {
+      final value = _valueForKey(source, key);
+      if (value != null) {
+        return _enabled(value, defaultValue: defaultValue);
+      }
+    }
+  }
+  return defaultValue;
+}
+
+Object? _valueForKey(Map<String, Object?> map, String key) {
+  final wanted = key.toLowerCase();
+  for (final entry in map.entries) {
+    if (entry.key.toLowerCase() == wanted) {
+      return entry.value;
+    }
+  }
+  return null;
+}
+
+bool _enabled(Object? value, {bool defaultValue = false}) {
+  if (value == null) {
+    return defaultValue;
+  }
+  if (value is bool) {
+    return value;
+  }
+  if (value is num) {
+    return value != 0;
+  }
+  final text = value.toString().trim().toLowerCase();
+  if (text.isEmpty) {
+    return defaultValue;
+  }
+  if (const {
+    '1',
+    'true',
+    'yes',
+    'on',
+    'open',
+    'enable',
+    'enabled',
+    '开启',
+    '开',
+    '启用',
+  }.contains(text)) {
+    return true;
+  }
+  if (const {
+    '0',
+    'false',
+    'no',
+    'off',
+    'close',
+    'closed',
+    'disable',
+    'disabled',
+    '关闭',
+    '关',
+    '停用',
+  }.contains(text)) {
+    return false;
+  }
+  return int.tryParse(text) != null ? int.parse(text) != 0 : defaultValue;
 }

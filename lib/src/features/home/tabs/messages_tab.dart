@@ -146,57 +146,43 @@ class _MessagesTabState extends State<MessagesTab> {
       hintText: '搜索',
       onTap: () => _push(context, SearchPage(controller: widget.controller)),
     );
-    if (_loading && _conversations.isEmpty) {
-      return ColoredBox(
-        color: Colors.white,
-        child: Column(
-          children: [
-            header,
-            const Expanded(child: Center(child: CircularProgressIndicator())),
-          ],
-        ),
-      );
-    }
-    if (_error != null && _conversations.isEmpty) {
-      return ColoredBox(
-        color: Colors.white,
-        child: Column(
-          children: [
-            header,
-            Expanded(
-              child: _ErrorState(
-                text: _error!,
-                onRetry: () => _loadConversations(showLoading: true),
-              ),
-            ),
-          ],
-        ),
-      );
-    }
-    if (_conversations.isEmpty) {
-      return ColoredBox(
-        color: Colors.white,
-        child: Column(
-          children: [
-            header,
-            const Expanded(child: _EmptyState(text: '暂无会话')),
-          ],
-        ),
-      );
-    }
     return ColoredBox(
-      color: Colors.white,
-      child: ListView.builder(
-        physics: const ClampingScrollPhysics(),
-        itemCount: _conversations.length + 1,
-        itemBuilder: (context, index) {
-          if (index == 0) {
-            return header;
-          }
-          return _conversationTile(context, _conversations[index - 1]);
-        },
+      color: _surfaceColor,
+      child: RefreshIndicator(
+        onRefresh: () => _loadConversations(showLoading: false),
+        child: ListView.builder(
+          physics: const AlwaysScrollableScrollPhysics(
+            parent: ClampingScrollPhysics(),
+          ),
+          itemCount: _conversations.isEmpty ? 2 : _conversations.length + 1,
+          itemBuilder: (context, index) {
+            if (index == 0) {
+              return header;
+            }
+            if (_conversations.isEmpty) {
+              return SizedBox(
+                height: MediaQuery.sizeOf(context).height * 0.55,
+                child: _emptyBody(),
+              );
+            }
+            return _conversationTile(context, _conversations[index - 1]);
+          },
+        ),
       ),
     );
+  }
+
+  Widget _emptyBody() {
+    if (_loading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (_error != null) {
+      return _ErrorState(
+        text: _error!,
+        onRetry: () => _loadConversations(showLoading: true),
+      );
+    }
+    return const _EmptyState(text: '暂无会话');
   }
 
   Widget _conversationTile(BuildContext context, Map<String, Object?> item) {
@@ -207,6 +193,7 @@ class _MessagesTabState extends State<MessagesTab> {
     final channelType = _channelTypeFromConversation(item);
     final channelId = _conversationChannelId(item, channelType);
     return _ConversationTile(
+      key: ValueKey('conversation-$channelType-$channelId'),
       title: title,
       subtitle: content.isEmpty ? '暂无最新消息' : content,
       time: time,

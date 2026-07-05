@@ -57,6 +57,7 @@ class SessionController extends ChangeNotifier {
 
   UserSession? get session => _session;
   AppInfo? get appInfo => _appInfo;
+  AppAuthConfig get authConfig => _appInfo?.auth ?? AppAuthConfig.defaults;
   String get device => _device;
   bool get booting => _booting;
   bool get busy => _busy;
@@ -231,6 +232,28 @@ class SessionController extends ChangeNotifier {
     });
   }
 
+  Future<void> loginWithMobile({
+    required String mobile,
+    required String code,
+    String captcha = '',
+  }) async {
+    await _runBusy(() async {
+      final session = await _api.loginWithMobile(
+        mobile: mobile,
+        code: code,
+        captcha: captcha,
+        device: _device,
+      );
+      _session = session;
+      _store.writeSession(session);
+      await _refreshLoggedInSession();
+    });
+  }
+
+  Future<ImageCaptcha> loadImageCaptcha({required int type}) {
+    return _api.getImageCaptcha(type: type);
+  }
+
   Future<void> register({
     required String username,
     required String password,
@@ -254,12 +277,16 @@ class SessionController extends ChangeNotifier {
     });
   }
 
-  Future<void> sendEmailCode(String email) {
-    return _runBusy(() => _api.sendEmailCode(email, device: _device));
+  Future<void> sendEmailCode(String email, {int type = 1}) {
+    return _runBusy(
+      () => _api.sendEmailCode(email, device: _device, type: type),
+    );
   }
 
-  Future<void> sendMobileCode(String mobile) {
-    return _runBusy(() => _api.sendMobileCode(mobile, device: _device));
+  Future<void> sendMobileCode(String mobile, {int type = 2}) {
+    return _runBusy(
+      () => _api.sendMobileCode(mobile, device: _device, type: type),
+    );
   }
 
   Future<List<Map<String, Object?>>> loadConversations() async {

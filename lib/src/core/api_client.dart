@@ -61,6 +61,34 @@ class ApiClient {
     return UserSession.fromJson(result.data);
   }
 
+  Future<UserSession> loginWithMobile({
+    required String mobile,
+    required String code,
+    required String device,
+    String captcha = '',
+  }) async {
+    final result = await securePublicPost<Map<String, Object?>>(
+      'mobile_login',
+      device: device,
+      params: {'mobile': mobile, 'code': code, 'captcha': captcha},
+    );
+    if (!result.isSuccess) {
+      throw ApiException(result.message, code: result.code);
+    }
+    return UserSession.fromJson(result.data);
+  }
+
+  Future<ImageCaptcha> getImageCaptcha({required int type}) async {
+    final result = await post<Object?>('get_image_verification_code', {
+      'type': type,
+      'timestamp': _timestamp(),
+    });
+    if (!result.isSuccess) {
+      throw ApiException(result.message, code: result.code);
+    }
+    return ImageCaptcha.fromJson(result.data);
+  }
+
   Future<void> register({
     required String username,
     required String password,
@@ -90,11 +118,15 @@ class ApiClient {
     }
   }
 
-  Future<void> sendEmailCode(String email, {required String device}) async {
+  Future<void> sendEmailCode(
+    String email, {
+    required String device,
+    int type = 1,
+  }) async {
     final result = await securePublicPost<Object?>(
       'get_email_verification_code',
       device: device,
-      params: {'email': email, 'type': '1'},
+      params: {'email': email, 'type': type.toString()},
       expectSecureResponse: false,
     );
     if (!result.isSuccess) {
@@ -102,11 +134,15 @@ class ApiClient {
     }
   }
 
-  Future<void> sendMobileCode(String mobile, {required String device}) async {
+  Future<void> sendMobileCode(
+    String mobile, {
+    required String device,
+    int type = 2,
+  }) async {
     final result = await securePublicPost<Object?>(
       'get_mobile_verification_code',
       device: device,
-      params: {'mobile': mobile, 'type': '2'},
+      params: {'mobile': mobile, 'type': type.toString()},
       expectSecureResponse: false,
     );
     if (!result.isSuccess) {

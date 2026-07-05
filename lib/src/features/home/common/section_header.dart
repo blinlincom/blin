@@ -51,22 +51,6 @@ class _ErrorBlock extends StatelessWidget {
   }
 }
 
-class _ChatError extends StatelessWidget {
-  const _ChatError({required this.text});
-
-  final String text;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(10),
-      color: const Color(0xffffeeee),
-      child: Text(text, style: const TextStyle(color: _dangerColor)),
-    );
-  }
-}
-
 class _InfoBar extends StatelessWidget {
   const _InfoBar({required this.text});
 
@@ -103,16 +87,16 @@ class _SectionHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      height: 30,
+      height: 28,
       alignment: Alignment.centerLeft,
       padding: const EdgeInsets.symmetric(horizontal: 16),
       color: _pageColor,
       child: Text(
         text,
         style: const TextStyle(
-          color: _mutedColor,
+          color: _secondaryTextColor,
           fontSize: 12,
-          fontWeight: FontWeight.w700,
+          fontWeight: FontWeight.w500,
         ),
       ),
     );
@@ -124,7 +108,7 @@ class _GroupGap extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const SizedBox(height: 8);
+    return const ColoredBox(color: _pageColor, child: SizedBox(height: 8));
   }
 }
 
@@ -194,7 +178,7 @@ class _EmptyRow extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 18),
       decoration: const BoxDecoration(
         border: Border(bottom: BorderSide(color: _lightBorderColor)),
       ),
@@ -211,7 +195,14 @@ class _EmptyState extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Center(
-      child: Text(text, style: const TextStyle(color: _mutedColor)),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 32),
+        child: Text(
+          text,
+          textAlign: TextAlign.center,
+          style: const TextStyle(color: _mutedColor, fontSize: 14),
+        ),
+      ),
     );
   }
 }
