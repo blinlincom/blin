@@ -43,22 +43,7 @@ class _MessageBubble extends StatelessWidget {
         color: _bubbleColor(contentType),
         borderRadius: BorderRadius.circular(isImageLike ? 8 : 9),
       ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          Align(alignment: Alignment.centerLeft, widthFactor: 1, child: bubble),
-          if (!isImageLike) ...[
-            const SizedBox(height: 5),
-            _MessageMeta(
-              time: _messageBubbleTime(item),
-              isMe: isMe,
-              status: status,
-              onRetry: onRetry,
-            ),
-          ],
-        ],
-      ),
+      child: bubble,
     );
   }
 
@@ -101,44 +86,8 @@ class _MessageBubble extends StatelessWidget {
       ChatContentTypes.image ||
       ChatContentTypes.gif ||
       ChatContentTypes.sticker => width * 0.62,
-      _ => width * 0.56,
+      _ => width * 0.58,
     };
-  }
-}
-
-class _MessageMeta extends StatelessWidget {
-  const _MessageMeta({
-    required this.time,
-    required this.isMe,
-    required this.status,
-    required this.onRetry,
-  });
-
-  final String time;
-  final bool isMe;
-  final String status;
-  final VoidCallback onRetry;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Text(
-          time,
-          style: TextStyle(
-            color: isMe ? const Color(0xff73946f) : const Color(0xff9198a2),
-            fontSize: 11,
-            fontWeight: FontWeight.w500,
-            height: 1,
-          ),
-        ),
-        if (isMe) ...[
-          const SizedBox(width: 5),
-          _MessageSendStatus(status: status, onRetry: onRetry),
-        ],
-      ],
-    );
   }
 }
 
@@ -539,13 +488,31 @@ class _PaymentPreview extends StatelessWidget {
 }
 
 class _MessageSendStatus extends StatelessWidget {
-  const _MessageSendStatus({required this.status, required this.onRetry});
+  const _MessageSendStatus({
+    required this.status,
+    required this.readText,
+    required this.onRetry,
+  });
 
   final String status;
+  final String readText;
   final VoidCallback onRetry;
 
   @override
   Widget build(BuildContext context) {
+    if (status == 'read' && readText.isNotEmpty) {
+      return Text(
+        readText,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(
+          color: _chatAckColor,
+          fontSize: 11,
+          fontWeight: FontWeight.w700,
+          height: 1,
+        ),
+      );
+    }
     return SizedBox(
       width: 18,
       height: 18,

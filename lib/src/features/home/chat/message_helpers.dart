@@ -45,14 +45,6 @@ String _messageTimeLabel(Map<String, Object?> item) {
   return '${two(time.month)}-${two(time.day)} $clock';
 }
 
-String _messageBubbleTime(Map<String, Object?> item) {
-  final label = _messageTimeLabel(item);
-  if (label.length >= 5) {
-    return label.substring(label.length - 5);
-  }
-  return label;
-}
-
 DateTime? _messageDateTime(Map<String, Object?> item) {
   final raw = _value(item, ['timestamp', 'create_time', 'msg_time']);
   if (raw.isEmpty) {
@@ -93,6 +85,40 @@ String _messageStatus(Map<String, Object?> item) {
     'sent' || 'success' || 'succeeded' || 'delivered' => 'sent',
     _ => status,
   };
+}
+
+String _messageReadStatusText(Map<String, Object?> item) {
+  final channelType = _intValue(item, ['channel_type']);
+  if (channelType != _groupChannelType) {
+    return '';
+  }
+  final payload = _asObjectMap(item['payload']);
+  final sources = [
+    item,
+    _asObjectMap(item['receipt']),
+    payload,
+    _asObjectMap(payload['receipt']),
+    _asObjectMap(payload['read_receipt']),
+  ];
+  var readCount = 0;
+  var total = 0;
+  for (final source in sources) {
+    readCount = max(
+      readCount,
+      _intValue(source, ['read_count', 'reader_count']),
+    );
+    total = max(
+      total,
+      _intValue(source, ['total', 'member_count', 'target_count']),
+    );
+  }
+  if (readCount <= 0) {
+    return '';
+  }
+  if (total > 0) {
+    return '$readCount/$total 已读';
+  }
+  return '$readCount人已读';
 }
 
 bool _hasReadReceiptState(Map<String, Object?> item) {

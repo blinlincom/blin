@@ -183,7 +183,7 @@ class _MessagesTabState extends State<MessagesTab> {
   Widget _conversationTile(BuildContext context, Map<String, Object?> item) {
     final title = _conversationTitle(item);
     final content = _conversationSubtitle(item);
-    final time = item['msg_time']?.toString() ?? '';
+    final time = _conversationTimeText(item);
     final unread = _intValue(item, ['unread_quantity']);
     final channelType = _channelTypeFromConversation(item);
     final channelId = _conversationChannelId(item, channelType);

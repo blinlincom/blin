@@ -32,6 +32,56 @@ String _conversationSubtitle(Map<String, Object?> item) {
   return content;
 }
 
+String _conversationTimeText(Map<String, Object?> item) {
+  final time = _conversationDateTime(item);
+  if (time == null) {
+    return '';
+  }
+  final now = DateTime.now();
+  final day = DateTime(time.year, time.month, time.day);
+  final today = DateTime(now.year, now.month, now.day);
+  final yesterday = today.subtract(const Duration(days: 1));
+  String two(int value) => value.toString().padLeft(2, '0');
+
+  if (day == today) {
+    return '${two(time.hour)}:${two(time.minute)}';
+  }
+  if (day == yesterday) {
+    return '昨天';
+  }
+
+  final weekStart = today.subtract(Duration(days: today.weekday - 1));
+  if (day.isAfter(weekStart.subtract(const Duration(days: 1))) &&
+      day.isBefore(today)) {
+    return _weekdayText(time.weekday);
+  }
+  if (time.year == now.year) {
+    return '${time.month}月${time.day}日';
+  }
+  return '${time.year}年${time.month}月${time.day}日';
+}
+
+DateTime? _conversationDateTime(Map<String, Object?> item) {
+  final raw = _value(item, ['msg_time', 'timestamp', 'create_time']);
+  if (raw.isEmpty) {
+    return null;
+  }
+  return _parseUiTime(raw);
+}
+
+String _weekdayText(int weekday) {
+  return switch (weekday) {
+    DateTime.monday => '星期一',
+    DateTime.tuesday => '星期二',
+    DateTime.wednesday => '星期三',
+    DateTime.thursday => '星期四',
+    DateTime.friday => '星期五',
+    DateTime.saturday => '星期六',
+    DateTime.sunday => '星期日',
+    _ => '',
+  };
+}
+
 String _redPacketConversationText(
   Map<String, Object?> payload,
   String content,

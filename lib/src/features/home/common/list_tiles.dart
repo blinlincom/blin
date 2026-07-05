@@ -229,35 +229,47 @@ class _ConversationTile extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 8),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Text(
-                  time,
-                  style: const TextStyle(color: _mutedColor, fontSize: 12),
-                ),
-                const SizedBox(height: 8),
-                if (unread > 0)
-                  Container(
-                    constraints: const BoxConstraints(minWidth: 18),
-                    height: 18,
-                    padding: const EdgeInsets.symmetric(horizontal: 5),
-                    alignment: Alignment.center,
-                    decoration: BoxDecoration(
-                      color: const Color(0xffff3b30),
-                      borderRadius: BorderRadius.circular(9),
-                    ),
-                    child: Text(
-                      unread > 99 ? '99+' : unread.toString(),
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 11,
-                        fontWeight: FontWeight.w700,
-                      ),
+            SizedBox(
+              width: 88,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                    time,
+                    textAlign: TextAlign.right,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: Color(0xffb1b6c0),
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w500,
+                      height: 1.15,
+                      fontFeatures: [FontFeature.tabularFigures()],
                     ),
                   ),
-              ],
+                  const SizedBox(height: 8),
+                  if (unread > 0)
+                    Container(
+                      constraints: const BoxConstraints(minWidth: 18),
+                      height: 18,
+                      padding: const EdgeInsets.symmetric(horizontal: 5),
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        color: const Color(0xffff3b30),
+                        borderRadius: BorderRadius.circular(9),
+                      ),
+                      child: Text(
+                        unread > 99 ? '99+' : unread.toString(),
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
             ),
           ],
         ),

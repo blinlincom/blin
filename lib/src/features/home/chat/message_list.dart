@@ -29,6 +29,20 @@ class _MessageRow extends StatelessWidget {
     final avatarUrl = isMe
         ? currentUserAvatarUrl
         : _messageSenderAvatarUrl(item);
+    final contentType = _messageContentType(item);
+    final status = _messageStatus(item);
+    final readText = _messageReadStatusText(item);
+    final statusInsideContent =
+        contentType == ChatContentTypes.image ||
+        contentType == ChatContentTypes.video;
+    final showExternalStatus =
+        isMe &&
+        !statusInsideContent &&
+        (status == 'sending' ||
+            status == 'queued' ||
+            status == 'sent' ||
+            status == 'read' ||
+            status == 'failed');
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 5),
       child: Row(
@@ -65,13 +79,24 @@ class _MessageRow extends StatelessWidget {
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
+                    if (showExternalStatus) ...[
+                      ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 74),
+                        child: _MessageSendStatus(
+                          status: status,
+                          readText: readText,
+                          onRetry: onRetry,
+                        ),
+                      ),
+                      const SizedBox(width: 5),
+                    ],
                     GestureDetector(
                       onTap: onTap,
                       onLongPress: onLongPress,
                       child: _MessageBubble(
                         item: item,
                         isMe: isMe,
-                        status: _messageStatus(item),
+                        status: status,
                         redPacketReceiving: redPacketReceiving,
                         onRetry: onRetry,
                       ),
