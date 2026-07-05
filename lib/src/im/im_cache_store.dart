@@ -305,7 +305,12 @@ class ImCacheStore {
     final current = readProfile(uid: uid, userId: userId);
     _kv.encodeString(
       '$_profilePrefix:$uid:$userId',
-      jsonEncode({...current, ...profile, 'userid': userId, 'id': userId}),
+      jsonEncode({
+        ...current,
+        ..._nonEmptyFields(profile),
+        'userid': userId,
+        'id': userId,
+      }),
     );
   }
 
@@ -433,6 +438,24 @@ class ImCacheStore {
 
   Map<String, Object?> _normalizeMap(Map<dynamic, dynamic> map) {
     return map.map((key, value) => MapEntry(key.toString(), value));
+  }
+
+  Map<String, Object?> _nonEmptyFields(Map<String, Object?> map) {
+    return Map<String, Object?>.fromEntries(
+      map.entries.where((entry) {
+        final value = entry.value;
+        if (value == null) {
+          return false;
+        }
+        if (value is String) {
+          return value.trim().isNotEmpty;
+        }
+        if (value is Iterable || value is Map) {
+          return true;
+        }
+        return value.toString().trim().isNotEmpty;
+      }),
+    );
   }
 
   String _profileUserId(Map<String, Object?> item) {

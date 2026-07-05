@@ -227,9 +227,14 @@ class GatewayStreamClient {
         data: {
           'type': frame.type,
           'has_cursor': frame.cursor.isNotEmpty,
+          'cursor_len': frame.cursor.length,
           'channel_id': frame.channelId,
           'channel_type': frame.channelType,
           'client_msg_no': frame.clientMsgNo,
+          'message_id': frame.messageId,
+          'message_seq': frame.messageSeq,
+          'timestamp': frame.timestamp,
+          'payload': frame.payload,
         },
       );
       onFrame(frame);

@@ -439,7 +439,9 @@ class _ContactsTabState extends State<ContactsTab> {
   void initState() {
     super.initState();
     widget.controller.addListener(_onControllerChanged);
-    _friends = widget.controller.cachedFriends();
+    _friends = widget.controller.hasLoadedFriends
+        ? widget.controller.cachedFriends(allowDisk: false)
+        : const [];
     _precacheContactAvatars(context, _friends, const []);
     _refresh(showLoading: _friends.isEmpty);
   }
@@ -451,7 +453,10 @@ class _ContactsTabState extends State<ContactsTab> {
   }
 
   void _onControllerChanged() {
-    final friends = widget.controller.cachedFriends();
+    if (!widget.controller.hasLoadedFriends) {
+      return;
+    }
+    final friends = widget.controller.cachedFriends(allowDisk: false);
     if (_sameMapList(_friends, friends)) {
       return;
     }
@@ -471,7 +476,7 @@ class _ContactsTabState extends State<ContactsTab> {
       });
     }
     try {
-      final friends = await widget.controller.loadFriends();
+      final friends = await widget.controller.loadFriends(forceRefresh: true);
       if (!mounted) {
         return;
       }
@@ -577,7 +582,7 @@ class _ContactsTabState extends State<ContactsTab> {
               for (final item in _friends)
                 _ContactTile(
                   title: _friendTitle(item),
-                  subtitle: '',
+                  subtitle: _friendSubtitle(item),
                   trailing: '',
                   isGroup: false,
                   avatarUrl: _friendAvatarUrl(item),
@@ -928,7 +933,9 @@ class _SearchPageState extends State<SearchPage> {
   @override
   void initState() {
     super.initState();
-    _friends = widget.controller.cachedFriends();
+    _friends = widget.controller.hasLoadedFriends
+        ? widget.controller.cachedFriends(allowDisk: false)
+        : const [];
     _refreshLocal(showLoading: _friends.isEmpty);
   }
 
@@ -946,7 +953,7 @@ class _SearchPageState extends State<SearchPage> {
       });
     }
     try {
-      final friends = await widget.controller.loadFriends();
+      final friends = await widget.controller.loadFriends(forceRefresh: true);
       if (!mounted) {
         return;
       }
@@ -2407,6 +2414,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   late int _conversationRevision;
   late int _messageRevision;
   StreamSubscription<BusinessImMessageEvent>? _messageSub;
+  StreamSubscription<BusinessImPresenceEvent>? _presenceSub;
   bool _didInitialScroll = false;
   bool _peerOnline = false;
   bool _onlineStatusLoading = false;
@@ -2416,6 +2424,8 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   bool _groupPresenceLoading = false;
   int _groupPresenceToken = 0;
   final Set<String> _burnTriggeredClientMsgNos = <String>{};
+  final Set<String> _receivingRedPacketIds = <String>{};
+  final Set<String> _receivingTransferIds = <String>{};
 
   bool get _isGroup => widget.channelType == _groupChannelType;
   String get _groupId =>
@@ -2432,6 +2442,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     _messageRevision = _currentMessageRevision();
     widget.controller.addListener(_onControllerChanged);
     _messageSub = widget.controller.messageEvents.listen(_onMessageEvent);
+    _presenceSub = widget.controller.presenceEvents.listen(_onPresenceEvent);
     _inputFocusNode.addListener(_onInputFocusChanged);
     unawaited(
       widget.controller.openConversation(
@@ -2485,10 +2496,12 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     if (oldWidget.controller != widget.controller) {
       oldWidget.controller.removeListener(_onControllerChanged);
       _messageSub?.cancel();
+      _presenceSub?.cancel();
       _conversationRevision = widget.controller.conversationVersion;
       _messageRevision = _currentMessageRevision();
       widget.controller.addListener(_onControllerChanged);
       _messageSub = widget.controller.messageEvents.listen(_onMessageEvent);
+      _presenceSub = widget.controller.presenceEvents.listen(_onPresenceEvent);
     } else if (oldWidget.channelId != widget.channelId ||
         oldWidget.channelType != widget.channelType) {
       _conversationRevision = widget.controller.conversationVersion;
@@ -2496,6 +2509,8 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       _messages = const [];
       _didInitialScroll = false;
       _burnTriggeredClientMsgNos.clear();
+      _receivingRedPacketIds.clear();
+      _receivingTransferIds.clear();
       _groupMuteState = const {};
       _peerOnline = false;
       _onlineStatusLoading = false;
@@ -2525,14 +2540,17 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     final nextConversation = widget.controller.conversationVersion;
     final nextMessage = _currentMessageRevision();
     final muteChanged = _refreshGroupMuteState();
+    final messageChanged = nextMessage != _messageRevision;
     if (nextConversation == _conversationRevision &&
-        nextMessage == _messageRevision &&
+        !messageChanged &&
         !muteChanged) {
       return;
     }
     _conversationRevision = nextConversation;
     _messageRevision = nextMessage;
-    _loadMessagesIntoState(showLoading: false);
+    if (messageChanged) {
+      _loadMessagesIntoState(showLoading: false);
+    }
   }
 
   bool _refreshGroupMuteState() {
@@ -2752,6 +2770,42 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     );
   }
 
+  void _onPresenceEvent(BusinessImPresenceEvent event) {
+    if (!mounted || _isGroup) {
+      return;
+    }
+    final receiverId = _receiverId;
+    final receiverUserId = _privateReceiverIdFromChannel(receiverId);
+    final eventUserId = event.userId.isNotEmpty
+        ? event.userId
+        : _privateReceiverIdFromChannel(event.uid);
+    final eventUid = event.uid.isNotEmpty
+        ? event.uid
+        : _uidFromUserId(eventUserId);
+    if (receiverId.isEmpty ||
+        eventUserId.isEmpty ||
+        (eventUserId != receiverUserId && eventUid != receiverId)) {
+      return;
+    }
+    if (_peerOnline == event.online && !_onlineStatusLoading) {
+      return;
+    }
+    AppLogger.info(
+      'ui',
+      'peer presence updated',
+      data: {
+        'receiver_id': receiverId,
+        'uid': event.uid,
+        'user_id': event.userId,
+        'online': event.online,
+      },
+    );
+    setState(() {
+      _peerOnline = event.online;
+      _onlineStatusLoading = false;
+    });
+  }
+
   int _currentMessageRevision() {
     return widget.controller.messageVersion(
       channelId: widget.channelId,
@@ -2794,11 +2848,12 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         messages,
         widget.controller.session?.avatar ?? '',
       );
+      final nextMessages = _stableLoadedMessages(messages, showLoading);
       setState(() {
-        _messages = messages;
+        _messages = nextMessages;
         _messagesLoading = false;
       });
-      _scheduleBurnAfterReadForMessages(messages);
+      _scheduleBurnAfterReadForMessages(nextMessages);
       if (showLoading && !_didInitialScroll) {
         _didInitialScroll = true;
         _scrollToBottom(animated: false);
@@ -2816,10 +2871,37 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     }
   }
 
+  List<Map<String, Object?>> _stableLoadedMessages(
+    List<Map<String, Object?>> loaded,
+    bool showLoading,
+  ) {
+    if (loaded.isEmpty && _messages.isNotEmpty && !showLoading) {
+      AppLogger.warn(
+        'ui',
+        'skip empty chat refresh over visible messages',
+        data: {
+          'channel_id': widget.channelId,
+          'channel_type': widget.channelType,
+          'current_count': _messages.length,
+        },
+      );
+      return _messages;
+    }
+    if (_messages.isEmpty) {
+      return loaded;
+    }
+    var merged = _messages;
+    for (final item in loaded) {
+      merged = _mergeMessageList(merged, item, limit: 200);
+    }
+    return merged;
+  }
+
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _messageSub?.cancel();
+    _presenceSub?.cancel();
     _scrollController.dispose();
     _inputFocusNode.removeListener(_onInputFocusChanged);
     _inputFocusNode.dispose();
@@ -2852,7 +2934,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
             (item) => _value(item, ['client_msg_no']) == clientMsgNo,
           );
     if (index >= 0) {
-      next[index] = {...next[index], ...incoming};
+      next[index] = _mergeUiMessage(next[index], incoming);
     } else {
       next.add(Map<String, Object?>.from(incoming));
     }
@@ -2868,6 +2950,27 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       return next;
     }
     return next.sublist(next.length - limit);
+  }
+
+  Map<String, Object?> _mergeUiMessage(
+    Map<String, Object?> existing,
+    Map<String, Object?> incoming,
+  ) {
+    final merged = <String, Object?>{...existing, ...incoming};
+    final existingPayload = _asObjectMap(existing['payload']);
+    final incomingPayload = _asObjectMap(incoming['payload']);
+    if (existingPayload.isNotEmpty || incomingPayload.isNotEmpty) {
+      final payload = <String, Object?>{...existingPayload, ...incomingPayload};
+      for (final key in ['red_packet', 'transfer', 'media', 'receipt']) {
+        final existingNested = _asObjectMap(existingPayload[key]);
+        final incomingNested = _asObjectMap(incomingPayload[key]);
+        if (existingNested.isNotEmpty || incomingNested.isNotEmpty) {
+          payload[key] = {...existingNested, ...incomingNested};
+        }
+      }
+      merged['payload'] = payload;
+    }
+    return merged;
   }
 
   bool _shouldAutoScrollForMessage(BusinessImMessageEvent event) {
@@ -2966,7 +3069,6 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                     onRecall: _recallSelected,
                     onDelete: _deleteSelected,
                     onBurn: _burnSelected,
-                    onReceiveRedPacket: _receiveSelectedRedPacket,
                     onReceiveTransfer: _receiveSelectedTransfer,
                     onClear: () => setState(() {
                       _selectedClientMsgNo = '';
@@ -3000,6 +3102,14 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                                   currentUserAvatarUrl:
                                       widget.controller.session?.avatar ?? '',
                                   onLongPress: () => _selectMessage(item),
+                                  onTap:
+                                      _messageContentType(item) ==
+                                          ChatContentTypes.redPacket
+                                      ? () => _receiveRedPacket(item)
+                                      : null,
+                                  redPacketReceiving: _redPacketIsReceiving(
+                                    item,
+                                  ),
                                   onRetry: () => _retryMessage(item),
                                 ),
                               ],
@@ -3477,37 +3587,252 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     });
   }
 
-  Future<void> _receiveSelectedRedPacket() async {
-    final id = _nestedValue(_selectedPayload, [
-      'red_packet.red_packet_id',
-      'red_packet_id',
-    ]);
-    if (id.isEmpty) {
-      setState(() => _error = '当前消息没有红包 ID');
+  Future<void> _receiveRedPacket(Map<String, Object?> item) async {
+    AppLogger.info(
+      'ui',
+      'red packet receive tapped',
+      data: {
+        'channel_id': widget.channelId,
+        'channel_type': widget.channelType,
+        'client_msg_no': _value(item, ['client_msg_no']),
+        'is_me': item['is_me'] == true,
+        'payload': _asObjectMap(item['payload']),
+      },
+    );
+    if (item['is_me'] == true) {
+      setState(() {
+        _error = null;
+        _message = '不能领取自己发送的红包';
+      });
       return;
     }
-    await _runAction(() async {
+    final payload = _asObjectMap(item['payload']);
+    final redPacketId = _redPacketReceiveId(payload);
+    if (redPacketId.isEmpty) {
+      final rawId = _redPacketRawId(payload);
+      AppLogger.warn(
+        'ui',
+        'red packet receive blocked',
+        data: {
+          'reason': rawId.isEmpty ? 'empty_id' : 'invalid_id',
+          'raw_id': rawId,
+          'channel_id': widget.channelId,
+          'channel_type': widget.channelType,
+          'client_msg_no': _value(item, ['client_msg_no']),
+          'payload': payload,
+        },
+      );
+      setState(() {
+        _message = '';
+        _error = rawId.isEmpty ? '红包发送确认中，请稍后再试' : '红包数据异常，请重新进入会话';
+      });
+      return;
+    }
+    final unavailableText = _redPacketUnavailableText(payload);
+    if (unavailableText.isNotEmpty) {
+      AppLogger.info(
+        'ui',
+        'red packet receive blocked',
+        data: {
+          'reason': unavailableText,
+          'red_packet_id': redPacketId,
+          'channel_id': widget.channelId,
+          'channel_type': widget.channelType,
+          'client_msg_no': _value(item, ['client_msg_no']),
+        },
+      );
+      setState(() {
+        _error = null;
+        _message = unavailableText;
+      });
+      return;
+    }
+    if (_receivingRedPacketIds.contains(redPacketId)) {
+      AppLogger.info(
+        'ui',
+        'red packet receive duplicate ignored',
+        data: {'red_packet_id': redPacketId},
+      );
+      return;
+    }
+    setState(() {
+      _receivingRedPacketIds.add(redPacketId);
+      _error = null;
+      _message = '';
+    });
+    try {
       final result = await widget.controller.receiveRedPacket(
-        redPacketId: id,
+        redPacketId: redPacketId,
         group: _isGroup,
       );
-      _message = _friendlyResult(result, successText: '红包已领取');
-    });
+      AppLogger.info(
+        'ui',
+        'red packet receive api success',
+        data: {
+          'red_packet_id': redPacketId,
+          'channel_id': widget.channelId,
+          'channel_type': widget.channelType,
+          'client_msg_no': _value(item, ['client_msg_no']),
+          'result': result,
+        },
+      );
+      final clientMsgNo = _value(item, ['client_msg_no']);
+      await widget.controller.markRedPacketReceivedLocal(
+        channelId: widget.channelId,
+        channelType: widget.channelType,
+        clientMsgNo: clientMsgNo,
+        redPacketId: redPacketId,
+        result: result,
+      );
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _message = _friendlyResult(result, successText: '红包已领取');
+        _conversationRevision = widget.controller.conversationVersion;
+        _messageRevision = _currentMessageRevision();
+      });
+      await _loadMessagesIntoState(showLoading: false);
+    } catch (error) {
+      AppLogger.error(
+        'ui',
+        'red packet receive failed',
+        error: error,
+        data: {
+          'red_packet_id': redPacketId,
+          'channel_id': widget.channelId,
+          'channel_type': widget.channelType,
+          'client_msg_no': _value(item, ['client_msg_no']),
+        },
+      );
+      if (mounted) {
+        setState(() => _error = error.toString());
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _receivingRedPacketIds.remove(redPacketId));
+      }
+    }
+  }
+
+  bool _redPacketIsReceiving(Map<String, Object?> item) {
+    final id = _redPacketReceiveId(_asObjectMap(item['payload']));
+    return id.isNotEmpty && _receivingRedPacketIds.contains(id);
   }
 
   Future<void> _receiveSelectedTransfer() async {
-    final id = _nestedValue(_selectedPayload, [
-      'transfer.transfer_id',
-      'transfer_id',
-    ]);
+    AppLogger.info(
+      'ui',
+      'transfer receive tapped',
+      data: {
+        'channel_id': widget.channelId,
+        'channel_type': widget.channelType,
+        'client_msg_no': _selectedClientMsgNo,
+        'payload': _selectedPayload,
+      },
+    );
+    final id = _transferReceiveId(_selectedPayload);
     if (id.isEmpty) {
-      setState(() => _error = '当前消息没有转账 ID');
+      final rawId = _transferRawId(_selectedPayload);
+      AppLogger.warn(
+        'ui',
+        'transfer receive blocked',
+        data: {
+          'reason': rawId.isEmpty ? 'empty_id' : 'invalid_id',
+          'raw_id': rawId,
+          'channel_id': widget.channelId,
+          'channel_type': widget.channelType,
+          'client_msg_no': _selectedClientMsgNo,
+          'payload': _selectedPayload,
+        },
+      );
+      setState(() {
+        _message = '';
+        _error = rawId.isEmpty ? '转账发送确认中，请稍后再试' : '转账数据异常，请重新进入会话';
+      });
       return;
     }
-    await _runAction(() async {
-      final result = await widget.controller.receiveTransfer(id);
-      _message = _friendlyResult(result, successText: '转账已收款');
+    final unavailableText = _transferUnavailableText(_selectedPayload);
+    if (unavailableText.isNotEmpty) {
+      AppLogger.info(
+        'ui',
+        'transfer receive blocked',
+        data: {
+          'reason': unavailableText,
+          'transfer_id': id,
+          'channel_id': widget.channelId,
+          'channel_type': widget.channelType,
+          'client_msg_no': _selectedClientMsgNo,
+        },
+      );
+      setState(() {
+        _error = null;
+        _message = unavailableText;
+      });
+      return;
+    }
+    if (_receivingTransferIds.contains(id)) {
+      AppLogger.info(
+        'ui',
+        'transfer receive duplicate ignored',
+        data: {'transfer_id': id},
+      );
+      return;
+    }
+    setState(() {
+      _receivingTransferIds.add(id);
+      _error = null;
+      _message = '';
     });
+    try {
+      final result = await widget.controller.receiveTransfer(id);
+      AppLogger.info(
+        'ui',
+        'transfer receive api success',
+        data: {
+          'transfer_id': id,
+          'channel_id': widget.channelId,
+          'channel_type': widget.channelType,
+          'client_msg_no': _selectedClientMsgNo,
+          'result': result,
+        },
+      );
+      await widget.controller.markTransferReceivedLocal(
+        channelId: widget.channelId,
+        channelType: widget.channelType,
+        clientMsgNo: _selectedClientMsgNo,
+        transferId: id,
+        result: result,
+      );
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _message = _friendlyResult(result, successText: '转账已收款');
+        _conversationRevision = widget.controller.conversationVersion;
+        _messageRevision = _currentMessageRevision();
+      });
+      await _loadMessagesIntoState(showLoading: false);
+    } catch (error) {
+      AppLogger.error(
+        'ui',
+        'transfer receive failed',
+        error: error,
+        data: {
+          'transfer_id': id,
+          'channel_id': widget.channelId,
+          'channel_type': widget.channelType,
+          'client_msg_no': _selectedClientMsgNo,
+        },
+      );
+      if (mounted) {
+        setState(() => _error = error.toString());
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _receivingTransferIds.remove(id));
+      }
+    }
   }
 
   Future<void> _openGroupMembers() async {
@@ -4990,6 +5315,8 @@ class _MessageRow extends StatelessWidget {
     required this.showSenderName,
     required this.currentUserAvatarUrl,
     required this.onLongPress,
+    required this.onTap,
+    required this.redPacketReceiving,
     required this.onRetry,
   });
 
@@ -4997,6 +5324,8 @@ class _MessageRow extends StatelessWidget {
   final bool showSenderName;
   final String currentUserAvatarUrl;
   final VoidCallback onLongPress;
+  final VoidCallback? onTap;
+  final bool redPacketReceiving;
   final VoidCallback onRetry;
 
   @override
@@ -5039,11 +5368,13 @@ class _MessageRow extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
                     GestureDetector(
+                      onTap: onTap,
                       onLongPress: onLongPress,
                       child: _MessageBubble(
                         item: item,
                         isMe: isMe,
                         status: _messageStatus(item),
+                        redPacketReceiving: redPacketReceiving,
                         onRetry: onRetry,
                       ),
                     ),
@@ -5319,12 +5650,14 @@ class _MessageBubble extends StatelessWidget {
     required this.item,
     required this.isMe,
     required this.status,
+    required this.redPacketReceiving,
     required this.onRetry,
   });
 
   final Map<String, Object?> item;
   final bool isMe;
   final String status;
+  final bool redPacketReceiving;
   final VoidCallback onRetry;
 
   @override
@@ -5342,6 +5675,7 @@ class _MessageBubble extends StatelessWidget {
       payload: payload,
       isMe: isMe,
       status: status,
+      redPacketReceiving: redPacketReceiving,
     );
     return Container(
       constraints: BoxConstraints(
@@ -5437,89 +5771,108 @@ class _MessageMeta extends StatelessWidget {
 }
 
 class _RedPacketPreview extends StatelessWidget {
-  const _RedPacketPreview({required this.remark});
+  const _RedPacketPreview({
+    required this.remark,
+    required this.statusText,
+    required this.receiving,
+  });
 
   final String remark;
+  final String statusText;
+  final bool receiving;
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      width: 236,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Container(
-            padding: const EdgeInsets.fromLTRB(16, 13, 16, 12),
-            decoration: const BoxDecoration(
-              gradient: LinearGradient(
-                colors: [Color(0xffffa34c), Color(0xffff963c)],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              ),
-              borderRadius: BorderRadius.vertical(top: Radius.circular(8)),
-            ),
-            child: Row(
-              children: [
-                Container(
-                  width: 47,
-                  height: 52,
-                  alignment: Alignment.center,
-                  decoration: const BoxDecoration(
-                    color: Color(0xffe94632),
-                    borderRadius: BorderRadius.all(Radius.circular(7)),
+    final text = remark.isEmpty ? '恭喜发财，大吉大利' : remark;
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(8),
+      child: SizedBox(
+        width: 226,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Container(
+              padding: const EdgeInsets.fromLTRB(14, 12, 14, 11),
+              color: const Color(0xffff9f43),
+              child: Row(
+                children: [
+                  Container(
+                    width: 42,
+                    height: 46,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: const Color(0xffe4422f),
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(color: const Color(0xffffd878)),
+                    ),
+                    child: receiving
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Color(0xffffd878),
+                            ),
+                          )
+                        : const Icon(
+                            Icons.redeem,
+                            color: Color(0xffffd878),
+                            size: 22,
+                          ),
                   ),
-                  child: const Icon(
-                    Icons.redeem,
-                    color: Color(0xffffd35b),
-                    size: 22,
-                  ),
-                ),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        remark.isEmpty ? '恭喜发财，大吉大利' : remark,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 14,
-                          fontWeight: FontWeight.w700,
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          text,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 14.5,
+                            fontWeight: FontWeight.w800,
+                            height: 1.15,
+                          ),
                         ),
-                      ),
-                      const SizedBox(height: 8),
-                      const Text(
-                        'BIM红包',
-                        style: TextStyle(color: Colors.white, fontSize: 12),
-                      ),
-                    ],
+                        const SizedBox(height: 7),
+                        Text(
+                          statusText,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: Color(0xfffff3dc),
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            height: 1,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-                ),
-              ],
-            ),
-          ),
-          Container(
-            height: 28,
-            alignment: Alignment.centerLeft,
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            decoration: const BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.vertical(bottom: Radius.circular(8)),
-            ),
-            child: const Text(
-              'BIM红包',
-              style: TextStyle(
-                color: Color(0xffaeb4bd),
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
+                ],
               ),
             ),
-          ),
-        ],
+            Container(
+              height: 27,
+              alignment: Alignment.centerLeft,
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              color: Colors.white,
+              child: const Text(
+                'BIM红包',
+                style: TextStyle(
+                  color: Color(0xff9da5b1),
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  height: 1,
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -5532,6 +5885,7 @@ class _MessageBubbleContent extends StatelessWidget {
     required this.payload,
     required this.isMe,
     required this.status,
+    required this.redPacketReceiving,
   });
 
   final String contentType;
@@ -5539,6 +5893,7 @@ class _MessageBubbleContent extends StatelessWidget {
   final Map<String, Object?> payload;
   final bool isMe;
   final String status;
+  final bool redPacketReceiving;
 
   @override
   Widget build(BuildContext context) {
@@ -5581,6 +5936,11 @@ class _MessageBubbleContent extends StatelessWidget {
       ),
       ChatContentTypes.redPacket => _RedPacketPreview(
         remark: _redPacketRemark(payload),
+        statusText: _redPacketStatusText(
+          payload,
+          receiving: redPacketReceiving,
+        ),
+        receiving: redPacketReceiving,
       ),
       _ => Text(
         content.isEmpty ? '[消息]' : content,
@@ -6374,7 +6734,6 @@ class _SelectedMessageBar extends StatelessWidget {
     required this.onRecall,
     required this.onDelete,
     required this.onBurn,
-    required this.onReceiveRedPacket,
     required this.onReceiveTransfer,
     required this.onClear,
   });
@@ -6384,7 +6743,6 @@ class _SelectedMessageBar extends StatelessWidget {
   final VoidCallback onRecall;
   final VoidCallback onDelete;
   final VoidCallback onBurn;
-  final VoidCallback onReceiveRedPacket;
   final VoidCallback onReceiveTransfer;
   final VoidCallback onClear;
 
@@ -6408,7 +6766,6 @@ class _SelectedMessageBar extends StatelessWidget {
           _MiniButton(label: '撤回', onTap: onRecall),
           _MiniButton(label: '删除', onTap: onDelete),
           _MiniButton(label: '焚毁', onTap: onBurn),
-          _MiniButton(label: '领红包', onTap: onReceiveRedPacket),
           _MiniButton(label: '收转账', onTap: onReceiveTransfer),
           IconButton(
             tooltip: '取消选择',
@@ -7434,6 +7791,101 @@ String _redPacketRemark(Map<String, Object?> payload, {String fallback = ''}) {
   return _isValidRedPacketRemark(fallback) ? fallback.trim() : '';
 }
 
+String _redPacketRawId(Map<String, Object?> payload) {
+  return _nestedValue(payload, [
+    'red_packet.red_packet_id',
+    'red_packet.packet_id',
+    'red_packet.id',
+    'red_packet_id',
+    'packet_id',
+  ]);
+}
+
+String _redPacketReceiveId(Map<String, Object?> payload) {
+  final raw = _redPacketRawId(payload);
+  final parsed = int.tryParse(raw);
+  return parsed != null && parsed > 0 ? parsed.toString() : '';
+}
+
+String _redPacketUnavailableText(Map<String, Object?> payload) {
+  final redPacket = _asObjectMap(payload['red_packet']);
+  if (_boolValue(redPacket['received_by_me']) ||
+      _boolValue(payload['received_by_me'])) {
+    return '红包已领取';
+  }
+  final status = _value(redPacket, [
+    'status',
+  ], fallback: _value(payload, ['status']));
+  if (status.isNotEmpty && status != '0') {
+    return '红包已领取或已失效';
+  }
+  final quantity = _intValue(redPacket, ['quantity']);
+  final receiveCount = _intValue(redPacket, ['receive_count']);
+  final remaining = _intValue(redPacket, ['remaining_amount']);
+  if (quantity > 0 && receiveCount >= quantity) {
+    return '红包已领取完';
+  }
+  if (quantity > 0 && remaining == 0 && receiveCount > 0) {
+    return '红包已领取完';
+  }
+  return '';
+}
+
+String _redPacketStatusText(
+  Map<String, Object?> payload, {
+  required bool receiving,
+}) {
+  if (receiving) {
+    return '领取中';
+  }
+  final unavailable = _redPacketUnavailableText(payload);
+  if (unavailable.isNotEmpty) {
+    return unavailable;
+  }
+  if (_redPacketReceiveId(payload).isEmpty) {
+    return '发送确认中';
+  }
+  final redPacket = _asObjectMap(payload['red_packet']);
+  final quantity = _intValue(redPacket, ['quantity']);
+  final receiveCount = _intValue(redPacket, ['receive_count']);
+  if (quantity > 1 && receiveCount > 0) {
+    return '$receiveCount/$quantity 已领取';
+  }
+  return '点击领取';
+}
+
+String _transferRawId(Map<String, Object?> payload) {
+  return _nestedValue(payload, [
+    'transfer.transfer_id',
+    'transfer.id',
+    'transfer_id',
+  ]);
+}
+
+String _transferReceiveId(Map<String, Object?> payload) {
+  final raw = _transferRawId(payload);
+  final parsed = int.tryParse(raw);
+  return parsed != null && parsed > 0 ? parsed.toString() : '';
+}
+
+String _transferUnavailableText(Map<String, Object?> payload) {
+  final transfer = _asObjectMap(payload['transfer']);
+  if (_boolValue(transfer['received_by_me']) ||
+      _boolValue(payload['received_by_me'])) {
+    return '转账已收款';
+  }
+  final status = _value(transfer, [
+    'status',
+  ], fallback: _value(payload, ['status']));
+  if (status == '1' || status == 'received' || status == '已收款') {
+    return '转账已收款';
+  }
+  if (status == '2' || status == 'expired' || status == '已过期') {
+    return '转账已过期';
+  }
+  return '';
+}
+
 bool _isValidRedPacketRemark(String value) {
   final text = value.trim();
   if (text.isEmpty ||
@@ -7694,9 +8146,34 @@ String _friendSubtitle(Map<String, Object?> item) {
     'bio',
   ], fallback: _value(item, ['signature']));
   return [
+    _friendPresenceText(item),
     if (username.isNotEmpty) '用户名 $username',
     if (signature.isNotEmpty) signature,
   ].join(' · ');
+}
+
+String _friendPresenceText(Map<String, Object?> item) {
+  final profile = _friendProfile(item);
+  for (final source in [item, profile]) {
+    for (final key in ['online', 'is_online', 'connected']) {
+      final value = source[key];
+      if (value != null) {
+        return _boolValue(value) ? '在线' : '离线';
+      }
+    }
+    final status = _value(source, [
+      'online_status',
+      'status',
+      'state',
+    ]).toLowerCase();
+    if (status == 'online' || status == 'connected' || status == '1') {
+      return '在线';
+    }
+    if (status == 'offline' || status == '0' || status == '离线') {
+      return '离线';
+    }
+  }
+  return '离线';
 }
 
 String _friendAvatarUrl(Map<String, Object?> item) {

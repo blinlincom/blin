@@ -25,6 +25,7 @@ class SessionController extends ChangeNotifier {
        _chat = chat,
        _cache = cache {
     _im.addListener(notifyListeners);
+    _presenceSub = _im.presenceEvents.listen(_onPresenceEvent);
   }
 
   final ApiClient _api;
@@ -49,6 +50,7 @@ class SessionController extends ChangeNotifier {
   DateTime? _groupCacheAt;
   Future<List<Map<String, Object?>>>? _friendRequest;
   Future<List<Map<String, Object?>>>? _groupRequest;
+  StreamSubscription<BusinessImPresenceEvent>? _presenceSub;
 
   UserSession? get session => _session;
   AppInfo? get appInfo => _appInfo;
@@ -62,19 +64,24 @@ class SessionController extends ChangeNotifier {
   String get imStatusText => _im.statusText;
   String? get imError => _im.lastError;
   int get conversationVersion => _im.conversationVersion;
+  bool get hasLoadedFriends => _friendCacheAt != null;
   Stream<BusinessImMessageEvent> get messageEvents => _im.messageEvents;
+  Stream<BusinessImPresenceEvent> get presenceEvents => _im.presenceEvents;
 
   List<Map<String, Object?>> cachedConversations() => _im.cachedConversations();
 
-  List<Map<String, Object?>> cachedFriends() {
+  List<Map<String, Object?>> cachedFriends({bool allowDisk = true}) {
     if (_friendCache.isNotEmpty) {
       return _copyList(_friendCache);
+    }
+    if (!allowDisk) {
+      return const [];
     }
     final uid = _chatUid();
     if (uid.isEmpty) {
       return const [];
     }
-    _friendCache = _cache.readFriendList(uid);
+    _friendCache = _hydrateFriendList(_cache.readFriendList(uid), uid: uid);
     return _copyList(_friendCache);
   }
 
@@ -269,15 +276,17 @@ class SessionController extends ChangeNotifier {
     return local;
   }
 
-  Future<List<Map<String, Object?>>> loadFriends() async {
+  Future<List<Map<String, Object?>>> loadFriends({
+    bool forceRefresh = false,
+  }) async {
     final current = _requireSession();
-    if (_isCacheFresh(_friendCacheAt)) {
+    if (!forceRefresh && _isCacheFresh(_friendCacheAt)) {
       AppLogger.info(
         'session',
         'load friends memory cache',
         data: {'count': _friendCache.length},
       );
-      return _friendCache;
+      return _copyList(_friendCache);
     }
     if (_friendRequest != null) {
       AppLogger.info('session', 'reuse friends request');
@@ -287,9 +296,10 @@ class SessionController extends ChangeNotifier {
     _friendRequest = _api
         .friends(session: current, device: _device)
         .timeout(const Duration(seconds: 15));
-    final list = await _friendRequest!.whenComplete(
+    final rawList = await _friendRequest!.whenComplete(
       () => _friendRequest = null,
     );
+    final list = _hydrateFriendList(rawList);
     _friendCache = list;
     _friendCacheAt = DateTime.now();
     _writeFriendCache(list);
@@ -299,7 +309,7 @@ class SessionController extends ChangeNotifier {
       'load friends success',
       data: {'count': list.length},
     );
-    return list;
+    return _copyList(list);
   }
 
   Future<List<Map<String, Object?>>> loadGroups() async {
@@ -535,6 +545,22 @@ class SessionController extends ChangeNotifier {
     );
   }
 
+  Future<void> markRedPacketReceivedLocal({
+    required String channelId,
+    required int channelType,
+    required String clientMsgNo,
+    required String redPacketId,
+    Map<String, Object?> result = const {},
+  }) {
+    return _im.markRedPacketReceivedLocal(
+      channelID: channelId,
+      channelType: channelType,
+      clientMsgNo: clientMsgNo,
+      redPacketId: redPacketId,
+      result: result,
+    );
+  }
+
   Future<Map<String, Object?>> receiveTransfer(String transferId) {
     return sendImAction(
       'im_person_transfer_receive',
@@ -542,6 +568,22 @@ class SessionController extends ChangeNotifier {
         'transfer_id': transferId,
         'client_msg_no': _im.newClientMsgNo(),
       },
+    );
+  }
+
+  Future<void> markTransferReceivedLocal({
+    required String channelId,
+    required int channelType,
+    required String clientMsgNo,
+    required String transferId,
+    Map<String, Object?> result = const {},
+  }) {
+    return _im.markTransferReceivedLocal(
+      channelID: channelId,
+      channelType: channelType,
+      clientMsgNo: clientMsgNo,
+      transferId: transferId,
+      result: result,
     );
   }
 
@@ -628,7 +670,6 @@ class SessionController extends ChangeNotifier {
         'receiver_id': receiverId,
         'money': money,
         'asset_type': assetType,
-        'transfer_id': _tradeNo('tr'),
         if (remark.isNotEmpty) 'remark': remark,
       },
     );
@@ -654,7 +695,6 @@ class SessionController extends ChangeNotifier {
         'receiver_id': receiverId,
         'money': money,
         'asset_type': assetType,
-        'transfer_id': _tradeNo('gtr'),
         if (remark.isNotEmpty) 'remark': remark,
       },
     );
@@ -676,7 +716,6 @@ class SessionController extends ChangeNotifier {
         'receiver_id': receiverId,
         'money': money,
         'asset_type': assetType,
-        'red_packet_id': _tradeNo('rp'),
         if (remark.isNotEmpty) 'remark': remark,
       },
     );
@@ -705,7 +744,6 @@ class SessionController extends ChangeNotifier {
         'asset_type': assetType,
         'packet_type': packetType,
         'quantity': quantity.toString(),
-        'red_packet_id': _tradeNo('grp'),
         if (receiverId.isNotEmpty) 'receiver_id': receiverId,
         if (remark.isNotEmpty) 'remark': remark,
       },
@@ -954,7 +992,7 @@ class SessionController extends ChangeNotifier {
     final uid = _chatUid();
     if (uid.isNotEmpty) {
       _cache.removeFriend(uid: uid, friendId: friendId);
-      _friendCache = _cache.readFriendList(uid);
+      _friendCache = _hydrateFriendList(_cache.readFriendList(uid), uid: uid);
       _friendCacheAt = DateTime.now();
     }
     await _im.removePrivateConversationAfterFriendDelete(
@@ -1121,12 +1159,6 @@ class SessionController extends ChangeNotifier {
     );
   }
 
-  String _tradeNo(String prefix) {
-    final millis = DateTime.now().millisecondsSinceEpoch;
-    final tail = millis.toRadixString(36);
-    return '${prefix}_${_session?.userId ?? '0'}_$tail';
-  }
-
   bool _isCacheFresh(DateTime? time) {
     if (time == null) {
       return false;
@@ -1147,14 +1179,15 @@ class SessionController extends ChangeNotifier {
     if (uid.isEmpty) {
       return;
     }
-    _cache.writeFriendList(uid: uid, friends: friends);
-    for (final item in friends) {
+    final hydrated = _hydrateFriendList(friends, uid: uid);
+    for (final item in hydrated) {
       final profile = _profileFromFriendItem(item);
       final userId = _profileUserId(profile, fallback: item);
       if (userId.isNotEmpty) {
         _cache.writeProfile(uid: uid, userId: userId, profile: profile);
       }
     }
+    _cache.writeFriendList(uid: uid, friends: hydrated);
   }
 
   void _writeGroupCache(List<Map<String, Object?>> groups) {
@@ -1163,6 +1196,104 @@ class SessionController extends ChangeNotifier {
       return;
     }
     _cache.writeGroupList(uid: uid, groups: groups);
+  }
+
+  void _onPresenceEvent(BusinessImPresenceEvent event) {
+    final uid = _chatUid();
+    if (uid.isEmpty) {
+      return;
+    }
+    final current = _friendCache.isNotEmpty
+        ? _friendCache
+        : _hydrateFriendList(_cache.readFriendList(uid), uid: uid);
+    if (current.isEmpty) {
+      return;
+    }
+    var changed = false;
+    final next = current
+        .map((item) {
+          if (!_friendMatchesPresence(item, event)) {
+            return item;
+          }
+          changed = true;
+          return _mergePresenceIntoFriend(item, event);
+        })
+        .toList(growable: false);
+    if (!changed) {
+      return;
+    }
+    _friendCache = next;
+    _friendCacheAt ??= DateTime.now();
+    _writeFriendCache(next);
+    AppLogger.info(
+      'session',
+      'friend presence updated',
+      data: {
+        'uid': event.uid,
+        'user_id': event.userId,
+        'online': event.online,
+        'friend_count': next.length,
+      },
+    );
+    notifyListeners();
+  }
+
+  bool _friendMatchesPresence(
+    Map<String, Object?> item,
+    BusinessImPresenceEvent event,
+  ) {
+    final profile = _profileFromFriendItem(item);
+    final eventUserId = event.userId.isNotEmpty
+        ? event.userId
+        : _userIdFromUid(event.uid);
+    final eventUid = event.uid.isNotEmpty && event.uid.startsWith('app')
+        ? event.uid
+        : (eventUserId.isEmpty ? '' : _uidFromUserId(eventUserId));
+    final userId = _profileUserId(profile, fallback: item);
+    if (eventUserId.isNotEmpty && userId == eventUserId) {
+      return true;
+    }
+    for (final key in [
+      'uid',
+      'im_uid',
+      'wukong_uid',
+      'channel_id',
+      'user_uid',
+    ]) {
+      final value = item[key]?.toString() ?? profile[key]?.toString() ?? '';
+      if (value.isNotEmpty && (value == event.uid || value == eventUid)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  Map<String, Object?> _mergePresenceIntoFriend(
+    Map<String, Object?> item,
+    BusinessImPresenceEvent event,
+  ) {
+    final next = Map<String, Object?>.from(item);
+    final fields = <String, Object?>{
+      'uid': event.uid,
+      'online': event.online ? 1 : 0,
+      'is_online': event.online ? 1 : 0,
+      'online_status': event.online ? 'online' : 'offline',
+      'device_flag': event.deviceFlag,
+      'device_online_count': event.deviceOnlineCount,
+      'total_online_count': event.totalOnlineCount,
+      'presence_event_time': event.eventTime,
+    };
+    next.addAll(fields);
+    for (final nestedKey in ['friend', 'user']) {
+      final nested = next[nestedKey];
+      if (nested is Map) {
+        next[nestedKey] = {
+          ...nested.map((key, value) => MapEntry(key.toString(), value)),
+          ...fields,
+        };
+      }
+    }
+    return next;
   }
 
   void _clearListCaches() {
@@ -1186,6 +1317,72 @@ class SessionController extends ChangeNotifier {
       return user.map((key, value) => MapEntry(key.toString(), value));
     }
     return item;
+  }
+
+  List<Map<String, Object?>> _hydrateFriendList(
+    List<Map<String, Object?>> friends, {
+    String uid = '',
+  }) {
+    final chatUid = uid.isEmpty ? _chatUid() : uid;
+    if (chatUid.isEmpty) {
+      return _copyList(friends);
+    }
+    return friends
+        .map((item) => _hydrateFriendItem(item, uid: chatUid))
+        .toList(growable: false);
+  }
+
+  Map<String, Object?> _hydrateFriendItem(
+    Map<String, Object?> item, {
+    required String uid,
+  }) {
+    final profile = _profileFromFriendItem(item);
+    final userId = _profileUserId(profile, fallback: item);
+    if (userId.isEmpty) {
+      return Map<String, Object?>.from(item);
+    }
+    final cached = _cache.readProfile(uid: uid, userId: userId);
+    final mergedProfile = _mergeNonEmpty(cached, profile);
+    final mergedItem = _mergeNonEmpty(mergedProfile, item);
+    final nestedKey = item['friend'] is Map
+        ? 'friend'
+        : item['user'] is Map
+        ? 'user'
+        : '';
+    if (nestedKey.isNotEmpty) {
+      mergedItem[nestedKey] = mergedProfile;
+    }
+    mergedItem['userid'] = userId;
+    mergedItem['user_id'] ??= userId;
+    return mergedItem;
+  }
+
+  Map<String, Object?> _mergeNonEmpty(
+    Map<String, Object?> base,
+    Map<String, Object?> overlay,
+  ) {
+    final merged = Map<String, Object?>.from(base);
+    for (final entry in overlay.entries) {
+      if (_hasNonEmptyValue(entry.value)) {
+        merged[entry.key] = entry.value;
+      } else {
+        merged.putIfAbsent(entry.key, () => entry.value);
+      }
+    }
+    return merged;
+  }
+
+  bool _hasNonEmptyValue(Object? value) {
+    if (value == null) {
+      return false;
+    }
+    if (value is String) {
+      return value.trim().isNotEmpty;
+    }
+    if (value is Map || value is Iterable) {
+      return true;
+    }
+    return value.toString().trim().isNotEmpty;
   }
 
   String _profileUserId(
@@ -1235,9 +1432,15 @@ class SessionController extends ChangeNotifier {
     return 'app${_api.appId}user$userId';
   }
 
+  String _userIdFromUid(String uid) {
+    final match = RegExp(r'user(\d+)$').firstMatch(uid);
+    return match?.group(1) ?? '';
+  }
+
   @override
   void dispose() {
     _im.removeListener(notifyListeners);
+    unawaited(_presenceSub?.cancel());
     unawaited(_im.stop());
     super.dispose();
   }

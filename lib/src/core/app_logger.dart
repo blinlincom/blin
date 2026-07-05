@@ -44,8 +44,8 @@ class AppLogEntry {
 class AppLogger {
   AppLogger._();
 
-  static const _maxEntries = 300;
-  static const _maxFileBytes = 2 * 1024 * 1024;
+  static const _maxEntries = 1000;
+  static const _maxFileBytes = 8 * 1024 * 1024;
   static final ValueNotifier<int> revision = ValueNotifier<int>(0);
   static final List<AppLogEntry> _entries = <AppLogEntry>[];
   static File? _file;
