@@ -24,7 +24,8 @@ class SessionController extends ChangeNotifier {
        _im = im,
        _chat = chat,
        _cache = cache {
-    _im.addListener(notifyListeners);
+    _lastImStatusText = _im.statusText;
+    _im.addListener(_onImServiceChanged);
     _presenceSub = _im.presenceEvents.listen(_onPresenceEvent);
   }
 
@@ -43,6 +44,8 @@ class SessionController extends ChangeNotifier {
   int _lastColdLaunchAt = 0;
   int _lastHotResumeAt = 0;
   DateTime? _lastHotRefreshAt;
+  String _lastImStatusText = '';
+  Future<void>? _presenceRefreshRequest;
   Future<void>? _refreshRequest;
   List<Map<String, Object?>> _friendCache = const [];
   List<Map<String, Object?>> _groupCache = const [];
@@ -64,6 +67,7 @@ class SessionController extends ChangeNotifier {
   String get imStatusText => _im.statusText;
   String? get imError => _im.lastError;
   int get conversationVersion => _im.conversationVersion;
+  bool get initialHistorySyncing => _im.initialHistorySyncing;
   bool get hasLoadedFriends => _friendCacheAt != null;
   Stream<BusinessImMessageEvent> get messageEvents => _im.messageEvents;
   Stream<BusinessImPresenceEvent> get presenceEvents => _im.presenceEvents;
@@ -1128,6 +1132,7 @@ class SessionController extends ChangeNotifier {
     _session = withProfile;
     _store.writeSession(withProfile);
     await _im.start(withProfile, device: _device);
+    unawaited(_warmBasicData());
     AppLogger.info(
       'session',
       'refresh logged in session success',
@@ -1139,6 +1144,19 @@ class SessionController extends ChangeNotifier {
             : withProfile.chat?.route.httpsStreamAddr ?? '',
       },
     );
+  }
+
+  Future<void> _warmBasicData() async {
+    try {
+      await Future.wait([loadFriends(), loadGroups()]);
+      AppLogger.info('session', 'basic data warmup success');
+    } catch (error, stackTrace) {
+      AppLogger.warn(
+        'session',
+        'basic data warmup failed',
+        data: {'error': error.toString(), 'stack': stackTrace.toString()},
+      );
+    }
   }
 
   Future<void> _sendBusinessMessage({
@@ -1236,6 +1254,39 @@ class SessionController extends ChangeNotifier {
       },
     );
     notifyListeners();
+  }
+
+  void _onImServiceChanged() {
+    final status = _im.statusText;
+    final becameConnected = status == '已连接' && _lastImStatusText != status;
+    _lastImStatusText = status;
+    if (becameConnected) {
+      _refreshFriendPresenceAfterConnect();
+    }
+    notifyListeners();
+  }
+
+  void _refreshFriendPresenceAfterConnect() {
+    if (_session == null ||
+        _device.isEmpty ||
+        _presenceRefreshRequest != null) {
+      return;
+    }
+    _presenceRefreshRequest = loadFriends(forceRefresh: true)
+        .timeout(const Duration(seconds: 12))
+        .then<void>((_) {
+          AppLogger.info('session', 'friend presence refreshed after connect');
+        })
+        .catchError((Object error, StackTrace stackTrace) {
+          AppLogger.warn(
+            'session',
+            'friend presence refresh after connect failed',
+            data: {'error': error.toString(), 'stack': stackTrace.toString()},
+          );
+        })
+        .whenComplete(() {
+          _presenceRefreshRequest = null;
+        });
   }
 
   bool _friendMatchesPresence(
@@ -1439,7 +1490,7 @@ class SessionController extends ChangeNotifier {
 
   @override
   void dispose() {
-    _im.removeListener(notifyListeners);
+    _im.removeListener(_onImServiceChanged);
     unawaited(_presenceSub?.cancel());
     unawaited(_im.stop());
     super.dispose();

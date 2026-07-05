@@ -126,7 +126,15 @@ class ChatSession {
     final map = value is Map
         ? value.cast<String, Object?>()
         : <String, Object?>{};
+    final historySync = map['history_sync'] is Map
+        ? (map['history_sync'] as Map).cast<String, Object?>()
+        : const <String, Object?>{};
     final route = ImRoute.fromJson(map['route']);
+    final serverHistoryEnabled = _flagEnabled(
+      map['server_history_sync_enabled'] ??
+          historySync['server_history_sync_enabled'],
+      defaultValue: true,
+    );
     return ChatSession(
       uid: map['uid']?.toString() ?? '',
       token: map['token']?.toString() ?? '',
@@ -145,11 +153,17 @@ class ChatSession {
               httpsStreamAddr: route.httpsStreamAddr,
             ),
       privateHistorySyncEnabled:
-          _flagEnabled(map['private_history_sync_enabled']) &&
-          _flagEnabled(map['server_history_sync_enabled'], defaultValue: true),
+          serverHistoryEnabled &&
+          _flagEnabled(
+            map['private_history_sync_enabled'] ??
+                historySync['private_history_sync_enabled'],
+          ),
       groupHistorySyncEnabled:
-          _flagEnabled(map['group_history_sync_enabled']) &&
-          _flagEnabled(map['server_history_sync_enabled'], defaultValue: true),
+          serverHistoryEnabled &&
+          _flagEnabled(
+            map['group_history_sync_enabled'] ??
+                historySync['group_history_sync_enabled'],
+          ),
     );
   }
 

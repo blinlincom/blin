@@ -1,0 +1,462 @@
+part of 'package:bim/src/features/home/home_page.dart';
+
+class _AsyncList extends StatefulWidget {
+  const _AsyncList({
+    required this.loader,
+    required this.itemBuilder,
+    required this.emptyText,
+  });
+
+  final Future<List<Map<String, Object?>>> Function() loader;
+  final Widget Function(BuildContext context, Map<String, Object?> item)
+  itemBuilder;
+  final String emptyText;
+
+  @override
+  State<_AsyncList> createState() => _AsyncListState();
+}
+
+class _AsyncListState extends State<_AsyncList> {
+  late Future<List<Map<String, Object?>>> _future;
+
+  @override
+  void initState() {
+    super.initState();
+    _future = _load();
+  }
+
+  @override
+  void didUpdateWidget(_AsyncList oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.loader != widget.loader) {
+      _future = _load();
+    }
+  }
+
+  Future<List<Map<String, Object?>>> _load() {
+    return AppLogger.measure('ui', 'load list', widget.loader);
+  }
+
+  void _reload() {
+    setState(() => _future = _load());
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<List<Map<String, Object?>>>(
+      future: _future,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState != ConnectionState.done) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        if (snapshot.hasError) {
+          return _ErrorState(text: snapshot.error.toString(), onRetry: _reload);
+        }
+        final items = snapshot.data ?? [];
+        if (items.isEmpty) {
+          return _EmptyState(text: widget.emptyText);
+        }
+        return ListView.builder(
+          itemCount: items.length,
+          itemBuilder: (context, index) {
+            return widget.itemBuilder(context, items[index]);
+          },
+        );
+      },
+    );
+  }
+}
+
+class _PlainListTile extends StatelessWidget {
+  const _PlainListTile({
+    required this.title,
+    required this.subtitle,
+    required this.trailing,
+    this.icon,
+    this.avatarUrl = '',
+    this.onTap,
+    this.onLongPress,
+  });
+
+  final IconData? icon;
+  final String avatarUrl;
+  final String title;
+  final String subtitle;
+  final String trailing;
+  final VoidCallback? onTap;
+  final VoidCallback? onLongPress;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: const BoxDecoration(
+        border: Border(bottom: BorderSide(color: _lightBorderColor)),
+      ),
+      child: ListTile(
+        leading: avatarUrl.isNotEmpty
+            ? _Avatar(label: title, imageUrl: avatarUrl, size: 38, icon: icon)
+            : icon == null
+            ? null
+            : Icon(icon, color: _mutedColor),
+        onTap: onTap,
+        onLongPress: onLongPress,
+        title: Text(
+          title,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(fontWeight: FontWeight.w700),
+        ),
+        subtitle: subtitle.isEmpty
+            ? null
+            : Text(subtitle, maxLines: 1, overflow: TextOverflow.ellipsis),
+        trailing: trailing.isEmpty
+            ? null
+            : Text(
+                trailing,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(color: _mutedColor),
+              ),
+      ),
+    );
+  }
+}
+
+class _SearchBar extends StatelessWidget {
+  const _SearchBar({required this.hintText, required this.onTap});
+
+  final String hintText;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return ColoredBox(
+      color: Colors.white,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(4),
+          child: Container(
+            height: 36,
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            decoration: BoxDecoration(
+              color: const Color(0xfff0f1f3),
+              borderRadius: BorderRadius.circular(4),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.search, color: _mutedColor, size: 18),
+                const SizedBox(width: 8),
+                Text(
+                  hintText,
+                  style: const TextStyle(color: _mutedColor, fontSize: 14),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ConversationTile extends StatelessWidget {
+  const _ConversationTile({
+    required this.title,
+    required this.subtitle,
+    required this.time,
+    required this.unread,
+    required this.isGroup,
+    required this.avatarUrl,
+    required this.onTap,
+  });
+
+  final String title;
+  final String subtitle;
+  final String time;
+  final int unread;
+  final bool isGroup;
+  final String avatarUrl;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          border: Border(bottom: BorderSide(color: _lightBorderColor)),
+        ),
+        child: Row(
+          children: [
+            _Avatar(
+              label: title,
+              imageUrl: avatarUrl,
+              size: 48,
+              color: isGroup ? const Color(0xff34c759) : _primaryColor,
+              icon: isGroup ? Icons.groups : null,
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: _textColor,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  _ConversationSubtitleText(text: subtitle),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Text(
+                  time,
+                  style: const TextStyle(color: _mutedColor, fontSize: 12),
+                ),
+                const SizedBox(height: 8),
+                if (unread > 0)
+                  Container(
+                    constraints: const BoxConstraints(minWidth: 18),
+                    height: 18,
+                    padding: const EdgeInsets.symmetric(horizontal: 5),
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: const Color(0xffff3b30),
+                      borderRadius: BorderRadius.circular(9),
+                    ),
+                    child: Text(
+                      unread > 99 ? '99+' : unread.toString(),
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ConversationSubtitleText extends StatelessWidget {
+  const _ConversationSubtitleText({required this.text});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    final prefixColor = _conversationPrefixColor(text);
+    if (prefixColor == null) {
+      return Text(
+        text,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(color: _mutedColor, fontSize: 13),
+      );
+    }
+    final prefix = text.startsWith('[红包]') ? '[红包]' : '[转账]';
+    final suffix = text.substring(prefix.length);
+    return Text.rich(
+      TextSpan(
+        children: [
+          TextSpan(
+            text: prefix,
+            style: TextStyle(color: prefixColor, fontWeight: FontWeight.w700),
+          ),
+          if (suffix.isNotEmpty)
+            TextSpan(
+              text: suffix,
+              style: const TextStyle(color: _mutedColor),
+            ),
+        ],
+      ),
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: const TextStyle(fontSize: 13),
+    );
+  }
+}
+
+class _ContactTile extends StatelessWidget {
+  const _ContactTile({
+    required this.title,
+    required this.subtitle,
+    required this.trailing,
+    required this.isGroup,
+    required this.onTap,
+    this.avatarUrl = '',
+    this.avatarColor,
+    this.icon,
+    this.onLongPress,
+  });
+
+  final String title;
+  final String subtitle;
+  final String trailing;
+  final bool isGroup;
+  final VoidCallback onTap;
+  final String avatarUrl;
+  final Color? avatarColor;
+  final IconData? icon;
+  final VoidCallback? onLongPress;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      onLongPress: onLongPress,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          border: Border(bottom: BorderSide(color: _lightBorderColor)),
+        ),
+        child: Row(
+          children: [
+            _Avatar(
+              label: title,
+              imageUrl: avatarUrl,
+              size: 38,
+              color:
+                  avatarColor ??
+                  (isGroup ? const Color(0xff34c759) : _primaryColor),
+              icon: icon ?? (isGroup ? Icons.groups : null),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: _textColor,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  if (subtitle.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 3),
+                      child: Text(
+                        subtitle,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: _mutedColor,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            if (trailing.isNotEmpty)
+              Text(
+                trailing,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(color: _mutedColor, fontSize: 12),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _MenuTile extends StatelessWidget {
+  const _MenuTile({
+    required this.icon,
+    required this.iconColor,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+    this.trailing,
+  });
+
+  final IconData icon;
+  final Color iconColor;
+  final String title;
+  final String subtitle;
+  final VoidCallback onTap;
+  final Widget? trailing;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          border: Border(bottom: BorderSide(color: _lightBorderColor)),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 34,
+              height: 34,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: iconColor.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Icon(icon, color: iconColor, size: 20),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      color: _textColor,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  if (subtitle.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 3),
+                      child: Text(
+                        subtitle,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: _mutedColor,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            if (trailing != null) ...[const SizedBox(width: 8), trailing!],
+            const Icon(Icons.chevron_right, color: _mutedColor, size: 20),
+          ],
+        ),
+      ),
+    );
+  }
+}
