@@ -69,6 +69,14 @@ class ImCacheStore {
     _kv.encodeInt(_channelClearKey(uid, channelId, channelType), timestampMs);
   }
 
+  void removeChannelClearMarker({
+    required String uid,
+    required String channelId,
+    required int channelType,
+  }) {
+    _kv.removeValue(_channelClearKey(uid, channelId, channelType));
+  }
+
   Set<String> readDeletedMessages({
     required String uid,
     required String channelId,
@@ -149,6 +157,32 @@ class ImCacheStore {
       channelType: channelType,
       timestampMs: timestampMs,
     );
+    _kv.removeValues([
+      _messageKey(uid, channelId, channelType),
+      _readMarkerKey(uid, channelId, channelType),
+      _deletedKey(uid, channelId, channelType),
+      _draftKey(channelId, channelType),
+    ]);
+    final conversations = readConversations(uid)
+        .where(
+          (item) =>
+              item['channel_id']?.toString() != channelId ||
+              (int.tryParse(item['channel_type']?.toString() ?? '') ?? 0) !=
+                  channelType,
+        )
+        .toList(growable: false);
+    writeConversations(uid: uid, conversations: conversations);
+    final recent = readRecentChannels(uid)
+        .where((item) => item != '$channelType:$channelId')
+        .toList(growable: false);
+    _kv.encodeString('$_recentPrefix:$uid', jsonEncode(recent));
+  }
+
+  void removeChannelCache({
+    required String uid,
+    required String channelId,
+    required int channelType,
+  }) {
     _kv.removeValues([
       _messageKey(uid, channelId, channelType),
       _readMarkerKey(uid, channelId, channelType),

@@ -68,8 +68,18 @@ class _MessagesTabState extends State<MessagesTab> {
     }
     if (next != _conversationRevision) {
       _conversationRevision = next;
-      _loadConversations(showLoading: false);
+      _applyCachedConversations();
     }
+  }
+
+  void _applyCachedConversations() {
+    final list = widget.controller.cachedConversations();
+    _precacheConversationAvatars(context, list);
+    setState(() {
+      _conversations = list;
+      _loading = widget.controller.initialHistorySyncing && list.isEmpty;
+      _error = null;
+    });
   }
 
   Future<void> _loadConversations({required bool showLoading}) async {
@@ -128,7 +138,7 @@ class _MessagesTabState extends State<MessagesTab> {
       if (!mounted) {
         return;
       }
-      await _loadConversations(showLoading: false);
+      _applyCachedConversations();
     } catch (error, stackTrace) {
       AppLogger.error(
         'ui',

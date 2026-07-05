@@ -200,12 +200,31 @@ class _ConversationTile extends StatelessWidget {
         ),
         child: Row(
           children: [
-            _Avatar(
-              label: title,
-              imageUrl: avatarUrl,
-              size: 48,
-              color: isGroup ? const Color(0xff34c759) : _primaryColor,
-              icon: isGroup ? Icons.groups : null,
+            SizedBox(
+              width: 52,
+              height: 52,
+              child: Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  Positioned(
+                    left: 0,
+                    top: 2,
+                    child: _Avatar(
+                      label: title,
+                      imageUrl: avatarUrl,
+                      size: 48,
+                      color: isGroup ? const Color(0xff34c759) : _primaryColor,
+                      icon: isGroup ? Icons.groups : null,
+                    ),
+                  ),
+                  if (unread > 0)
+                    Positioned(
+                      top: 0,
+                      right: 0,
+                      child: _UnreadBadge(count: unread),
+                    ),
+                ],
+              ),
             ),
             const SizedBox(width: 12),
             Expanded(
@@ -230,48 +249,69 @@ class _ConversationTile extends StatelessWidget {
             ),
             const SizedBox(width: 8),
             SizedBox(
-              width: 88,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Text(
-                    time,
-                    textAlign: TextAlign.right,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: Color(0xffb1b6c0),
-                      fontSize: 11.5,
-                      fontWeight: FontWeight.w500,
-                      height: 1.15,
-                      fontFeatures: [FontFeature.tabularFigures()],
-                    ),
+              width: 76,
+              child: Align(
+                alignment: Alignment.topRight,
+                child: Text(
+                  time,
+                  textAlign: TextAlign.right,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Color(0xffb1b6c0),
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w500,
+                    height: 1.15,
+                    fontFeatures: [FontFeature.tabularFigures()],
                   ),
-                  const SizedBox(height: 8),
-                  if (unread > 0)
-                    Container(
-                      constraints: const BoxConstraints(minWidth: 18),
-                      height: 18,
-                      padding: const EdgeInsets.symmetric(horizontal: 5),
-                      alignment: Alignment.center,
-                      decoration: BoxDecoration(
-                        color: const Color(0xffff3b30),
-                        borderRadius: BorderRadius.circular(9),
-                      ),
-                      child: Text(
-                        unread > 99 ? '99+' : unread.toString(),
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ),
-                ],
+                ),
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _UnreadBadge extends StatelessWidget {
+  const _UnreadBadge({required this.count, this.compact = false});
+
+  final int count;
+  final bool compact;
+
+  @override
+  Widget build(BuildContext context) {
+    if (count <= 0) {
+      return const SizedBox.shrink();
+    }
+    final label = count > 99 ? '99+' : count.toString();
+    final height = compact ? 16.0 : 19.0;
+    final minWidth = compact ? 16.0 : 19.0;
+    return Semantics(
+      label: '$count 条未读消息',
+      child: ExcludeSemantics(
+        child: Container(
+          height: height,
+          constraints: BoxConstraints(minWidth: minWidth),
+          padding: EdgeInsets.symmetric(horizontal: compact ? 4 : 5),
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: const Color(0xffdc2626),
+            borderRadius: BorderRadius.circular(height / 2),
+            border: Border.all(color: _surfaceColor, width: compact ? 1.5 : 2),
+          ),
+          child: Text(
+            label,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: compact ? 9.5 : 10.5,
+              fontWeight: FontWeight.w800,
+              height: 1,
+              fontFeatures: const [FontFeature.tabularFigures()],
+            ),
+          ),
         ),
       ),
     );

@@ -1738,6 +1738,18 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         }
       }
     }
+    if (!_isGroup) {
+      for (final item in widget.controller.cachedFriends()) {
+        final channelId = _friendChannelId(item);
+        final userId = _friendUserId(item);
+        if (channelId == widget.channelId || userId == _receiverId) {
+          final avatar = _friendAvatarUrl(item);
+          if (avatar.isNotEmpty) {
+            return avatar;
+          }
+        }
+      }
+    }
     for (final item in _messages) {
       if (!_isSelfMessage(item)) {
         final avatar = _messageSenderAvatarUrl(item);

@@ -74,10 +74,14 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   var _index = 0;
+  int _totalUnread = 0;
 
   @override
   void initState() {
     super.initState();
+    _totalUnread = _conversationUnreadTotal(
+      widget.controller.cachedConversations(),
+    );
     widget.controller.addListener(_onControllerChanged);
   }
 
@@ -87,6 +91,9 @@ class _HomePageState extends State<HomePage> {
     if (oldWidget.controller != widget.controller) {
       oldWidget.controller.removeListener(_onControllerChanged);
       widget.controller.addListener(_onControllerChanged);
+      _totalUnread = _conversationUnreadTotal(
+        widget.controller.cachedConversations(),
+      );
     }
   }
 
@@ -97,8 +104,14 @@ class _HomePageState extends State<HomePage> {
   }
 
   void _onControllerChanged() {
-    if (mounted && _index == 0) {
-      setState(() {});
+    if (!mounted) {
+      return;
+    }
+    final nextUnread = _conversationUnreadTotal(
+      widget.controller.cachedConversations(),
+    );
+    if (_index == 0 || nextUnread != _totalUnread) {
+      setState(() => _totalUnread = nextUnread);
     }
   }
 
@@ -148,20 +161,23 @@ class _HomePageState extends State<HomePage> {
           selectedLabelStyle: const TextStyle(fontWeight: FontWeight.w700),
           unselectedLabelStyle: const TextStyle(fontWeight: FontWeight.w500),
           iconSize: 24,
-          items: const [
+          items: [
             BottomNavigationBarItem(
-              icon: Icon(Icons.sms_outlined),
+              icon: _BottomNavIcon(
+                icon: Icons.sms_outlined,
+                unread: _totalUnread,
+              ),
               label: '消息',
             ),
-            BottomNavigationBarItem(
+            const BottomNavigationBarItem(
               icon: Icon(Icons.contacts_outlined),
               label: '通讯录',
             ),
-            BottomNavigationBarItem(
+            const BottomNavigationBarItem(
               icon: Icon(Icons.explore_outlined),
               label: '发现',
             ),
-            BottomNavigationBarItem(
+            const BottomNavigationBarItem(
               icon: Icon(Icons.person_outline),
               label: '我',
             ),
@@ -222,5 +238,41 @@ class _HomePageState extends State<HomePage> {
       return status.isEmpty ? '连接异常' : status;
     }
     return '消息';
+  }
+}
+
+int _conversationUnreadTotal(Iterable<Map<String, Object?>> conversations) {
+  var total = 0;
+  for (final item in conversations) {
+    total += _intValue(item, ['unread_quantity', 'unread']);
+  }
+  return total;
+}
+
+class _BottomNavIcon extends StatelessWidget {
+  const _BottomNavIcon({required this.icon, required this.unread});
+
+  final IconData icon;
+  final int unread;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 32,
+      height: 28,
+      child: Stack(
+        clipBehavior: Clip.none,
+        alignment: Alignment.center,
+        children: [
+          Icon(icon),
+          if (unread > 0)
+            Positioned(
+              top: -2,
+              right: 0,
+              child: _UnreadBadge(count: unread, compact: true),
+            ),
+        ],
+      ),
+    );
   }
 }

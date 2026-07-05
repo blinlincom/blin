@@ -978,6 +978,13 @@ class BusinessImService extends ChangeNotifier {
         channelId: channelID,
         channelType: channelType,
       );
+      if (messages.isNotEmpty) {
+        _clearLocalHistoryBoundaryAfterServerSync(
+          channelId: channelID,
+          channelType: channelType,
+          acceptedCount: messages.length,
+        );
+      }
       final merged = _mergeMessages(
         _readMessagesForChannel(channelID, channelType),
         messages,
@@ -1019,6 +1026,26 @@ class BusinessImService extends ChangeNotifier {
       );
       return _sortAndLimit(merged, limit);
     } catch (error, stackTrace) {
+      if (channelType == chat.channelTypeGroup && _isMissingGroupError(error)) {
+        AppLogger.warn(
+          'im',
+          'invalid group channel removed',
+          data: {
+            'channel_id': channelID,
+            'channel_type': channelType,
+            'group_id': groupId.isNotEmpty
+                ? groupId
+                : _groupIdForChannel(channelID),
+            'error': error.toString(),
+          },
+        );
+        _removeInvalidChannel(
+          channelId: channelID,
+          channelType: channelType,
+          source: 'group_history_not_found',
+        );
+        return const <Map<String, Object?>>[];
+      }
       AppLogger.error(
         'im',
         'channel history sync failed',
@@ -2424,22 +2451,33 @@ class BusinessImService extends ChangeNotifier {
     }
     _gatewayAckDraining = true;
     try {
+      await Future<void>.delayed(const Duration(milliseconds: 80));
       while (_gatewayAckQueue.isNotEmpty) {
-        final current = _gatewayAckQueue.first;
-        final success = await _ackGatewayFrameOnce(current);
+        final batch = <GatewayFrame>[];
+        while (_gatewayAckQueue.isNotEmpty && batch.length < 100) {
+          batch.add(_gatewayAckQueue.removeFirst());
+        }
+        final success = await _ackGatewayFramesOnce(batch);
         if (!success) {
           _handleRealtimeClosed('gateway_ack_failed', 'Gateway ACK 失败');
           return;
         }
-        _gatewayAckQueue.removeFirst();
       }
     } finally {
       _gatewayAckDraining = false;
     }
   }
 
-  Future<bool> _ackGatewayFrameOnce(GatewayFrame frame) async {
+  Future<bool> _ackGatewayFramesOnce(List<GatewayFrame> frames) async {
+    if (frames.isEmpty) {
+      return true;
+    }
     final chat = _requireChat();
+    final frame = frames.last;
+    final clientMsgNos = <String>{
+      for (final item in frames)
+        if (item.clientMsgNo.isNotEmpty) item.clientMsgNo,
+    }.toList(growable: false);
     try {
       var ticket = await _ensureGatewayAckTicket();
       try {
@@ -2447,7 +2485,7 @@ class BusinessImService extends ChangeNotifier {
           ackUrl: _gatewayAckUrl,
           ticket: ticket,
           lastCursor: frame.cursor,
-          clientMsgNos: [if (frame.clientMsgNo.isNotEmpty) frame.clientMsgNo],
+          clientMsgNos: clientMsgNos,
         );
       } on ApiException catch (error) {
         if (error.code != 401) {
@@ -2458,7 +2496,7 @@ class BusinessImService extends ChangeNotifier {
           ackUrl: _gatewayAckUrl,
           ticket: ticket,
           lastCursor: frame.cursor,
-          clientMsgNos: [if (frame.clientMsgNo.isNotEmpty) frame.clientMsgNo],
+          clientMsgNos: clientMsgNos,
         );
       }
       _cache.writeGatewayCursor(
@@ -2466,6 +2504,17 @@ class BusinessImService extends ChangeNotifier {
         device: _device,
         cursor: frame.cursor,
       );
+      if (frames.length > 1) {
+        AppLogger.info(
+          'im',
+          'gateway ack batch committed',
+          data: {
+            'frame_count': frames.length,
+            'client_msg_no_count': clientMsgNos.length,
+            'cursor_len': frame.cursor.length,
+          },
+        );
+      }
       return true;
     } catch (error, stackTrace) {
       AppLogger.error(
@@ -2772,10 +2821,6 @@ class BusinessImService extends ChangeNotifier {
       );
       if (normalized.isEmpty) {
         drop(_historyRawDropReason(raw));
-        continue;
-      }
-      if (!_messageVisibleAfterClear(normalized)) {
-        drop('cleared_by_user');
         continue;
       }
       if (!_messageNotDeleted(normalized)) {
@@ -3466,11 +3511,17 @@ class BusinessImService extends ChangeNotifier {
     }
     if (cmd == 'friend_deleted') {
       final friendId = _value(payload, ['friend_id', 'target_user_id']);
-      unawaited(
-        removePrivateConversationAfterFriendDelete(
-          friendId: friendId,
-          channelID: channelId,
-        ),
+      if (friendId.isNotEmpty) {
+        _cache.removeFriend(uid: chat.uid, friendId: friendId);
+      }
+      AppLogger.info(
+        'im',
+        'friend delete command handled without clearing chat history',
+        data: {
+          'friend_id': friendId,
+          'channel_id': channelId,
+          'channel_type': channelType,
+        },
       );
       return true;
     }
@@ -4603,6 +4654,73 @@ class BusinessImService extends ChangeNotifier {
       return false;
     }
     return true;
+  }
+
+  bool _isMissingGroupError(Object error) {
+    final text = error.toString().toLowerCase();
+    return text.contains('群聊不存在') ||
+        text.contains('群不存在') ||
+        text.contains('group not found') ||
+        text.contains('group does not exist');
+  }
+
+  void _removeInvalidChannel({
+    required String channelId,
+    required int channelType,
+    required String source,
+  }) {
+    final chat = _requireChat();
+    channelId = _canonicalChannelId(channelId, channelType);
+    _cache.removeChannelCache(
+      uid: chat.uid,
+      channelId: channelId,
+      channelType: channelType,
+    );
+    final key = _messageKey(channelId, channelType);
+    _historySyncedChannels.remove(key);
+    _historyRetryAfter.remove(key);
+    _channelMessageVersions.remove(key);
+    _latestConversations = _currentLocalConversations(
+      chat,
+    ).map(_hydrateConversationProfile).toList(growable: false);
+    _bumpConversations(source);
+    _markMessageChannel(
+      source: source,
+      channelId: channelId,
+      channelType: channelType,
+    );
+  }
+
+  void _clearLocalHistoryBoundaryAfterServerSync({
+    required String channelId,
+    required int channelType,
+    required int acceptedCount,
+  }) {
+    final chat = _requireChat();
+    channelId = _canonicalChannelId(channelId, channelType);
+    final boundary = _cache.readChannelClearMarker(
+      uid: chat.uid,
+      channelId: channelId,
+      channelType: channelType,
+    );
+    if (boundary <= 0) {
+      return;
+    }
+    _cache.removeChannelClearMarker(
+      uid: chat.uid,
+      channelId: channelId,
+      channelType: channelType,
+    );
+    AppLogger.info(
+      'im',
+      'local history boundary cleared after server sync',
+      data: {
+        'channel_id': channelId,
+        'channel_type': channelType,
+        'accepted_count': acceptedCount,
+        'previous_boundary': boundary,
+      },
+    );
   }
 
   void _writeMessages(
