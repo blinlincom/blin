@@ -148,26 +148,21 @@ class _MessagesTabState extends State<MessagesTab> {
     );
     return ColoredBox(
       color: _surfaceColor,
-      child: RefreshIndicator(
-        onRefresh: () => _loadConversations(showLoading: false),
-        child: ListView.builder(
-          physics: const AlwaysScrollableScrollPhysics(
-            parent: ClampingScrollPhysics(),
-          ),
-          itemCount: _conversations.isEmpty ? 2 : _conversations.length + 1,
-          itemBuilder: (context, index) {
-            if (index == 0) {
-              return header;
-            }
-            if (_conversations.isEmpty) {
-              return SizedBox(
-                height: MediaQuery.sizeOf(context).height * 0.55,
-                child: _emptyBody(),
-              );
-            }
-            return _conversationTile(context, _conversations[index - 1]);
-          },
-        ),
+      child: ListView.builder(
+        physics: const ClampingScrollPhysics(),
+        itemCount: _conversations.isEmpty ? 2 : _conversations.length + 1,
+        itemBuilder: (context, index) {
+          if (index == 0) {
+            return header;
+          }
+          if (_conversations.isEmpty) {
+            return SizedBox(
+              height: MediaQuery.sizeOf(context).height * 0.55,
+              child: _emptyBody(),
+            );
+          }
+          return _conversationTile(context, _conversations[index - 1]);
+        },
       ),
     );
   }

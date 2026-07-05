@@ -24,7 +24,6 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   final _textController = TextEditingController();
   final _scrollController = ScrollController();
   final _inputFocusNode = FocusNode();
-  bool _sending = false;
   bool _toolsOpen = false;
   bool _burnAfterRead = false;
   bool _mentionAll = false;
@@ -704,160 +703,175 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     final composerEnabled = _composerEnabled;
     final toastText = _error ?? _message;
     final toastIsError = _error != null;
-    return Scaffold(
-      resizeToAvoidBottomInset: true,
-      backgroundColor: _chatPageColor,
-      body: SafeArea(
-        child: AnimatedBuilder(
-          animation: widget.controller,
-          builder: (context, _) {
-            return Stack(
-              children: [
-                Column(
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: const SystemUiOverlayStyle(
+        statusBarColor: _surfaceColor,
+        statusBarIconBrightness: Brightness.dark,
+        statusBarBrightness: Brightness.light,
+        systemNavigationBarColor: _surfaceColor,
+        systemNavigationBarIconBrightness: Brightness.dark,
+      ),
+      child: Scaffold(
+        resizeToAvoidBottomInset: true,
+        backgroundColor: _surfaceColor,
+        body: SafeArea(
+          child: ColoredBox(
+            color: _chatPageColor,
+            child: AnimatedBuilder(
+              animation: widget.controller,
+              builder: (context, _) {
+                return Stack(
                   children: [
-                    _ChatHeader(
-                      title: _chatHeaderTitle(),
-                      avatarUrl: _headerAvatarUrl(),
-                      isGroup: _isGroup,
-                      statusText: _chatHeaderStatusText(),
-                      online: !_isGroup && _peerOnline,
-                      groupPresenceLoading: _groupPresenceLoading,
-                      onBack: () => Navigator.of(context).maybePop(),
-                      onDetail: _openChatDetail,
-                      onVoiceCall: () => _showCallPending('语音通话'),
-                      onVideoCall: () => _showCallPending('视频通话'),
+                    Column(
+                      children: [
+                        _ChatHeader(
+                          title: _chatHeaderTitle(),
+                          avatarUrl: _headerAvatarUrl(),
+                          isGroup: _isGroup,
+                          statusText: _chatHeaderStatusText(),
+                          online: !_isGroup && _peerOnline,
+                          groupPresenceLoading: _groupPresenceLoading,
+                          onBack: () => Navigator.of(context).maybePop(),
+                          onDetail: _openChatDetail,
+                          onVoiceCall: () => _showCallPending('语音通话'),
+                          onVideoCall: () => _showCallPending('视频通话'),
+                        ),
+                        if (_replyClientMsgNo.isNotEmpty ||
+                            _burnAfterRead ||
+                            _mentionAll ||
+                            _mentionUserIds.isNotEmpty)
+                          _ChatOptionBar(
+                            text: _optionText(),
+                            onClear: _clearOptions,
+                          ),
+                        if (_selectedClientMsgNo.isNotEmpty)
+                          _SelectedMessageBar(
+                            onReply: () => setState(() {
+                              _replyClientMsgNo = _selectedClientMsgNo;
+                              _selectedClientMsgNo = '';
+                            }),
+                            onReceipt: _queryReceipt,
+                            onRecall: _recallSelected,
+                            onDelete: _deleteSelected,
+                            onBurn: _burnSelected,
+                            onReceiveTransfer: _receiveSelectedTransfer,
+                            onClear: () => setState(() {
+                              _selectedClientMsgNo = '';
+                              _selectedPayload = const {};
+                            }),
+                          ),
+                        Expanded(
+                          child: _messagesLoading && _messages.isEmpty
+                              ? const Center(child: CircularProgressIndicator())
+                              : _messages.isEmpty
+                              ? const _EmptyState(text: '暂无消息')
+                              : ListView.builder(
+                                  controller: _scrollController,
+                                  reverse: true,
+                                  padding: const EdgeInsets.fromLTRB(
+                                    14,
+                                    10,
+                                    14,
+                                    16,
+                                  ),
+                                  itemCount: _messages.length,
+                                  itemBuilder: (context, index) {
+                                    final messageIndex =
+                                        _messages.length - 1 - index;
+                                    final item = _messages[messageIndex];
+                                    final showTime = _shouldShowTimeDivider(
+                                      _messages,
+                                      messageIndex,
+                                    );
+                                    return Column(
+                                      children: [
+                                        if (showTime)
+                                          _TimeDivider(
+                                            text: _messageTimeLabel(item),
+                                          ),
+                                        _MessageRow(
+                                          item: item,
+                                          showSenderName: _isGroup,
+                                          currentUserAvatarUrl:
+                                              widget
+                                                  .controller
+                                                  .session
+                                                  ?.avatar ??
+                                              '',
+                                          onLongPress: () =>
+                                              _selectMessage(item),
+                                          onTap:
+                                              _messageContentType(item) ==
+                                                  ChatContentTypes.redPacket
+                                              ? () => _receiveRedPacket(item)
+                                              : null,
+                                          redPacketReceiving:
+                                              _redPacketIsReceiving(item),
+                                          onRetry: () => _retryMessage(item),
+                                        ),
+                                      ],
+                                    );
+                                  },
+                                ),
+                        ),
+                        _Composer(
+                          controller: _textController,
+                          focusNode: _inputFocusNode,
+                          enabled: composerEnabled,
+                          disabledText: muteText,
+                          toolsOpen: _toolsOpen,
+                          onVoice: () => _sendMedia(ChatContentTypes.voice),
+                          onEmoji: () => _sendMedia(ChatContentTypes.emoji),
+                          onTools: _toggleTools,
+                          onSend: _sendText,
+                        ),
+                        if (_toolsOpen)
+                          _ChatToolsPanel(
+                            isGroup: _isGroup,
+                            onTextOption: _openTextOptions,
+                            onImage: () => _sendMedia(ChatContentTypes.image),
+                            onEmoji: () => _sendMedia(ChatContentTypes.emoji),
+                            onGif: () => _sendMedia(ChatContentTypes.gif),
+                            onSticker: () =>
+                                _sendMedia(ChatContentTypes.sticker),
+                            onVoice: () => _sendMedia(ChatContentTypes.voice),
+                            onVideo: () => _sendMedia(ChatContentTypes.video),
+                            onFile: () => _sendMedia(ChatContentTypes.file),
+                            onContactCard: _sendContactCard,
+                            onTransfer: _sendTransfer,
+                            onRedPacket: _sendRedPacket,
+                            onGroupVoiceCall: () => _showCallPending('群语音通话'),
+                            onGroupVideoCall: () => _showCallPending('群视频通话'),
+                            onGroupMembers: _isGroup ? _openGroupMembers : null,
+                          ),
+                      ],
                     ),
-                    if (_replyClientMsgNo.isNotEmpty ||
-                        _burnAfterRead ||
-                        _mentionAll ||
-                        _mentionUserIds.isNotEmpty)
-                      _ChatOptionBar(
-                        text: _optionText(),
-                        onClear: _clearOptions,
-                      ),
-                    if (_selectedClientMsgNo.isNotEmpty)
-                      _SelectedMessageBar(
-                        onReply: () => setState(() {
-                          _replyClientMsgNo = _selectedClientMsgNo;
-                          _selectedClientMsgNo = '';
-                        }),
-                        onReceipt: _queryReceipt,
-                        onRecall: _recallSelected,
-                        onDelete: _deleteSelected,
-                        onBurn: _burnSelected,
-                        onReceiveTransfer: _receiveSelectedTransfer,
-                        onClear: () => setState(() {
-                          _selectedClientMsgNo = '';
-                          _selectedPayload = const {};
-                        }),
-                      ),
-                    Expanded(
-                      child: _messagesLoading && _messages.isEmpty
-                          ? const Center(child: CircularProgressIndicator())
-                          : _messages.isEmpty
-                          ? const _EmptyState(text: '暂无消息')
-                          : ListView.builder(
-                              controller: _scrollController,
-                              reverse: true,
-                              padding: const EdgeInsets.fromLTRB(
-                                14,
-                                10,
-                                14,
-                                16,
-                              ),
-                              itemCount: _messages.length,
-                              itemBuilder: (context, index) {
-                                final messageIndex =
-                                    _messages.length - 1 - index;
-                                final item = _messages[messageIndex];
-                                final showTime = _shouldShowTimeDivider(
-                                  _messages,
-                                  messageIndex,
-                                );
-                                return Column(
-                                  children: [
-                                    if (showTime)
-                                      _TimeDivider(
-                                        text: _messageTimeLabel(item),
-                                      ),
-                                    _MessageRow(
-                                      item: item,
-                                      showSenderName: _isGroup,
-                                      currentUserAvatarUrl:
-                                          widget.controller.session?.avatar ??
-                                          '',
-                                      onLongPress: () => _selectMessage(item),
-                                      onTap:
-                                          _messageContentType(item) ==
-                                              ChatContentTypes.redPacket
-                                          ? () => _receiveRedPacket(item)
-                                          : null,
-                                      redPacketReceiving: _redPacketIsReceiving(
-                                        item,
-                                      ),
-                                      onRetry: () => _retryMessage(item),
-                                    ),
-                                  ],
-                                );
-                              },
-                            ),
-                    ),
-                    _Composer(
-                      controller: _textController,
-                      focusNode: _inputFocusNode,
-                      sending: _sending,
-                      enabled: composerEnabled,
-                      disabledText: muteText,
-                      toolsOpen: _toolsOpen,
-                      onVoice: () => _sendMedia(ChatContentTypes.voice),
-                      onEmoji: () => _sendMedia(ChatContentTypes.emoji),
-                      onTools: _toggleTools,
-                      onSend: _sendText,
-                    ),
-                    if (_toolsOpen)
-                      _ChatToolsPanel(
-                        isGroup: _isGroup,
-                        onTextOption: _openTextOptions,
-                        onImage: () => _sendMedia(ChatContentTypes.image),
-                        onEmoji: () => _sendMedia(ChatContentTypes.emoji),
-                        onGif: () => _sendMedia(ChatContentTypes.gif),
-                        onSticker: () => _sendMedia(ChatContentTypes.sticker),
-                        onVoice: () => _sendMedia(ChatContentTypes.voice),
-                        onVideo: () => _sendMedia(ChatContentTypes.video),
-                        onFile: () => _sendMedia(ChatContentTypes.file),
-                        onContactCard: _sendContactCard,
-                        onTransfer: _sendTransfer,
-                        onRedPacket: _sendRedPacket,
-                        onGroupVoiceCall: () => _showCallPending('群语音通话'),
-                        onGroupVideoCall: () => _showCallPending('群视频通话'),
-                        onGroupMembers: _isGroup ? _openGroupMembers : null,
+                    if (toastText.isNotEmpty)
+                      Positioned(
+                        top: 72,
+                        left: 28,
+                        right: 28,
+                        child: _ChatToast(
+                          key: ValueKey('$toastIsError:$toastText'),
+                          text: toastText,
+                          error: toastIsError,
+                          onDismiss: () {
+                            if (!mounted) {
+                              return;
+                            }
+                            if (toastIsError && _error == toastText) {
+                              setState(() => _error = null);
+                            } else if (!toastIsError && _message == toastText) {
+                              setState(() => _message = '');
+                            }
+                          },
+                        ),
                       ),
                   ],
-                ),
-                if (toastText.isNotEmpty)
-                  Positioned(
-                    top: 72,
-                    left: 28,
-                    right: 28,
-                    child: _ChatToast(
-                      key: ValueKey('$toastIsError:$toastText'),
-                      text: toastText,
-                      error: toastIsError,
-                      onDismiss: () {
-                        if (!mounted) {
-                          return;
-                        }
-                        if (toastIsError && _error == toastText) {
-                          setState(() => _error = null);
-                        } else if (!toastIsError && _message == toastText) {
-                          setState(() => _message = '');
-                        }
-                      },
-                    ),
-                  ),
-              ],
-            );
-          },
+                );
+              },
+            ),
+          ),
         ),
       ),
     );
@@ -880,9 +894,6 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   }
 
   Future<void> _sendText() async {
-    if (_sending) {
-      return;
-    }
     if (!_composerEnabled) {
       setState(() => _message = _groupMuteText(_groupMuteState));
       return;
@@ -927,9 +938,6 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   }
 
   Future<void> _retryMessage(Map<String, Object?> item) async {
-    if (_sending) {
-      return;
-    }
     if (_messageStatus(item) != 'failed') {
       return;
     }
@@ -1316,14 +1324,14 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         'payload': _asObjectMap(item['payload']),
       },
     );
-    if (item['is_me'] == true) {
+    final payload = _asObjectMap(item['payload']);
+    if (item['is_me'] == true && !_canReceiveOwnRedPacket(payload, _isGroup)) {
       setState(() {
         _error = null;
-        _message = '不能领取自己发送的红包';
+        _message = _isGroup ? '指定红包不能由发送者领取' : '不能领取自己发送的红包';
       });
       return;
     }
-    final payload = _asObjectMap(item['payload']);
     final redPacketId = _redPacketReceiveId(payload);
     if (redPacketId.isEmpty) {
       final rawId = _redPacketRawId(payload);
@@ -1405,7 +1413,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         return;
       }
       setState(() {
-        _message = _friendlyResult(result, successText: '红包已领取');
+        _message = '';
         _conversationRevision = widget.controller.conversationVersion;
         _messageRevision = _currentMessageRevision();
       });
@@ -1594,11 +1602,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     VoidCallback? beforeTask,
     bool keepKeyboard = false,
   }) async {
-    if (_sending) {
-      return;
-    }
     setState(() {
-      _sending = true;
       _error = null;
       _message = '';
     });
@@ -1612,10 +1616,11 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         });
       }
     } catch (error) {
-      _error = error.toString();
+      if (mounted) {
+        setState(() => _error = error.toString());
+      }
     } finally {
       if (mounted) {
-        setState(() => _sending = false);
         if (keepKeyboard) {
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (mounted) {

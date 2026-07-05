@@ -20,7 +20,7 @@ flutter run \
 - Android：包名 `bimotc.com`，需要网络权限；缓存加密 key 通过 Android Keystore 保护。
 - Android 媒体权限：聊天内图片/视频选择使用应用内相册网格，需要 `READ_EXTERNAL_STORAGE`、`READ_MEDIA_IMAGES`、`READ_MEDIA_VIDEO`；不申请 `MANAGE_EXTERNAL_STORAGE`。
 - iOS/macOS：需要允许访问业务 API 和 Gateway HTTP/HTTPS Stream 地址；聊天内图片/视频选择需要相册权限说明 `NSPhotoLibraryUsageDescription`；缓存加密 key 通过 Keychain 插件通道获取。若业务端仍使用 HTTP，需要按平台网络安全策略放行对应域名。
-- Windows/Linux：当前使用应用私有目录下的 `.bim_data` 初始化 MMKV，运行环境必须允许写入应用数据目录；缓存加密 key 由本地安全文件兜底保存，发布时应配合系统账户权限保护目录。
+- Windows/Linux：当前使用应用私有目录下的 `.bim_data` 初始化 MMKV，运行环境必须允许写入应用数据目录；缓存加密 key 保存到应用私有安全文件，发布时应配合系统账户权限保护目录。
 - Web：当前实时层和 MMKV 缓存不是 Web 适配方案，不能直接按移动端配置运行；如要支持 Web，需要补 WebSocket-only 实时层和 Web 安全存储实现。
 - 实时地址：业务端必须返回 `route.https_stream_addr` 和 `stream.ticket`。客户配置 HTTPS/TLS 时地址使用 `https://.../api/sync/open`，未配置时可使用 `http://.../api/sync/open`；客户端不接受 WSS/WS/TCP 降级。
 - 屏幕方向：Android、iOS 入口固定竖屏，多端布局仍按不同屏幕宽度自适应。

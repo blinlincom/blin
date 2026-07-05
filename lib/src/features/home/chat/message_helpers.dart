@@ -156,6 +156,8 @@ String _systemNoticeText(Map<String, Object?> item) {
   if (content.isNotEmpty &&
       content != '[消息]' &&
       content != '[领取红包]' &&
+      content != '已领取红包' &&
+      content != '已收款' &&
       content != '[已收款]') {
     return content;
   }
@@ -184,11 +186,17 @@ String _paymentNoticeText(
   final actorName = _value(payload, ['actor_name'], fallback: '对方');
   final senderName = _value(payload, ['sender_name'], fallback: '对方');
   if (action == ChatContentTypes.redPacketReceived) {
+    if (actorIsMe && senderIsMe) {
+      return '你领取了自己的红包';
+    }
     if (actorIsMe) {
       return '你领取了$senderName的红包';
     }
     if (senderIsMe) {
       return '$actorName领取了你的红包';
+    }
+    if (actorName.isNotEmpty && actorName == senderName) {
+      return '$actorName领取了自己的红包';
     }
     return '$actorName领取了$senderName的红包';
   }
@@ -268,6 +276,16 @@ String _redPacketReceiveId(Map<String, Object?> payload) {
   final raw = _redPacketRawId(payload);
   final parsed = int.tryParse(raw);
   return parsed != null && parsed > 0 ? parsed.toString() : '';
+}
+
+bool _canReceiveOwnRedPacket(Map<String, Object?> payload, bool isGroup) {
+  if (!isGroup) {
+    return false;
+  }
+  final redPacket = _asObjectMap(payload['red_packet']);
+  final packetType = _value(redPacket, ['packet_type']).toLowerCase();
+  final receiverId = _intValue(redPacket, ['receiver_id']);
+  return receiverId == 0 && (packetType == 'ordinary' || packetType == 'luck');
 }
 
 String _redPacketUnavailableText(Map<String, Object?> payload) {

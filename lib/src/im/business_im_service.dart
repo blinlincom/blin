@@ -733,20 +733,16 @@ class BusinessImService extends ChangeNotifier {
   Future<List<Map<String, Object?>>> _syncConversationsFromServerOnce() async {
     final session = _requireSession();
     final chat = _requireChat();
-    final local = _cache
-        .readConversations(chat.uid)
-        .map(_normalizeConversation)
-        .where(_conversationVisibleAfterClear)
-        .toList();
+    final initialLocal = _currentLocalConversations(chat);
     if (!_conversationHistorySyncEnabled(chat)) {
-      _latestConversations = local;
+      _latestConversations = initialLocal;
       _serverConversationsSynced = true;
       AppLogger.info(
         'im',
         'server conversation sync skipped',
         data: {
           'reason': 'server_history_sync_disabled',
-          'local_count': local.length,
+          'local_count': initialLocal.length,
           'private_history_sync_enabled': chat.privateHistorySyncEnabled,
           'group_history_sync_enabled': chat.groupHistorySyncEnabled,
         },
@@ -765,7 +761,6 @@ class BusinessImService extends ChangeNotifier {
       );
       final serverConversations = list
           .map(_normalizeConversation)
-          .map(_hydrateConversationProfile)
           .where(
             (item) => _historySyncEnabledForType(
               _intValue(item, ['channel_type']),
@@ -773,11 +768,22 @@ class BusinessImService extends ChangeNotifier {
             ),
           )
           .where(_conversationVisibleAfterClear)
+          .map(_rememberConversationProfile)
+          .map(_hydrateConversationProfile)
           .toList();
-      _latestConversations = _mergeConversationLists(
-        serverConversations,
-        local,
-      ).map(_hydrateConversationProfile).toList(growable: false);
+      final latestBeforeMerge = _latestConversations
+          .map(_normalizeConversation)
+          .where(_conversationVisibleAfterClear)
+          .toList(growable: false);
+      final freshLocal = _currentLocalConversations(chat);
+      _latestConversations =
+          _mergeConversationLists(
+                serverConversations,
+                _mergeConversationLists(freshLocal, latestBeforeMerge),
+              )
+              .map(_rememberConversationProfile)
+              .map(_hydrateConversationProfile)
+              .toList(growable: false);
       _cache.writeConversations(
         uid: chat.uid,
         conversations: _latestConversations,
@@ -788,7 +794,9 @@ class BusinessImService extends ChangeNotifier {
         'im',
         'server conversations synced',
         data: {
-          'local_count': local.length,
+          'initial_local_count': initialLocal.length,
+          'fresh_local_count': freshLocal.length,
+          'memory_count': latestBeforeMerge.length,
           'server_raw_count': list.length,
           'server_accepted_count': serverConversations.length,
           'merged_count': _latestConversations.length,
@@ -1014,6 +1022,14 @@ class BusinessImService extends ChangeNotifier {
     return chat.privateHistorySyncEnabled || chat.groupHistorySyncEnabled;
   }
 
+  List<Map<String, Object?>> _currentLocalConversations(ChatSession chat) {
+    return _cache
+        .readConversations(chat.uid)
+        .map(_normalizeConversation)
+        .where(_conversationVisibleAfterClear)
+        .toList(growable: false);
+  }
+
   List<Map<String, Object?>> _mergeConversationLists(
     List<Map<String, Object?>> primary,
     List<Map<String, Object?>> secondary,
@@ -1119,6 +1135,26 @@ class BusinessImService extends ChangeNotifier {
       }
       _cache.writeProfile(uid: chat.uid, userId: userId, profile: profile);
     }
+  }
+
+  Map<String, Object?> _rememberConversationProfile(Map<String, Object?> item) {
+    final chat = _session?.chat;
+    if (chat == null ||
+        _intValue(item, ['channel_type']) != chat.channelTypePerson) {
+      return item;
+    }
+    final receiverId = _value(item, [
+      'receiver_id',
+      'peer_id',
+      'friend_id',
+      'user_id',
+      'userid',
+    ], fallback: _receiverIdFromChannel(_value(item, ['channel_id', 'uid'])));
+    if (receiverId.isEmpty) {
+      return item;
+    }
+    _cache.writeProfile(uid: chat.uid, userId: receiverId, profile: item);
+    return item;
   }
 
   Map<String, Object?> _hydrateConversationProfile(Map<String, Object?> item) {
@@ -2345,15 +2381,10 @@ class BusinessImService extends ChangeNotifier {
 
   Map<String, Object?> _normalizeConversation(Map<String, Object?> item) {
     final rawPayload = _asMap(item['payload']);
-    final channelType = _intValue(item, ['channel_type']);
-    final type = channelType == _requireChat().channelTypeGroup
+    final resolvedType = _conversationChannelType(item, rawPayload);
+    final type = resolvedType == _requireChat().channelTypeGroup
         ? 'group'
         : 'private';
-    final resolvedType = channelType == 0
-        ? (type == 'group'
-              ? _requireChat().channelTypeGroup
-              : _requireChat().channelTypePerson)
-        : channelType;
     final channelId = _canonicalChannelId(
       resolvedType == _requireChat().channelTypePerson
           ? _privateChannelIdFromConversation(item, rawPayload)
@@ -2401,19 +2432,30 @@ class BusinessImService extends ChangeNotifier {
     final contentType = _value(item, [
       'content_type',
     ], fallback: rawPayload['content_type']?.toString() ?? '');
-    final content = _value(item, [
+    final rawContent = _value(item, [
       'content',
     ], fallback: _payloadContent(rawPayload));
     final payload = _ensureBusinessPayload(
       rawPayload,
       contentType: contentType,
-      content: content,
+      content: rawContent,
       clientMsgNo: _value(item, ['last_client_msg_no', 'client_msg_no']),
     );
     final displayable = _isDisplayableChatPayload(
       payload,
       contentType: contentType,
     );
+    final content = switch (contentType) {
+      ChatContentTypes.redPacketReceived => _paymentReceiptContent(
+        payload,
+        action: ChatContentTypes.redPacketReceived,
+      ),
+      ChatContentTypes.transferReceived => _paymentReceiptContent(
+        payload,
+        action: ChatContentTypes.transferReceived,
+      ),
+      _ => rawContent,
+    };
     return <String, Object?>{
       ...item,
       'conversation_type': item['conversation_type']?.toString() ?? type,
@@ -2492,6 +2534,14 @@ class BusinessImService extends ChangeNotifier {
         ...payload,
         if (content.isNotEmpty) 'content': content,
       }),
+      ChatContentTypes.redPacketReceived => _paymentReceiptContent(
+        payload,
+        action: ChatContentTypes.redPacketReceived,
+      ),
+      ChatContentTypes.transferReceived => _paymentReceiptContent(
+        payload,
+        action: ChatContentTypes.transferReceived,
+      ),
       _ => content.isNotEmpty ? content : _payloadContent(payload),
     };
     return <String, Object?>{
@@ -2506,6 +2556,8 @@ class BusinessImService extends ChangeNotifier {
         'message_seq',
       ], fallback: _intValue(raw, ['message_seq'])),
       'channel_id': canonicalChannelId,
+      if (channelType == _requireChat().channelTypePerson)
+        'receiver_id': _receiverIdFromChannel(canonicalChannelId),
       'channel_type': channelType,
       'from_uid': fromUid,
       'is_me': _isCurrentUserMessage(senderId: senderId, senderUid: fromUid),
@@ -2521,6 +2573,40 @@ class BusinessImService extends ChangeNotifier {
       ]),
       'from_user': fromUser,
     };
+  }
+
+  int _conversationChannelType(
+    Map<String, Object?> item,
+    Map<String, Object?> payload,
+  ) {
+    final chat = _requireChat();
+    final direct = _intValue(item, ['channel_type']);
+    if (direct > 0) {
+      return direct;
+    }
+    final payloadType = _intValue(payload, ['channel_type']);
+    if (payloadType > 0) {
+      return payloadType;
+    }
+    final markers = <String>[
+      _value(item, ['conversation_type']),
+      _value(item, ['channel_type_name']),
+      _value(item, ['type']),
+      _value(payload, ['conversation_type']),
+      _value(payload, ['channel_type_name']),
+      _value(payload, ['scene']),
+      _value(payload, ['type']),
+    ].map((value) => value.trim().toLowerCase()).toList(growable: false);
+    if (markers.any((value) => value == 'group' || value == 'group_chat')) {
+      return chat.channelTypeGroup;
+    }
+    if (markers.any(
+      (value) =>
+          value == 'private' || value == 'person' || value == 'private_chat',
+    )) {
+      return chat.channelTypePerson;
+    }
+    return chat.channelTypePerson;
   }
 
   Map<String, Object?> _normalizeSendResult(
@@ -3038,9 +3124,12 @@ class BusinessImService extends ChangeNotifier {
           : 'transfer';
       final existingNested = _asMap(existingPayload[nestedKey]);
       final nestedReceipt = _asMap(receipt[nestedKey]);
+      final flatReceipt = Map<String, Object?>.from(receipt)
+        ..remove('red_packet')
+        ..remove('transfer');
       final updatedNested = _cleanPayload({
         ...existingNested,
-        ...receipt,
+        ...flatReceipt,
         ...nestedReceipt,
         if (_actionReceiptFromCurrentUser(receipt)) 'received_by_me': '1',
       });
@@ -3304,11 +3393,17 @@ class BusinessImService extends ChangeNotifier {
     required String senderName,
   }) {
     if (action == ChatContentTypes.redPacketReceived) {
+      if (actorIsCurrentUser && senderIsCurrentUser) {
+        return '你领取了自己的红包';
+      }
       if (actorIsCurrentUser) {
         return '你领取了$senderName的红包';
       }
       if (senderIsCurrentUser) {
         return '$actorName领取了你的红包';
+      }
+      if (actorName.isNotEmpty && actorName == senderName) {
+        return '$actorName领取了自己的红包';
       }
       return '$actorName领取了$senderName的红包';
     }
@@ -4440,7 +4535,9 @@ class BusinessImService extends ChangeNotifier {
     final contentType = payload['content_type']?.toString() ?? '';
     if (content.isNotEmpty &&
         contentType != ChatContentTypes.redPacket &&
-        contentType != ChatContentTypes.transfer) {
+        contentType != ChatContentTypes.transfer &&
+        contentType != ChatContentTypes.redPacketReceived &&
+        contentType != ChatContentTypes.transferReceived) {
       return content;
     }
     return switch (contentType) {
@@ -4550,13 +4647,51 @@ class BusinessImService extends ChangeNotifier {
     if (content.isNotEmpty &&
         content != '[消息]' &&
         content != '[领取红包]' &&
-        content != '[已收款]') {
+        content != '已领取红包' &&
+        content != '[已收款]' &&
+        content != '已收款') {
       return content;
     }
-    final actorIsCurrentUser = _boolValue(payload['actor_is_me']);
-    final senderIsCurrentUser = _boolValue(payload['sender_is_me']);
-    final actorName = _value(payload, ['actor_name'], fallback: '对方');
-    final senderName = _value(payload, ['sender_name'], fallback: '对方');
+    final receipt = _asMap(payload['receipt']);
+    final nestedKey = action == ChatContentTypes.redPacketReceived
+        ? 'red_packet'
+        : 'transfer';
+    final nested = {
+      ..._asMap(payload[nestedKey]),
+      ..._asMap(receipt[nestedKey]),
+    };
+    final currentUserId = _session?.userId.toString() ?? '';
+    final actorId = _value(
+      payload,
+      ['actor_id'],
+      fallback: _value(receipt, [
+        'operator_id',
+        'reader_id',
+        'receiver_id',
+        'actor_id',
+        'user_id',
+      ], fallback: _value(nested, ['receiver_id'])),
+    );
+    final senderId = _value(payload, [
+      'source_sender_id',
+      'original_sender_id',
+    ], fallback: _value(nested, ['sender_id']));
+    final actorIsCurrentUser =
+        _boolValue(payload['actor_is_me']) ||
+        (actorId.isNotEmpty && actorId == currentUserId);
+    final senderIsCurrentUser =
+        _boolValue(payload['sender_is_me']) ||
+        (senderId.isNotEmpty && senderId == currentUserId);
+    final actorName = _displayNameFromSources([
+      receipt,
+      nested,
+      payload,
+    ], fallback: _profileDisplayName(actorId, fallback: '对方'));
+    final senderName = _displayNameFromSources([
+      nested,
+      receipt,
+      payload,
+    ], fallback: _profileDisplayName(senderId, fallback: '对方'));
     return _paymentActionReceiptText(
       action: action,
       actorIsCurrentUser: actorIsCurrentUser,

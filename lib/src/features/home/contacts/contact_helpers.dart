@@ -125,9 +125,17 @@ String _avatarUrlFromMap(Map<String, Object?> item, {String fallback = ''}) {
 }
 
 String _normalizeAvatarUrl(String raw) {
-  final value = raw.trim();
+  var value = raw.trim();
   if (value.isEmpty || value.startsWith('data:')) {
     return value;
+  }
+  while (value.startsWith('./')) {
+    value = value.substring(2);
+  }
+  if (value.startsWith('/public/')) {
+    value = value.substring('/public'.length);
+  } else if (value.startsWith('public/')) {
+    value = value.substring('public/'.length);
   }
   final uri = Uri.tryParse(value);
   if (uri != null && uri.hasScheme) {

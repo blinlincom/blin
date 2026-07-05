@@ -23,7 +23,8 @@ class _MessageBubble extends StatelessWidget {
     final isImageLike =
         contentType == ChatContentTypes.image ||
         contentType == ChatContentTypes.gif ||
-        contentType == ChatContentTypes.sticker;
+        contentType == ChatContentTypes.sticker ||
+        contentType == ChatContentTypes.video;
     final bubble = _MessageBubbleContent(
       contentType: contentType,
       content: content,
@@ -31,10 +32,11 @@ class _MessageBubble extends StatelessWidget {
       isMe: isMe,
       status: status,
       redPacketReceiving: redPacketReceiving,
+      onRetry: onRetry,
     );
     return Container(
       constraints: BoxConstraints(
-        maxWidth: MediaQuery.sizeOf(context).width * 0.68,
+        maxWidth: _bubbleMaxWidth(context, contentType),
       ),
       padding: _bubblePadding(contentType),
       decoration: BoxDecoration(
@@ -43,19 +45,16 @@ class _MessageBubble extends StatelessWidget {
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.end,
         children: [
-          bubble,
+          Align(alignment: Alignment.centerLeft, widthFactor: 1, child: bubble),
           if (!isImageLike) ...[
             const SizedBox(height: 5),
-            Align(
-              alignment: Alignment.centerRight,
-              child: _MessageMeta(
-                time: _messageBubbleTime(item),
-                isMe: isMe,
-                status: status,
-                onRetry: onRetry,
-              ),
+            _MessageMeta(
+              time: _messageBubbleTime(item),
+              isMe: isMe,
+              status: status,
+              onRetry: onRetry,
             ),
           ],
         ],
@@ -64,7 +63,8 @@ class _MessageBubble extends StatelessWidget {
   }
 
   Color _bubbleColor(String contentType) {
-    if (contentType == ChatContentTypes.redPacket) {
+    if (contentType == ChatContentTypes.redPacket ||
+        contentType == ChatContentTypes.video) {
       return Colors.transparent;
     }
     return isMe ? _chatMineBubbleColor : Colors.white;
@@ -75,16 +75,33 @@ class _MessageBubble extends StatelessWidget {
       ChatContentTypes.redPacket => EdgeInsets.zero,
       ChatContentTypes.image ||
       ChatContentTypes.gif ||
-      ChatContentTypes.sticker => const EdgeInsets.all(0),
+      ChatContentTypes.sticker ||
+      ChatContentTypes.video => const EdgeInsets.all(0),
       ChatContentTypes.file ||
       ChatContentTypes.voice ||
-      ChatContentTypes.video ||
       ChatContentTypes.contactCard ||
       ChatContentTypes.transfer => const EdgeInsets.symmetric(
         horizontal: 11,
         vertical: 9,
       ),
       _ => const EdgeInsets.fromLTRB(12, 8, 9, 7),
+    };
+  }
+
+  double _bubbleMaxWidth(BuildContext context, String contentType) {
+    final width = MediaQuery.sizeOf(context).width;
+    return switch (contentType) {
+      ChatContentTypes.redPacket =>
+        (width * 0.72).clamp(220.0, 240.0).toDouble(),
+      ChatContentTypes.file ||
+      ChatContentTypes.video ||
+      ChatContentTypes.contactCard ||
+      ChatContentTypes.transfer => width * 0.62,
+      ChatContentTypes.voice => width * 0.46,
+      ChatContentTypes.image ||
+      ChatContentTypes.gif ||
+      ChatContentTypes.sticker => width * 0.62,
+      _ => width * 0.56,
     };
   }
 }
@@ -241,6 +258,7 @@ class _MessageBubbleContent extends StatelessWidget {
     required this.isMe,
     required this.status,
     required this.redPacketReceiving,
+    required this.onRetry,
   });
 
   final String contentType;
@@ -249,6 +267,7 @@ class _MessageBubbleContent extends StatelessWidget {
   final bool isMe;
   final String status;
   final bool redPacketReceiving;
+  final VoidCallback onRetry;
 
   @override
   Widget build(BuildContext context) {
@@ -256,6 +275,7 @@ class _MessageBubbleContent extends StatelessWidget {
       ChatContentTypes.image => _ImageMessagePreview(
         payload: payload,
         status: status,
+        onRetry: onRetry,
       ),
       ChatContentTypes.gif => _MediaPreview(
         icon: Icons.gif_box_outlined,
@@ -280,6 +300,7 @@ class _MessageBubbleContent extends StatelessWidget {
         payload: payload,
         content: content,
         status: status,
+        onRetry: onRetry,
       ),
       ChatContentTypes.file => _FilePreview(payload: payload, content: content),
       ChatContentTypes.contactCard => _ContactCardPreview(payload: payload),

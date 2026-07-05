@@ -59,10 +59,15 @@ class _MediaPreview extends StatelessWidget {
 }
 
 class _ImageMessagePreview extends StatelessWidget {
-  const _ImageMessagePreview({required this.payload, required this.status});
+  const _ImageMessagePreview({
+    required this.payload,
+    required this.status,
+    required this.onRetry,
+  });
 
   final Map<String, Object?> payload;
   final String status;
+  final VoidCallback onRetry;
 
   @override
   Widget build(BuildContext context) {
@@ -74,18 +79,29 @@ class _ImageMessagePreview extends StatelessWidget {
       ], fallback: _value(_asObjectMap(payload['media']), ['url'])),
     );
     final image = localPath.isNotEmpty && File(localPath).existsSync()
-        ? Image.file(File(localPath), fit: BoxFit.cover)
+        ? Image.file(
+            File(localPath),
+            fit: BoxFit.cover,
+            errorBuilder: (_, __, ___) => const _MediaLoadPlaceholder(
+              icon: Icons.broken_image_outlined,
+              title: '图片无法显示',
+            ),
+          )
         : url.isNotEmpty
-        ? Image.network(url, fit: BoxFit.cover, gaplessPlayback: true)
-        : null;
-    if (image == null) {
-      return const _MediaPreview(
-        icon: Icons.image_outlined,
-        title: '图片',
-        subtitle: '',
-        isMe: false,
-      );
-    }
+        ? Image.network(
+            url,
+            fit: BoxFit.cover,
+            gaplessPlayback: true,
+            loadingBuilder: _mediaLoadingBuilder,
+            errorBuilder: (_, __, ___) => const _MediaLoadPlaceholder(
+              icon: Icons.broken_image_outlined,
+              title: '图片加载失败',
+            ),
+          )
+        : const _MediaLoadPlaceholder(
+            icon: Icons.image_outlined,
+            title: '图片地址为空',
+          );
     return ClipRRect(
       borderRadius: BorderRadius.circular(8),
       child: SizedBox(
@@ -98,6 +114,7 @@ class _ImageMessagePreview extends StatelessWidget {
             _MediaUploadOverlay(
               status: status,
               progress: _uploadProgress(payload),
+              onRetry: onRetry,
             ),
           ],
         ),
@@ -111,11 +128,13 @@ class _VideoMessagePreview extends StatelessWidget {
     required this.payload,
     required this.content,
     required this.status,
+    required this.onRetry,
   });
 
   final Map<String, Object?> payload;
   final String content;
   final String status;
+  final VoidCallback onRetry;
 
   @override
   Widget build(BuildContext context) {
@@ -135,29 +154,47 @@ class _VideoMessagePreview extends StatelessWidget {
         'image_path',
       ]),
     );
+    final source = _videoPreviewSource(payload, media);
     final localPath = _looksLikeVideoPath(rawLocalPath) ? '' : rawLocalPath;
     final coverUrl = _looksLikeVideoPath(rawCoverUrl)
         ? ''
         : _normalizeAvatarUrl(rawCoverUrl);
     final image = localPath.isNotEmpty && File(localPath).existsSync()
-        ? Image.file(File(localPath), fit: BoxFit.cover)
+        ? Image.file(
+            File(localPath),
+            fit: BoxFit.cover,
+            errorBuilder: (_, __, ___) => const _MediaLoadPlaceholder(
+              icon: Icons.videocam_off_outlined,
+              title: '封面无法显示',
+            ),
+          )
         : coverUrl.isNotEmpty
-        ? Image.network(coverUrl, fit: BoxFit.cover, gaplessPlayback: true)
+        ? Image.network(
+            coverUrl,
+            fit: BoxFit.cover,
+            gaplessPlayback: true,
+            loadingBuilder: _mediaLoadingBuilder,
+            errorBuilder: (_, __, ___) => const _MediaLoadPlaceholder(
+              icon: Icons.videocam_off_outlined,
+              title: '封面加载失败',
+            ),
+          )
         : null;
     if (image == null) {
-      final source = _videoPreviewSource(payload, media);
       if (source != null) {
         return _VideoFramePreview(
           source: source,
           payload: payload,
           content: content,
           status: status,
+          onRetry: onRetry,
         );
       }
       return _VideoPlaceholderPreview(
         payload: payload,
         content: content,
         status: status,
+        onRetry: onRetry,
       );
     }
     return ClipRRect(
@@ -188,6 +225,76 @@ class _VideoMessagePreview extends StatelessWidget {
             _MediaUploadOverlay(
               status: status,
               progress: _uploadProgress(payload),
+              onRetry: onRetry,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+Widget _mediaLoadingBuilder(
+  BuildContext context,
+  Widget child,
+  ImageChunkEvent? loadingProgress,
+) {
+  if (loadingProgress == null) {
+    return child;
+  }
+  final expected = loadingProgress.expectedTotalBytes;
+  final progress = expected == null || expected <= 0
+      ? null
+      : loadingProgress.cumulativeBytesLoaded / expected;
+  return _MediaLoadPlaceholder(
+    icon: Icons.image_outlined,
+    title: '加载中',
+    progress: progress,
+  );
+}
+
+class _MediaLoadPlaceholder extends StatelessWidget {
+  const _MediaLoadPlaceholder({
+    required this.icon,
+    required this.title,
+    this.progress,
+  });
+
+  final IconData icon;
+  final String title;
+  final double? progress;
+
+  @override
+  Widget build(BuildContext context) {
+    final value = progress;
+    return DecoratedBox(
+      decoration: const BoxDecoration(color: Color(0xffeef0f3)),
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (value == null)
+              Icon(icon, color: const Color(0xff8e96a3), size: 28)
+            else
+              SizedBox(
+                width: 28,
+                height: 28,
+                child: CircularProgressIndicator(
+                  value: value.clamp(0, 1).toDouble(),
+                  strokeWidth: 2.2,
+                  color: const Color(0xff8e96a3),
+                  backgroundColor: const Color(0x338e96a3),
+                ),
+              ),
+            const SizedBox(height: 7),
+            Text(
+              title,
+              style: const TextStyle(
+                color: Color(0xff737b88),
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+                height: 1,
+              ),
             ),
           ],
         ),
@@ -211,12 +318,14 @@ class _VideoFramePreview extends StatefulWidget {
     required this.payload,
     required this.content,
     required this.status,
+    required this.onRetry,
   });
 
   final _VideoPreviewSource source;
   final Map<String, Object?> payload;
   final String content;
   final String status;
+  final VoidCallback onRetry;
 
   @override
   State<_VideoFramePreview> createState() => _VideoFramePreviewState();
@@ -299,6 +408,7 @@ class _VideoFramePreviewState extends State<_VideoFramePreview> {
         payload: widget.payload,
         content: widget.content,
         status: widget.status,
+        onRetry: widget.onRetry,
       );
     }
     final size = controller.value.size;
@@ -340,6 +450,7 @@ class _VideoFramePreviewState extends State<_VideoFramePreview> {
             _MediaUploadOverlay(
               status: widget.status,
               progress: _uploadProgress(widget.payload),
+              onRetry: widget.onRetry,
             ),
           ],
         ),
@@ -353,11 +464,13 @@ class _VideoPlaceholderPreview extends StatelessWidget {
     required this.payload,
     required this.content,
     required this.status,
+    required this.onRetry,
   });
 
   final Map<String, Object?> payload;
   final String content;
   final String status;
+  final VoidCallback onRetry;
 
   @override
   Widget build(BuildContext context) {
@@ -434,6 +547,7 @@ class _VideoPlaceholderPreview extends StatelessWidget {
             _MediaUploadOverlay(
               status: status,
               progress: _uploadProgress(payload),
+              onRetry: onRetry,
             ),
           ],
         ),
@@ -443,10 +557,15 @@ class _VideoPlaceholderPreview extends StatelessWidget {
 }
 
 class _MediaUploadOverlay extends StatelessWidget {
-  const _MediaUploadOverlay({required this.status, required this.progress});
+  const _MediaUploadOverlay({
+    required this.status,
+    required this.progress,
+    required this.onRetry,
+  });
 
   final String status;
   final double progress;
+  final VoidCallback onRetry;
 
   @override
   Widget build(BuildContext context) {
@@ -455,43 +574,62 @@ class _MediaUploadOverlay extends StatelessWidget {
     }
     final failed = status == 'failed';
     final hasProgress = progress > 0 && progress < 1;
-    return ColoredBox(
-      color: const Color(0x66000000),
-      child: Center(
-        child: Container(
-          width: 58,
-          height: 58,
-          alignment: Alignment.center,
-          decoration: const BoxDecoration(
-            color: Color(0xaa000000),
-            shape: BoxShape.circle,
-          ),
-          child: failed
-              ? const Icon(Icons.error_outline, color: Colors.white, size: 28)
-              : Stack(
-                  alignment: Alignment.center,
-                  children: [
-                    SizedBox(
-                      width: 34,
-                      height: 34,
-                      child: CircularProgressIndicator(
-                        value: hasProgress ? progress : null,
-                        strokeWidth: 2.4,
-                        color: Colors.white,
-                        backgroundColor: const Color(0x55ffffff),
-                      ),
-                    ),
-                    if (hasProgress)
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: failed ? onRetry : null,
+      child: ColoredBox(
+        color: const Color(0x66000000),
+        child: Center(
+          child: Container(
+            width: failed ? 76 : 58,
+            height: failed ? 62 : 58,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: const Color(0xaa000000),
+              borderRadius: BorderRadius.circular(failed ? 10 : 999),
+            ),
+            child: failed
+                ? const Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.error_outline, color: Colors.white, size: 25),
+                      SizedBox(height: 4),
                       Text(
-                        '${(progress * 100).clamp(1, 99).round()}%',
-                        style: const TextStyle(
+                        '重发',
+                        style: TextStyle(
                           color: Colors.white,
-                          fontSize: 10,
+                          fontSize: 11,
                           fontWeight: FontWeight.w700,
+                          height: 1,
                         ),
                       ),
-                  ],
-                ),
+                    ],
+                  )
+                : Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      SizedBox(
+                        width: 34,
+                        height: 34,
+                        child: CircularProgressIndicator(
+                          value: hasProgress ? progress : null,
+                          strokeWidth: 2.4,
+                          color: Colors.white,
+                          backgroundColor: const Color(0x55ffffff),
+                        ),
+                      ),
+                      if (hasProgress)
+                        Text(
+                          '${(progress * 100).clamp(1, 99).round()}%',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 10,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                    ],
+                  ),
+          ),
         ),
       ),
     );

@@ -4,7 +4,6 @@ class _Composer extends StatelessWidget {
   const _Composer({
     required this.controller,
     required this.focusNode,
-    required this.sending,
     required this.enabled,
     required this.disabledText,
     required this.toolsOpen,
@@ -16,7 +15,6 @@ class _Composer extends StatelessWidget {
 
   final TextEditingController controller;
   final FocusNode focusNode;
-  final bool sending;
   final bool enabled;
   final String disabledText;
   final bool toolsOpen;
@@ -45,7 +43,7 @@ class _Composer extends StatelessWidget {
             _ComposerIconButton(
               tooltip: '语音',
               icon: Icons.mic_none,
-              onPressed: sending || !enabled ? null : onVoice,
+              onPressed: !enabled ? null : onVoice,
             ),
             const SizedBox(width: 6),
             Expanded(
@@ -64,16 +62,12 @@ class _Composer extends StatelessWidget {
                   enabled: enabled,
                   textInputAction: TextInputAction.send,
                   onSubmitted: (_) {
-                    if (!sending && enabled) {
+                    if (enabled) {
                       onSend();
                     }
                   },
                   decoration: InputDecoration(
-                    hintText: sending
-                        ? '发送中'
-                        : enabled
-                        ? '输入消息'
-                        : disabledText,
+                    hintText: enabled ? '输入消息' : disabledText,
                     hintStyle: const TextStyle(
                       color: Color(0xffaeb4bd),
                       fontSize: 15,
@@ -109,18 +103,18 @@ class _Composer extends StatelessWidget {
             _ComposerIconButton(
               tooltip: '表情',
               icon: Icons.sentiment_satisfied_alt,
-              onPressed: sending || !enabled ? null : onEmoji,
+              onPressed: !enabled ? null : onEmoji,
             ),
             const SizedBox(width: 4),
             _ComposerIconButton(
               tooltip: toolsOpen ? '收起' : '更多',
               icon: toolsOpen ? Icons.close : Icons.add_circle_outline,
-              onPressed: sending || !enabled ? null : onTools,
+              onPressed: !enabled ? null : onTools,
             ),
             ValueListenableBuilder<TextEditingValue>(
               valueListenable: controller,
               builder: (context, value, _) {
-                if (!enabled || (!sending && value.text.trim().isEmpty)) {
+                if (!enabled || value.text.trim().isEmpty) {
                   return const SizedBox.shrink();
                 }
                 return Row(
@@ -130,7 +124,7 @@ class _Composer extends StatelessWidget {
                     SizedBox(
                       height: 36,
                       child: TextButton(
-                        onPressed: sending ? null : onSend,
+                        onPressed: onSend,
                         style: TextButton.styleFrom(
                           foregroundColor: Colors.white,
                           backgroundColor: _chatAckColor,
