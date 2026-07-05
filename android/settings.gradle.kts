@@ -11,14 +11,7 @@ pluginManagement {
     includeBuild("$flutterSdkPath/packages/flutter_tools/gradle")
 
     repositories {
-        exclusiveContent {
-            forRepository {
-                maven("https://storage.googleapis.com/download.flutter.io")
-            }
-            filter {
-                includeGroup("io.flutter")
-            }
-        }
+        maven("https://storage.googleapis.com/download.flutter.io")
         google {
             content {
                 includeGroupByRegex("com\\.android.*")
