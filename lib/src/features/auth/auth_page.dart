@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:flutter/material.dart';
 
 import '../../app/session_controller.dart';
@@ -333,7 +335,7 @@ class _AuthPageState extends State<AuthPage> {
               _AuthInput(
                 controller: _registerUsername,
                 icon: Icons.person_outline,
-                hintText: '用户名（可选，默认使用手机号）',
+                hintText: '用户名（可选，不填自动生成）',
                 required: false,
               ),
               const SizedBox(height: 16),
@@ -423,15 +425,12 @@ class _AuthPageState extends State<AuthPage> {
     final email = _registerEmail.text.trim();
     final username = _registerUsername.text.trim().isNotEmpty
         ? _registerUsername.text.trim()
-        : mobile;
-    if (username.isEmpty) {
-      _showSnack('请填写手机号或用户名');
-      return;
-    }
+        : _randomRegisterUsername();
     try {
       await widget.controller.register(
         username: username,
         password: _registerPassword.text,
+        nickname: _randomRegisterNickname(),
         email: email,
         mobile: mobile,
         captcha: _registerCaptcha.text.trim(),
@@ -448,6 +447,26 @@ class _AuthPageState extends State<AuthPage> {
     } catch (_) {
       // 错误已经写入 controller，页面通过 Notice 展示。
     }
+  }
+
+  String _randomRegisterUsername() {
+    const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+    final random = Random.secure();
+    final suffix = List<String>.generate(
+      8,
+      (_) => chars[random.nextInt(chars.length)],
+    ).join();
+    return 'bim_${DateTime.now().millisecondsSinceEpoch}_$suffix';
+  }
+
+  String _randomRegisterNickname() {
+    const chars = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+    final random = Random.secure();
+    final suffix = List<String>.generate(
+      6,
+      (_) => chars[random.nextInt(chars.length)],
+    ).join();
+    return 'BIM用户$suffix';
   }
 
   Future<void> _sendRegisterCode() async {

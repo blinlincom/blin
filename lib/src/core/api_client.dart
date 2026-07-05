@@ -65,6 +65,7 @@ class ApiClient {
     required String username,
     required String password,
     required String device,
+    String nickname = '',
     String mobile = '',
     String email = '',
     String captcha = '',
@@ -76,6 +77,7 @@ class ApiClient {
       params: {
         'username': username,
         'password': password,
+        if (nickname.isNotEmpty) 'nickname': nickname,
         if (mobile.isNotEmpty) 'mobile': mobile,
         if (email.isNotEmpty) 'email': email,
         if (captcha.isNotEmpty) 'captcha': captcha,
@@ -210,14 +212,7 @@ class ApiClient {
     if (!result.isSuccess) {
       throw ApiException(result.message, code: result.code);
     }
-    final list = result.data['list'];
-    if (list is List) {
-      return list
-          .whereType<Map>()
-          .map((item) => item.cast<String, Object?>())
-          .toList();
-    }
-    return [];
+    return _mapListFromPayload(result.data);
   }
 
   Future<List<Map<String, Object?>>> personMessages({
@@ -238,14 +233,7 @@ class ApiClient {
       limit: limit,
       pullMode: pullMode,
     );
-    final list = data['list'];
-    if (list is List) {
-      return list
-          .whereType<Map>()
-          .map((item) => item.cast<String, Object?>())
-          .toList();
-    }
-    return [];
+    return _mapListFromPayload(data);
   }
 
   Future<Map<String, Object?>> personMessagePage({
@@ -294,14 +282,32 @@ class ApiClient {
       limit: limit,
       pullMode: pullMode,
     );
-    final list = data['list'];
-    if (list is List) {
-      return list
-          .whereType<Map>()
-          .map((item) => item.cast<String, Object?>())
-          .toList();
+    return _mapListFromPayload(data);
+  }
+
+  List<Map<String, Object?>> _mapListFromPayload(Map<String, Object?> data) {
+    Object? list;
+    for (final key in ['list', 'items', 'rows', 'records']) {
+      final value = data[key];
+      if (value is List) {
+        list = value;
+        break;
+      }
     }
-    return [];
+    final nested = data['data'];
+    if (list == null && nested is List) {
+      list = nested;
+    }
+    if (list == null && nested is Map) {
+      return _mapListFromPayload(nested.cast<String, Object?>());
+    }
+    if (list is! List) {
+      return [];
+    }
+    return list
+        .whereType<Map>()
+        .map((item) => item.cast<String, Object?>())
+        .toList();
   }
 
   Future<Map<String, Object?>> groupMessagePage({
@@ -340,6 +346,7 @@ class ApiClient {
     required String contentType,
     Map<String, Object?> params = const {},
     String filePath = '',
+    void Function(double progress)? onUploadProgress,
   }) {
     return secureImBusinessAction(
       action: 'im_person_send',
@@ -353,6 +360,7 @@ class ApiClient {
       },
       params: {'client_msg_no': clientMsgNo},
       filePath: filePath,
+      onUploadProgress: onUploadProgress,
       secureResponse: true,
     );
   }
@@ -365,6 +373,7 @@ class ApiClient {
     required String contentType,
     Map<String, Object?> params = const {},
     String filePath = '',
+    void Function(double progress)? onUploadProgress,
   }) {
     return secureImBusinessAction(
       action: 'im_group_send',
@@ -378,6 +387,7 @@ class ApiClient {
       },
       params: {'client_msg_no': clientMsgNo},
       filePath: filePath,
+      onUploadProgress: onUploadProgress,
       secureResponse: true,
     );
   }
@@ -492,6 +502,7 @@ class ApiClient {
     Map<String, Object?> params = const {},
     String filePath = '',
     bool secureResponse = true,
+    void Function(double progress)? onUploadProgress,
   }) async {
     final result = await secureSignedImPost<Map<String, Object?>>(
       action,
@@ -499,6 +510,7 @@ class ApiClient {
       device: device,
       params: params,
       filePath: filePath,
+      onUploadProgress: onUploadProgress,
       secureResponse: secureResponse,
     );
     if (!result.isSuccess) {
@@ -516,6 +528,7 @@ class ApiClient {
     required Map<String, Object?> secureParams,
     String filePath = '',
     bool secureResponse = false,
+    void Function(double progress)? onUploadProgress,
   }) async {
     final timestamp = _timestamp();
     final nonce = _nonce();
@@ -565,6 +578,7 @@ class ApiClient {
         payload,
         filePath: encryptedFile?.path ?? '',
         fileFieldName: encryptedFile == null ? 'file' : 'secure_file',
+        onUploadProgress: onUploadProgress,
         secureResponse: secureResponse
             ? _SecureResponseContext(
                 session: session,
@@ -593,6 +607,7 @@ class ApiClient {
     required Map<String, Object?> params,
     String filePath = '',
     bool secureResponse = true,
+    void Function(double progress)? onUploadProgress,
   }) {
     final clientMsgNo = _nonce();
     final timestamp = _timestamp();
@@ -624,6 +639,7 @@ class ApiClient {
       action,
       payload,
       filePath: filePath,
+      onUploadProgress: onUploadProgress,
       secureResponse: secureResponse
           ? _SecureResponseContext(
               session: session,
@@ -641,6 +657,7 @@ class ApiClient {
     required Map<String, Object?> params,
     String filePath = '',
     bool expectSecureResponse = true,
+    void Function(double progress)? onUploadProgress,
   }) {
     final clientMsgNo = _nonce();
     final timestamp = _timestamp();
@@ -671,6 +688,7 @@ class ApiClient {
       action,
       payload,
       filePath: filePath,
+      onUploadProgress: onUploadProgress,
       secureResponse: expectSecureResponse
           ? _SecureResponseContext.public(
               device: device,
@@ -701,6 +719,7 @@ class ApiClient {
     Map<String, Object?> params, {
     String filePath = '',
     String fileFieldName = 'file',
+    void Function(double progress)? onUploadProgress,
     _SecureResponseContext? secureResponse,
   }) async {
     final stopwatch = Stopwatch()..start();
@@ -722,6 +741,14 @@ class ApiClient {
       final response = await _dio.post<Object?>(
         action,
         data: FormData.fromMap(requestData),
+        onSendProgress: onUploadProgress == null
+            ? null
+            : (sent, total) {
+                if (total <= 0) {
+                  return;
+                }
+                onUploadProgress((sent / total).clamp(0, 1).toDouble());
+              },
       );
       final result = _parse<T>(response.data, secureResponse: secureResponse);
       AppLogger.info(

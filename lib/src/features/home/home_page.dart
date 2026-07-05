@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:photo_manager/photo_manager.dart';
+import 'package:video_player/video_player.dart';
 
 import '../../app/session_controller.dart';
 import '../../core/app_config.dart';
@@ -354,7 +355,7 @@ class _MessagesTabState extends State<MessagesTab> {
 
   Widget _conversationTile(BuildContext context, Map<String, Object?> item) {
     final title = _conversationTitle(item);
-    final content = item['content']?.toString() ?? '';
+    final content = _conversationSubtitle(item);
     final time = item['msg_time']?.toString() ?? '';
     final unread = _intValue(item, ['unread_quantity']);
     final channelType = _channelTypeFromConversation(item);
@@ -2407,6 +2408,13 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   late int _messageRevision;
   StreamSubscription<BusinessImMessageEvent>? _messageSub;
   bool _didInitialScroll = false;
+  bool _peerOnline = false;
+  bool _onlineStatusLoading = false;
+  int _onlineStatusToken = 0;
+  int? _groupMemberCount;
+  int? _groupOnlineCount;
+  bool _groupPresenceLoading = false;
+  int _groupPresenceToken = 0;
   final Set<String> _burnTriggeredClientMsgNos = <String>{};
 
   bool get _isGroup => widget.channelType == _groupChannelType;
@@ -2433,8 +2441,10 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     );
     _loadMessagesIntoState(showLoading: true);
     _refreshGroupMuteState();
+    _refreshPeerOnlineStatus();
     if (_isGroup) {
       unawaited(_loadGroupMuteStatus());
+      unawaited(_refreshGroupPresence());
     }
     _textController.text = widget.controller.readDraft(
       channelId: widget.channelId,
@@ -2487,6 +2497,11 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       _didInitialScroll = false;
       _burnTriggeredClientMsgNos.clear();
       _groupMuteState = const {};
+      _peerOnline = false;
+      _onlineStatusLoading = false;
+      _groupMemberCount = null;
+      _groupOnlineCount = null;
+      _groupPresenceLoading = false;
       unawaited(
         widget.controller.openConversation(
           channelId: widget.channelId,
@@ -2495,8 +2510,10 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       );
       _loadMessagesIntoState(showLoading: true);
       _refreshGroupMuteState();
+      _refreshPeerOnlineStatus();
       if (_isGroup) {
         unawaited(_loadGroupMuteStatus());
+        unawaited(_refreshGroupPresence());
       }
     }
   }
@@ -2556,6 +2573,150 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         'load group mute status failed',
         data: {'group_id': _groupId, 'error': error.toString()},
       );
+    }
+  }
+
+  String _chatHeaderStatusText() {
+    if (_isGroup) {
+      if (_groupOnlineCount == null) {
+        if (!_groupPresenceLoading) {
+          return '在线人数获取失败';
+        }
+        return '在线人数同步中';
+      }
+      return '$_groupOnlineCount人在线';
+    }
+    if (_onlineStatusLoading) {
+      return '检测中';
+    }
+    return _peerOnline ? '在线' : '离线';
+  }
+
+  String _chatHeaderTitle() {
+    final title = widget.title.isEmpty ? '群聊' : widget.title;
+    if (!_isGroup) {
+      return widget.title;
+    }
+    final count = _groupMemberCount;
+    return count == null ? title : '$title（$count）';
+  }
+
+  Future<void> _refreshGroupPresence() async {
+    if (!_isGroup) {
+      return;
+    }
+    final token = ++_groupPresenceToken;
+    if (mounted) {
+      setState(() => _groupPresenceLoading = true);
+    }
+    try {
+      final groupMembersResult = await widget.controller.groupMembers(_groupId);
+      if (!mounted || token != _groupPresenceToken) {
+        return;
+      }
+      final members = _listFromResult(groupMembersResult);
+      final onlineCount = await _loadGroupOnlineCount(members);
+      if (!mounted || token != _groupPresenceToken) {
+        return;
+      }
+      setState(() {
+        _groupMemberCount = members.length;
+        _groupOnlineCount = onlineCount;
+        _groupPresenceLoading = false;
+      });
+    } catch (error, stackTrace) {
+      AppLogger.warn(
+        'ui',
+        'load group presence failed',
+        data: {
+          'group_id': _groupId,
+          'error': error.toString(),
+          'stack': stackTrace.toString(),
+        },
+      );
+      if (!mounted || token != _groupPresenceToken) {
+        return;
+      }
+      setState(() => _groupPresenceLoading = false);
+    }
+  }
+
+  Future<int> _loadGroupOnlineCount(List<Map<String, Object?>> members) async {
+    if (members.isEmpty) {
+      return 0;
+    }
+    const limit = 500;
+    var page = 1;
+    final counted = <String>{};
+    while (mounted) {
+      final result = await widget.controller.onlineUsers(
+        page: page,
+        limit: limit,
+      );
+      final onlineUsers = _listFromResult(result);
+      for (final member in members) {
+        final key = _memberPresenceKey(member);
+        if (counted.contains(key)) {
+          continue;
+        }
+        if (onlineUsers.any((user) => _memberMatchesOnlineUser(member, user))) {
+          counted.add(key);
+        }
+      }
+      if (counted.length >= members.length || onlineUsers.length < limit) {
+        break;
+      }
+      page += 1;
+    }
+    return counted.length;
+  }
+
+  Future<void> _refreshPeerOnlineStatus() async {
+    if (_isGroup) {
+      if (mounted) {
+        setState(() {
+          _peerOnline = false;
+          _onlineStatusLoading = false;
+        });
+      }
+      return;
+    }
+    final receiverId = _receiverId;
+    if (receiverId.isEmpty) {
+      return;
+    }
+    final token = ++_onlineStatusToken;
+    if (mounted) {
+      setState(() => _onlineStatusLoading = true);
+    }
+    try {
+      final result = await widget.controller.onlineUsers(limit: 200);
+      final list = _listFromResult(result);
+      final online = list.any((item) => _onlineUserMatches(item, receiverId));
+      if (!mounted || token != _onlineStatusToken) {
+        return;
+      }
+      setState(() {
+        _peerOnline = online;
+        _onlineStatusLoading = false;
+      });
+    } catch (error, stackTrace) {
+      AppLogger.warn(
+        'ui',
+        'load peer online status failed',
+        data: {
+          'receiver_id': receiverId,
+          'error': error.toString(),
+          'stack': stackTrace.toString(),
+        },
+      );
+      if (!mounted || token != _onlineStatusToken) {
+        return;
+      }
+      setState(() {
+        _peerOnline = false;
+        _onlineStatusLoading = false;
+      });
     }
   }
 
@@ -2779,26 +2940,14 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
             return Column(
               children: [
                 _ChatHeader(
-                  title: widget.title,
+                  title: _chatHeaderTitle(),
                   avatarUrl: _headerAvatarUrl(),
                   isGroup: _isGroup,
+                  statusText: _chatHeaderStatusText(),
+                  online: !_isGroup && _peerOnline,
+                  groupPresenceLoading: _groupPresenceLoading,
                   onBack: () => Navigator.of(context).maybePop(),
-                  onDetail: () => _push(
-                    context,
-                    _isGroup
-                        ? GroupDetailPage(
-                            controller: widget.controller,
-                            title: widget.title,
-                            groupId: _groupId,
-                            channelId: widget.channelId,
-                          )
-                        : PrivateChatActionsPage(
-                            controller: widget.controller,
-                            title: widget.title,
-                            receiverId: _receiverId,
-                            channelId: widget.channelId,
-                          ),
-                  ),
+                  onDetail: _openChatDetail,
                 ),
                 if (_error != null) _ChatError(text: _error!),
                 if (_message.isNotEmpty) _InfoBar(text: _message),
@@ -3075,6 +3224,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
           hint: 'money 或 integral',
           initial: 'money',
         ),
+        const ActionInputField(id: 'remark', label: '备注'),
         if (_isGroup) const ActionInputField(id: 'receiver_id', label: '指定收款人'),
       ],
     );
@@ -3094,12 +3244,14 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
           receiverId: data['receiver_id'] ?? '',
           money: money,
           assetType: data['asset_type'] ?? 'money',
+          remark: data['remark'] ?? '',
         );
       } else {
         await widget.controller.sendPrivateTransfer(
           receiverId: _receiverId,
           money: money,
           assetType: data['asset_type'] ?? 'money',
+          remark: data['remark'] ?? '',
         );
       }
     });
@@ -3125,7 +3277,11 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
           hint: 'money 或 integral',
           initial: 'money',
         ),
-        const ActionInputField(id: 'remark', label: '备注'),
+        const ActionInputField(
+          id: 'remark',
+          label: '祝福语',
+          initial: '恭喜发财，大吉大利',
+        ),
         if (_isGroup)
           const ActionInputField(
             id: 'packet_type',
@@ -3364,6 +3520,31 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         channelId: widget.channelId,
       ),
     );
+    if (mounted && _isGroup) {
+      unawaited(_refreshGroupPresence());
+    }
+  }
+
+  Future<void> _openChatDetail() async {
+    await _push(
+      context,
+      _isGroup
+          ? GroupDetailPage(
+              controller: widget.controller,
+              title: widget.title,
+              groupId: _groupId,
+              channelId: widget.channelId,
+            )
+          : PrivateChatActionsPage(
+              controller: widget.controller,
+              title: widget.title,
+              receiverId: _receiverId,
+              channelId: widget.channelId,
+            ),
+    );
+    if (mounted && _isGroup) {
+      unawaited(_refreshGroupPresence());
+    }
   }
 
   Future<void> _runSending(
@@ -4418,12 +4599,7 @@ class _ConversationTile extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: 4),
-                  Text(
-                    subtitle,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(color: _mutedColor, fontSize: 13),
-                  ),
+                  _ConversationSubtitleText(text: subtitle),
                 ],
               ),
             ),
@@ -4460,6 +4636,45 @@ class _ConversationTile extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+class _ConversationSubtitleText extends StatelessWidget {
+  const _ConversationSubtitleText({required this.text});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    final prefixColor = _conversationPrefixColor(text);
+    if (prefixColor == null) {
+      return Text(
+        text,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(color: _mutedColor, fontSize: 13),
+      );
+    }
+    final prefix = text.startsWith('[红包]') ? '[红包]' : '[转账]';
+    final suffix = text.substring(prefix.length);
+    return Text.rich(
+      TextSpan(
+        children: [
+          TextSpan(
+            text: prefix,
+            style: TextStyle(color: prefixColor, fontWeight: FontWeight.w700),
+          ),
+          if (suffix.isNotEmpty)
+            TextSpan(
+              text: suffix,
+              style: const TextStyle(color: _mutedColor),
+            ),
+        ],
+      ),
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: const TextStyle(fontSize: 13),
     );
   }
 }
@@ -4858,6 +5073,9 @@ class _ChatHeader extends StatelessWidget {
     required this.title,
     required this.avatarUrl,
     required this.isGroup,
+    required this.statusText,
+    required this.online,
+    required this.groupPresenceLoading,
     required this.onBack,
     required this.onDetail,
   });
@@ -4865,11 +5083,117 @@ class _ChatHeader extends StatelessWidget {
   final String title;
   final String avatarUrl;
   final bool isGroup;
+  final String statusText;
+  final bool online;
+  final bool groupPresenceLoading;
   final VoidCallback onBack;
   final VoidCallback onDetail;
 
   @override
   Widget build(BuildContext context) {
+    if (isGroup) {
+      return Container(
+        height: 64,
+        color: _chatPageColor,
+        padding: const EdgeInsets.fromLTRB(8, 4, 10, 5),
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            Positioned(
+              left: 0,
+              top: 0,
+              bottom: 0,
+              child: _HeaderIconButton(
+                tooltip: '返回',
+                icon: Icons.chevron_left,
+                iconSize: 31,
+                onPressed: onBack,
+              ),
+            ),
+            Positioned.fill(
+              left: 86,
+              right: 118,
+              child: Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      title.isEmpty ? '群聊' : title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        color: Colors.black,
+                        fontSize: 17,
+                        fontWeight: FontWeight.w800,
+                        height: 1.05,
+                      ),
+                    ),
+                    const SizedBox(height: 5),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (groupPresenceLoading) ...[
+                          const SizedBox(
+                            width: 8,
+                            height: 8,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 1.4,
+                              color: Color(0xff8c939d),
+                            ),
+                          ),
+                          const SizedBox(width: 5),
+                        ],
+                        Flexible(
+                          child: Text(
+                            statusText,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: Color(0xff8c939d),
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.w500,
+                              height: 1,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            Positioned(
+              right: 0,
+              top: 0,
+              bottom: 0,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _HeaderIconButton(
+                    tooltip: '语音通话',
+                    icon: Icons.call_outlined,
+                    onPressed: () {},
+                  ),
+                  const SizedBox(width: 5),
+                  _HeaderIconButton(
+                    tooltip: '视频通话',
+                    icon: Icons.videocam_outlined,
+                    onPressed: () {},
+                  ),
+                  const SizedBox(width: 5),
+                  _HeaderIconButton(
+                    tooltip: '群设置',
+                    icon: Icons.more_horiz,
+                    onPressed: onDetail,
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
+    }
     return Container(
       height: 64,
       color: _chatPageColor,
@@ -4911,19 +5235,21 @@ class _ChatHeader extends StatelessWidget {
                 Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const SizedBox(
+                    SizedBox(
                       width: 7,
                       height: 7,
                       child: DecoratedBox(
                         decoration: BoxDecoration(
-                          color: _chatOnlineColor,
+                          color: online || isGroup
+                              ? _chatOnlineColor
+                              : const Color(0xffb8bec8),
                           shape: BoxShape.circle,
                         ),
                       ),
                     ),
                     const SizedBox(width: 5),
                     Text(
-                      isGroup ? '群聊' : '在线',
+                      statusText,
                       style: const TextStyle(
                         color: Color(0xff8c939d),
                         fontSize: 11.5,
@@ -5015,6 +5341,7 @@ class _MessageBubble extends StatelessWidget {
       content: content,
       payload: payload,
       isMe: isMe,
+      status: status,
     );
     return Container(
       constraints: BoxConstraints(
@@ -5027,16 +5354,19 @@ class _MessageBubble extends StatelessWidget {
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.end,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           bubble,
           if (!isImageLike) ...[
             const SizedBox(height: 5),
-            _MessageMeta(
-              time: _messageBubbleTime(item),
-              isMe: isMe,
-              status: status,
-              onRetry: onRetry,
+            Align(
+              alignment: Alignment.centerRight,
+              child: _MessageMeta(
+                time: _messageBubbleTime(item),
+                isMe: isMe,
+                status: status,
+                onRetry: onRetry,
+              ),
             ),
           ],
         ],
@@ -5107,9 +5437,9 @@ class _MessageMeta extends StatelessWidget {
 }
 
 class _RedPacketPreview extends StatelessWidget {
-  const _RedPacketPreview({required this.amount});
+  const _RedPacketPreview({required this.remark});
 
-  final String amount;
+  final String remark;
 
   @override
   Widget build(BuildContext context) {
@@ -5151,29 +5481,17 @@ class _RedPacketPreview extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      const Text(
-                        '恭喜发财，大吉大利',
+                      Text(
+                        remark.isEmpty ? '恭喜发财，大吉大利' : remark,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
+                        style: const TextStyle(
                           color: Colors.white,
                           fontSize: 14,
                           fontWeight: FontWeight.w700,
                         ),
                       ),
-                      const SizedBox(height: 5),
-                      Text(
-                        amount.isEmpty ? '¥0.00' : amount,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 18,
-                          fontWeight: FontWeight.w800,
-                          height: 1.05,
-                        ),
-                      ),
-                      const SizedBox(height: 5),
+                      const SizedBox(height: 8),
                       const Text(
                         'BIM红包',
                         style: TextStyle(color: Colors.white, fontSize: 12),
@@ -5213,17 +5531,22 @@ class _MessageBubbleContent extends StatelessWidget {
     required this.content,
     required this.payload,
     required this.isMe,
+    required this.status,
   });
 
   final String contentType;
   final String content;
   final Map<String, Object?> payload;
   final bool isMe;
+  final String status;
 
   @override
   Widget build(BuildContext context) {
     return switch (contentType) {
-      ChatContentTypes.image => _ImageMessagePreview(payload: payload),
+      ChatContentTypes.image => _ImageMessagePreview(
+        payload: payload,
+        status: status,
+      ),
       ChatContentTypes.gif => _MediaPreview(
         icon: Icons.gif_box_outlined,
         title: content.isEmpty ? 'GIF' : content,
@@ -5246,6 +5569,7 @@ class _MessageBubbleContent extends StatelessWidget {
       ChatContentTypes.video => _VideoMessagePreview(
         payload: payload,
         content: content,
+        status: status,
       ),
       ChatContentTypes.file => _FilePreview(payload: payload, content: content),
       ChatContentTypes.contactCard => _ContactCardPreview(payload: payload),
@@ -5255,11 +5579,8 @@ class _MessageBubbleContent extends StatelessWidget {
         amount: _paymentAmount(payload),
         isMe: isMe,
       ),
-      ChatContentTypes.redPacket => _PaymentPreview(
-        icon: Icons.redeem_outlined,
-        title: '红包',
-        amount: _paymentAmount(payload),
-        isMe: isMe,
+      ChatContentTypes.redPacket => _RedPacketPreview(
+        remark: _redPacketRemark(payload),
       ),
       _ => Text(
         content.isEmpty ? '[消息]' : content,
@@ -5333,9 +5654,10 @@ class _MediaPreview extends StatelessWidget {
 }
 
 class _ImageMessagePreview extends StatelessWidget {
-  const _ImageMessagePreview({required this.payload});
+  const _ImageMessagePreview({required this.payload, required this.status});
 
   final Map<String, Object?> payload;
+  final String status;
 
   @override
   Widget build(BuildContext context) {
@@ -5361,38 +5683,76 @@ class _ImageMessagePreview extends StatelessWidget {
     }
     return ClipRRect(
       borderRadius: BorderRadius.circular(8),
-      child: SizedBox(width: 208, height: 124, child: image),
+      child: SizedBox(
+        width: 208,
+        height: 124,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            image,
+            _MediaUploadOverlay(
+              status: status,
+              progress: _uploadProgress(payload),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
 
 class _VideoMessagePreview extends StatelessWidget {
-  const _VideoMessagePreview({required this.payload, required this.content});
+  const _VideoMessagePreview({
+    required this.payload,
+    required this.content,
+    required this.status,
+  });
 
   final Map<String, Object?> payload;
   final String content;
+  final String status;
 
   @override
   Widget build(BuildContext context) {
     final media = _asObjectMap(payload['media']);
-    final localPath = _value(payload, ['cover_file_path', 'file_path']);
-    final coverUrl = _normalizeAvatarUrl(
-      _value(payload, [
+    final rawLocalPath = _value(payload, [
+      'cover_file_path',
+      'thumb_file_path',
+      'thumbnail_file_path',
+    ]);
+    final rawCoverUrl = _value(
+      payload,
+      ['cover_url', 'thumb_url', 'thumbnail_url', 'image_path'],
+      fallback: _value(media, [
         'cover_url',
+        'thumb_url',
+        'thumbnail_url',
         'image_path',
-      ], fallback: _value(media, ['cover_url', 'url'])),
+      ]),
     );
+    final localPath = _looksLikeVideoPath(rawLocalPath) ? '' : rawLocalPath;
+    final coverUrl = _looksLikeVideoPath(rawCoverUrl)
+        ? ''
+        : _normalizeAvatarUrl(rawCoverUrl);
     final image = localPath.isNotEmpty && File(localPath).existsSync()
         ? Image.file(File(localPath), fit: BoxFit.cover)
         : coverUrl.isNotEmpty
         ? Image.network(coverUrl, fit: BoxFit.cover, gaplessPlayback: true)
         : null;
     if (image == null) {
-      return _MediaPreview(
-        icon: Icons.play_circle_outline,
-        title: content.isEmpty ? '视频' : content,
-        subtitle: _videoSubtitle(payload),
-        isMe: true,
+      final source = _videoPreviewSource(payload, media);
+      if (source != null) {
+        return _VideoFramePreview(
+          source: source,
+          payload: payload,
+          content: content,
+          status: status,
+        );
+      }
+      return _VideoPlaceholderPreview(
+        payload: payload,
+        content: content,
+        status: status,
       );
     }
     return ClipRRect(
@@ -5404,22 +5764,329 @@ class _VideoMessagePreview extends StatelessWidget {
           fit: StackFit.expand,
           children: [
             image,
-            Center(
-              child: Container(
-                width: 38,
-                height: 38,
-                decoration: const BoxDecoration(
-                  color: Color(0x99000000),
-                  shape: BoxShape.circle,
+            if (status != 'sending')
+              Center(
+                child: Container(
+                  width: 38,
+                  height: 38,
+                  decoration: const BoxDecoration(
+                    color: Color(0x99000000),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    Icons.play_arrow,
+                    color: Colors.white,
+                    size: 26,
+                  ),
                 ),
-                child: const Icon(
-                  Icons.play_arrow,
-                  color: Colors.white,
-                  size: 26,
+              ),
+            _MediaUploadOverlay(
+              status: status,
+              progress: _uploadProgress(payload),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _VideoPreviewSource {
+  const _VideoPreviewSource({required this.value, required this.isLocal});
+
+  final String value;
+  final bool isLocal;
+
+  String get key => '${isLocal ? 'file' : 'url'}:$value';
+}
+
+class _VideoFramePreview extends StatefulWidget {
+  const _VideoFramePreview({
+    required this.source,
+    required this.payload,
+    required this.content,
+    required this.status,
+  });
+
+  final _VideoPreviewSource source;
+  final Map<String, Object?> payload;
+  final String content;
+  final String status;
+
+  @override
+  State<_VideoFramePreview> createState() => _VideoFramePreviewState();
+}
+
+class _VideoFramePreviewState extends State<_VideoFramePreview> {
+  VideoPlayerController? _controller;
+  bool _ready = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  @override
+  void didUpdateWidget(covariant _VideoFramePreview oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.source.key != widget.source.key) {
+      _load();
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller?.dispose();
+    super.dispose();
+  }
+
+  Future<void> _load() async {
+    final previous = _controller;
+    _controller = null;
+    _ready = false;
+    await previous?.dispose();
+
+    final source = widget.source;
+    final options = VideoPlayerOptions(mixWithOthers: true);
+    final controller = source.isLocal
+        ? VideoPlayerController.file(
+            File(source.value),
+            videoPlayerOptions: options,
+          )
+        : VideoPlayerController.networkUrl(
+            Uri.parse(source.value),
+            videoPlayerOptions: options,
+          );
+    _controller = controller;
+    try {
+      await controller.initialize();
+      await controller.setVolume(0);
+      await controller.pause();
+      if (!mounted || _controller != controller) {
+        return;
+      }
+      setState(() => _ready = true);
+    } catch (error, stackTrace) {
+      AppLogger.error(
+        'chat',
+        'video preview initialize failed',
+        error: error,
+        stackTrace: stackTrace,
+        data: {'source': source.key},
+      );
+      await controller.dispose();
+      if (!mounted || _controller != controller) {
+        return;
+      }
+      setState(() {
+        _controller = null;
+        _ready = false;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final controller = _controller;
+    if (!_ready || controller == null || !controller.value.isInitialized) {
+      return _VideoPlaceholderPreview(
+        payload: widget.payload,
+        content: widget.content,
+        status: widget.status,
+      );
+    }
+    final size = controller.value.size;
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(8),
+      child: SizedBox(
+        width: 208,
+        height: 124,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            ColoredBox(
+              color: Colors.black,
+              child: FittedBox(
+                fit: BoxFit.cover,
+                child: SizedBox(
+                  width: size.width <= 0 ? 208 : size.width,
+                  height: size.height <= 0 ? 124 : size.height,
+                  child: VideoPlayer(controller),
                 ),
               ),
             ),
+            if (widget.status != 'sending')
+              Center(
+                child: Container(
+                  width: 38,
+                  height: 38,
+                  decoration: const BoxDecoration(
+                    color: Color(0x99000000),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    Icons.play_arrow,
+                    color: Colors.white,
+                    size: 26,
+                  ),
+                ),
+              ),
+            _MediaUploadOverlay(
+              status: widget.status,
+              progress: _uploadProgress(widget.payload),
+            ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _VideoPlaceholderPreview extends StatelessWidget {
+  const _VideoPlaceholderPreview({
+    required this.payload,
+    required this.content,
+    required this.status,
+  });
+
+  final Map<String, Object?> payload;
+  final String content;
+  final String status;
+
+  @override
+  Widget build(BuildContext context) {
+    final title = _videoTitle(payload, content);
+    final subtitle = _videoSubtitle(payload);
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(8),
+      child: SizedBox(
+        width: 208,
+        height: 124,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            const DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [Color(0xff222832), Color(0xff101317)],
+                ),
+              ),
+            ),
+            Positioned(
+              left: 14,
+              right: 14,
+              bottom: 12,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  if (subtitle.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 3),
+                      child: Text(
+                        subtitle,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Color(0xccffffff),
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            if (status != 'sending')
+              Center(
+                child: Container(
+                  width: 38,
+                  height: 38,
+                  decoration: const BoxDecoration(
+                    color: Color(0x99000000),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    Icons.play_arrow,
+                    color: Colors.white,
+                    size: 26,
+                  ),
+                ),
+              ),
+            _MediaUploadOverlay(
+              status: status,
+              progress: _uploadProgress(payload),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _MediaUploadOverlay extends StatelessWidget {
+  const _MediaUploadOverlay({required this.status, required this.progress});
+
+  final String status;
+  final double progress;
+
+  @override
+  Widget build(BuildContext context) {
+    if (status != 'sending' && status != 'failed') {
+      return const SizedBox.shrink();
+    }
+    final failed = status == 'failed';
+    final hasProgress = progress > 0 && progress < 1;
+    return ColoredBox(
+      color: const Color(0x66000000),
+      child: Center(
+        child: Container(
+          width: 58,
+          height: 58,
+          alignment: Alignment.center,
+          decoration: const BoxDecoration(
+            color: Color(0xaa000000),
+            shape: BoxShape.circle,
+          ),
+          child: failed
+              ? const Icon(Icons.error_outline, color: Colors.white, size: 28)
+              : Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    SizedBox(
+                      width: 34,
+                      height: 34,
+                      child: CircularProgressIndicator(
+                        value: hasProgress ? progress : null,
+                        strokeWidth: 2.4,
+                        color: Colors.white,
+                        backgroundColor: const Color(0x55ffffff),
+                      ),
+                    ),
+                    if (hasProgress)
+                      Text(
+                        '${(progress * 100).clamp(1, 99).round()}%',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                  ],
+                ),
         ),
       ),
     );
@@ -5599,9 +6266,6 @@ class _PaymentPreview extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (title == '红包') {
-      return _RedPacketPreview(amount: amount);
-    }
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -5669,8 +6333,9 @@ class _MessageSendStatus extends StatelessWidget {
               ),
             ),
           ),
+          'read' => const Icon(Icons.done_all, size: 17, color: _chatAckColor),
           'queued' ||
-          'sent' => const Icon(Icons.done_all, size: 17, color: _chatAckColor),
+          'sent' => const Icon(Icons.done, size: 17, color: _chatAckColor),
           _ => const SizedBox.shrink(),
         },
       ),
@@ -6658,7 +7323,47 @@ String _messageSenderAvatarUrl(Map<String, Object?> item) {
 }
 
 String _messageStatus(Map<String, Object?> item) {
-  return _value(item, ['status']);
+  final status = _value(item, ['status']).toLowerCase();
+  if (_hasReadReceiptState(item)) {
+    return 'read';
+  }
+  return switch (status) {
+    'read' || 'readed' || 'seen' => 'read',
+    'queued' => 'queued',
+    'sending' => 'sending',
+    'failed' => 'failed',
+    'sent' || 'success' || 'succeeded' || 'delivered' => 'sent',
+    _ => status,
+  };
+}
+
+bool _hasReadReceiptState(Map<String, Object?> item) {
+  final payload = _asObjectMap(item['payload']);
+  final receipt = _asObjectMap(item['receipt']);
+  final payloadReceipt = _asObjectMap(payload['receipt']);
+  for (final source in [item, payload, receipt, payloadReceipt]) {
+    if (_boolValue(source['is_read']) ||
+        _boolValue(source['read']) ||
+        _boolValue(source['readed']) ||
+        _boolValue(source['has_read'])) {
+      return true;
+    }
+    final status = _value(source, [
+      'receipt_status',
+      'read_status',
+      'status',
+    ]).toLowerCase();
+    if (status == 'read' || status == 'readed' || status == 'seen') {
+      return true;
+    }
+    if (_intValue(source, ['read_at']) > 0 ||
+        _intValue(source, ['read_time']) > 0 ||
+        _intValue(source, ['read_count']) > 0 ||
+        _intValue(source, ['reader_count']) > 0) {
+      return true;
+    }
+  }
+  return false;
 }
 
 String _messageContentType(Map<String, Object?> item) {
@@ -6705,6 +7410,68 @@ String _paymentAmount(Map<String, Object?> payload) {
     return value == null ? '¥$money' : '¥${value.toStringAsFixed(2)}';
   }
   return '$money $asset';
+}
+
+String _redPacketRemark(Map<String, Object?> payload, {String fallback = ''}) {
+  final redPacket = _asObjectMap(payload['red_packet']);
+  for (final source in [redPacket, payload]) {
+    final value = _value(source, [
+      'remark',
+      'blessing',
+      'bless',
+      'wish',
+      'greeting',
+      'greetings',
+      'message',
+      'content',
+      'text',
+      'note',
+    ]);
+    if (_isValidRedPacketRemark(value)) {
+      return value;
+    }
+  }
+  return _isValidRedPacketRemark(fallback) ? fallback.trim() : '';
+}
+
+bool _isValidRedPacketRemark(String value) {
+  final text = value.trim();
+  if (text.isEmpty ||
+      text == '[红包]' ||
+      text == '[消息]' ||
+      text == '[red_packet]') {
+    return false;
+  }
+  if (text.startsWith('{') || text.startsWith('[')) {
+    return false;
+  }
+  final moneyLike = RegExp(
+    r'^[¥￥]?\d+(\.\d+)?\s*(money|金币|integral|积分)?$',
+    caseSensitive: false,
+  );
+  return !moneyLike.hasMatch(text);
+}
+
+Color? _conversationPrefixColor(String text) {
+  if (text.startsWith('[红包]')) {
+    return const Color(0xffe64340);
+  }
+  if (text.startsWith('[转账]')) {
+    return const Color(0xffff8a00);
+  }
+  return null;
+}
+
+double _uploadProgress(Map<String, Object?> payload) {
+  final raw = _value(payload, ['upload_progress', 'progress']);
+  final parsed = double.tryParse(raw);
+  if (parsed == null) {
+    return 0;
+  }
+  if (parsed > 1) {
+    return (parsed / 100).clamp(0, 1).toDouble();
+  }
+  return parsed.clamp(0, 1).toDouble();
 }
 
 String _fileSizeLabel(Object? raw) {
@@ -6818,6 +7585,37 @@ String _conversationTitle(Map<String, Object?> item) {
     return _value(item, ['name', 'group_name'], fallback: '群聊');
   }
   return _value(item, ['nickname', 'username', 'name'], fallback: '私聊');
+}
+
+String _conversationSubtitle(Map<String, Object?> item) {
+  final payload = _asObjectMap(item['payload']);
+  final contentType = _value(item, [
+    'content_type',
+  ], fallback: _value(payload, ['content_type']));
+  final content = _value(item, ['content']);
+  if (contentType == ChatContentTypes.redPacket) {
+    return _redPacketConversationText(payload, content);
+  }
+  if (contentType == ChatContentTypes.transfer) {
+    return _transferConversationText(payload, content);
+  }
+  return content;
+}
+
+String _redPacketConversationText(
+  Map<String, Object?> payload,
+  String content,
+) {
+  final direct = content.trim();
+  if (direct.startsWith('[红包]') && direct.length > '[红包]'.length) {
+    return direct;
+  }
+  final remark = _redPacketRemark(payload, fallback: direct);
+  return remark.isEmpty ? '[红包]' : '[红包]$remark';
+}
+
+String _transferConversationText(Map<String, Object?> payload, String content) {
+  return '[转账]请收款';
 }
 
 String _conversationAvatarUrl(Map<String, Object?> item) {
@@ -7248,7 +8046,10 @@ List<Map<String, Object?>> _listFromResult(Map<String, Object?> result) {
   Object? value = result['list'] ?? result['items'];
   final data = result['data'];
   if (value == null && data is Map) {
-    value = data['list'] ?? data['items'];
+    value = data['list'] ?? data['items'] ?? data['rows'] ?? data['records'];
+  }
+  if (value == null && data is List) {
+    value = data;
   }
   if (value is List) {
     return value
@@ -7259,6 +8060,102 @@ List<Map<String, Object?>> _listFromResult(Map<String, Object?> result) {
         .toList();
   }
   return const [];
+}
+
+bool _memberMatchesOnlineUser(
+  Map<String, Object?> member,
+  Map<String, Object?> onlineUser,
+) {
+  for (final id in _memberPresenceIds(member)) {
+    if (_onlineUserMatches(onlineUser, id)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+Iterable<String> _memberPresenceIds(Map<String, Object?> member) sync* {
+  for (final key in [
+    'uid',
+    'im_uid',
+    'wukong_uid',
+    'channel_id',
+    'user_uid',
+    'member_uid',
+  ]) {
+    final value = _value(member, [key]);
+    if (value.isNotEmpty) {
+      yield value;
+    }
+  }
+  final userId = _memberUserId(member);
+  if (userId.isNotEmpty) {
+    yield userId;
+    yield _uidFromUserId(userId);
+  }
+  final user = _asObjectMap(member['user']);
+  if (user.isNotEmpty) {
+    yield* _memberPresenceIds(user);
+  }
+}
+
+String _memberPresenceKey(Map<String, Object?> member) {
+  for (final id in _memberPresenceIds(member)) {
+    if (id.isNotEmpty) {
+      return id;
+    }
+  }
+  return jsonEncode(member);
+}
+
+bool _onlineUserMatches(Map<String, Object?> item, String receiverId) {
+  if (_onlineFlagKnownFalse(item)) {
+    return false;
+  }
+  final userId = _privateReceiverIdFromChannel(receiverId);
+  final uid = _uidFromUserId(userId);
+  for (final key in [
+    'uid',
+    'im_uid',
+    'wukong_uid',
+    'channel_id',
+    'from_uid',
+    'user_uid',
+  ]) {
+    final value = _value(item, [key]);
+    if (value == uid || value == receiverId) {
+      return true;
+    }
+  }
+  for (final key in [
+    'user_id',
+    'userid',
+    'id',
+    'friend_id',
+    'receiver_id',
+    'member_id',
+  ]) {
+    if (_value(item, [key]) == userId) {
+      return true;
+    }
+  }
+  final user = _asObjectMap(item['user']);
+  return user.isNotEmpty && _onlineUserMatches(user, receiverId);
+}
+
+bool _onlineFlagKnownFalse(Map<String, Object?> item) {
+  for (final key in ['online', 'is_online', 'connected']) {
+    final value = item[key];
+    if (value != null && !_boolValue(value)) {
+      return true;
+    }
+  }
+  final status = _value(item, [
+    'status',
+    'online_status',
+    'state',
+  ]).toLowerCase();
+  return status == 'offline' || status == '离线' || status == '0';
 }
 
 bool _sameMapList(
@@ -7377,6 +8274,73 @@ String _videoSubtitle(Map<String, Object?> payload) {
     return '$name · $duration';
   }
   return name.isNotEmpty ? name : duration;
+}
+
+String _videoTitle(Map<String, Object?> payload, String content) {
+  if (content.isNotEmpty && content != '[视频]' && content != '[消息]') {
+    return content;
+  }
+  final media = _asObjectMap(payload['media']);
+  final name = _value(payload, [
+    'name',
+    'file_name',
+  ], fallback: _value(media, ['name', 'file_name']));
+  if (name.isNotEmpty) {
+    return name;
+  }
+  final path = _value(payload, [
+    'file_path',
+    'url',
+  ], fallback: _value(media, ['url', 'file_path']));
+  return path.isEmpty ? '视频' : _fileName(path);
+}
+
+_VideoPreviewSource? _videoPreviewSource(
+  Map<String, Object?> payload,
+  Map<String, Object?> media,
+) {
+  final localPath = _value(payload, [
+    'file_path',
+    'video_file_path',
+  ], fallback: _value(media, ['file_path', 'video_file_path']));
+  if (localPath.isNotEmpty &&
+      _looksLikeVideoPath(localPath) &&
+      File(localPath).existsSync()) {
+    return _VideoPreviewSource(value: localPath, isLocal: true);
+  }
+
+  final rawUrl = _value(payload, [
+    'video_url',
+    'file_url',
+    'url',
+    'video_path',
+  ], fallback: _value(media, ['video_url', 'file_url', 'url', 'video_path']));
+  final url = _normalizeAvatarUrl(rawUrl);
+  if (url.isNotEmpty && !_looksLikeImagePath(url)) {
+    return _VideoPreviewSource(value: url, isLocal: false);
+  }
+  return null;
+}
+
+bool _looksLikeImagePath(String value) {
+  final clean = value.split('?').first.toLowerCase();
+  return clean.endsWith('.jpg') ||
+      clean.endsWith('.jpeg') ||
+      clean.endsWith('.png') ||
+      clean.endsWith('.gif') ||
+      clean.endsWith('.webp') ||
+      clean.endsWith('.bmp') ||
+      clean.endsWith('.heic');
+}
+
+bool _looksLikeVideoPath(String value) {
+  final clean = value.split('?').first.toLowerCase();
+  return clean.endsWith('.mp4') ||
+      clean.endsWith('.mov') ||
+      clean.endsWith('.m4v') ||
+      clean.endsWith('.webm') ||
+      clean.endsWith('.avi') ||
+      clean.endsWith('.mkv');
 }
 
 String _fileName(String path) {

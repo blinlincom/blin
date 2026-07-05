@@ -38,6 +38,7 @@ dependencies:
   encrypt: ^5.0.3
   path_provider: ^2.1.5
   photo_manager: ^3.9.0
+  video_player: ^2.11.1
 
 dev_dependencies:
   flutter_test:

@@ -223,6 +223,7 @@ class SessionController extends ChangeNotifier {
   Future<void> register({
     required String username,
     required String password,
+    String nickname = '',
     String mobile = '',
     String email = '',
     String captcha = '',
@@ -232,6 +233,7 @@ class SessionController extends ChangeNotifier {
       return _api.register(
         username: username,
         password: password,
+        nickname: nickname,
         mobile: mobile,
         email: email,
         captcha: captcha,
@@ -252,15 +254,13 @@ class SessionController extends ChangeNotifier {
   Future<List<Map<String, Object?>>> loadConversations() async {
     _requireSession();
     AppLogger.info('session', 'load conversations start');
-    final local = await _im
-        .refreshLocalConversations(notify: false)
-        .timeout(
-          const Duration(seconds: 8),
-          onTimeout: () {
-            AppLogger.warn('session', 'local conversations timeout');
-            return <Map<String, Object?>>[];
-          },
-        );
+    final local = await _im.loadConversations().timeout(
+      const Duration(seconds: 8),
+      onTimeout: () {
+        AppLogger.warn('session', 'local conversations timeout');
+        return _im.cachedConversations();
+      },
+    );
     AppLogger.info(
       'session',
       'load conversations local success',
@@ -617,6 +617,7 @@ class SessionController extends ChangeNotifier {
     required String receiverId,
     required String money,
     required String assetType,
+    String remark = '',
   }) async {
     _requireSession();
     await _sendBusinessMessage(
@@ -628,6 +629,7 @@ class SessionController extends ChangeNotifier {
         'money': money,
         'asset_type': assetType,
         'transfer_id': _tradeNo('tr'),
+        if (remark.isNotEmpty) 'remark': remark,
       },
     );
     return const {'msg': '已发送'};
@@ -638,6 +640,7 @@ class SessionController extends ChangeNotifier {
     required String receiverId,
     required String money,
     required String assetType,
+    String remark = '',
     String channelId = '',
   }) async {
     _requireSession();
@@ -652,6 +655,7 @@ class SessionController extends ChangeNotifier {
         'money': money,
         'asset_type': assetType,
         'transfer_id': _tradeNo('gtr'),
+        if (remark.isNotEmpty) 'remark': remark,
       },
     );
     return const {'msg': '已发送'};
