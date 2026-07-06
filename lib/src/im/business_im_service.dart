@@ -1885,6 +1885,7 @@ class BusinessImService extends ChangeNotifier {
     List<String> mentionUserIds = const [],
     bool mentionAll = false,
     String replyClientMsgNo = '',
+    Map<String, Object?> quote = const {},
     bool burnAfterRead = false,
     int burnAfterReadSeconds = 0,
   }) {
@@ -1900,6 +1901,10 @@ class BusinessImService extends ChangeNotifier {
         if (mentionAll) 'mention_all': '1',
         if (replyClientMsgNo.isNotEmpty)
           'reply_client_msg_no': replyClientMsgNo,
+        if (replyClientMsgNo.isNotEmpty)
+          'quote_client_msg_no': replyClientMsgNo,
+        if (quote.isNotEmpty) 'quote': quote,
+        if (quote.isNotEmpty) 'quote_json': jsonEncode(quote),
         if (burnAfterRead) 'burn_after_read': '1',
         if (burnAfterRead && burnAfterReadSeconds > 0)
           'burn_after_read_seconds': burnAfterReadSeconds.toString(),
@@ -5530,7 +5535,13 @@ class BusinessImService extends ChangeNotifier {
     final incomingPayload = _asMap(incoming['payload']);
     if (existingPayload.isNotEmpty || incomingPayload.isNotEmpty) {
       final payload = _mergeNonEmpty(existingPayload, incomingPayload);
-      for (final key in ['red_packet', 'transfer', 'media', 'receipt']) {
+      for (final key in [
+        'red_packet',
+        'transfer',
+        'media',
+        'receipt',
+        'quote',
+      ]) {
         final existingNested = _asMap(existingPayload[key]);
         final incomingNested = _asMap(incomingPayload[key]);
         if (existingNested.isNotEmpty || incomingNested.isNotEmpty) {
@@ -5548,6 +5559,9 @@ class BusinessImService extends ChangeNotifier {
         'url',
         'cover',
         'thumbnail',
+        'reply_client_msg_no',
+        'quote_client_msg_no',
+        'quote_json',
       ]);
       merged['payload'] = payload;
     }
@@ -6198,7 +6212,12 @@ class BusinessImService extends ChangeNotifier {
       'payload_keys': payload.keys.take(80).toList(growable: false),
       'has_red_packet': payload['red_packet'] is Map,
       'has_transfer': payload['transfer'] is Map,
-      'has_reply': _value(payload, ['reply_client_msg_no']).isNotEmpty,
+      'has_reply':
+          _value(payload, [
+            'reply_client_msg_no',
+            'quote_client_msg_no',
+          ]).isNotEmpty ||
+          _asMap(payload['quote']).isNotEmpty,
       'has_file_path': _value(payload, ['file_path']).isNotEmpty,
       'has_image_path': _value(payload, ['image_path']).isNotEmpty,
       'has_video_path': _value(payload, ['video_path']).isNotEmpty,

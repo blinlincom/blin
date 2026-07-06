@@ -168,6 +168,153 @@ String _messageContentText(
   return _value(payload, ['content', 'text', 'remark'], fallback: content);
 }
 
+Map<String, Object?> _messageQuote(Map<String, Object?> item) {
+  final payload = _asObjectMap(item['payload']);
+  final quote = _quoteMapFromPayload(payload);
+  if (quote.isNotEmpty) {
+    return quote;
+  }
+  final clientMsgNo = _value(payload, [
+    'quote_client_msg_no',
+    'reply_client_msg_no',
+  ]);
+  if (clientMsgNo.isEmpty) {
+    return const {};
+  }
+  return {
+    'client_msg_no': clientMsgNo,
+    if (_value(payload, ['quote_sender_name']).isNotEmpty)
+      'sender_name': _value(payload, ['quote_sender_name']),
+    if (_value(payload, ['quote_content_preview']).isNotEmpty)
+      'content_preview': _value(payload, ['quote_content_preview']),
+    if (_value(payload, ['quote_content_type']).isNotEmpty)
+      'content_type': _value(payload, ['quote_content_type']),
+    if (_value(payload, ['quote_content_preview']).isEmpty)
+      'status': 'unavailable',
+  };
+}
+
+Map<String, Object?> _quoteMapFromPayload(Map<String, Object?> payload) {
+  final direct = _asObjectMap(payload['quote']);
+  if (direct.isNotEmpty) {
+    return direct;
+  }
+  final raw = _value(payload, ['quote', 'quote_json']);
+  if (raw.isEmpty || !raw.trimLeft().startsWith('{')) {
+    return const {};
+  }
+  try {
+    final decoded = jsonDecode(raw);
+    return _asObjectMap(decoded);
+  } on Object {
+    return const {};
+  }
+}
+
+bool _canQuoteMessage(Map<String, Object?> item) {
+  if (item.isEmpty || _isSystemNoticeMessage(item)) {
+    return false;
+  }
+  if (_value(item, ['client_msg_no']).isEmpty) {
+    return false;
+  }
+  final payload = _asObjectMap(item['payload']);
+  if (_boolValue(payload['burn_after_read']) ||
+      _asObjectMap(payload['burn_after_read']).isNotEmpty) {
+    return false;
+  }
+  final contentType = _messageContentType(item);
+  return switch (contentType) {
+    ChatContentTypes.text ||
+    ChatContentTypes.image ||
+    ChatContentTypes.emoji ||
+    ChatContentTypes.gif ||
+    ChatContentTypes.sticker ||
+    ChatContentTypes.voice ||
+    ChatContentTypes.video ||
+    ChatContentTypes.file ||
+    ChatContentTypes.contactCard => true,
+    _ => false,
+  };
+}
+
+Map<String, Object?> _quoteSnapshotFromMessage(Map<String, Object?> item) {
+  if (!_canQuoteMessage(item)) {
+    return const {};
+  }
+  final payload = _asObjectMap(item['payload']);
+  final contentType = _messageContentType(item);
+  final preview = _quotePreviewForMessage(item, payload, contentType);
+  return {
+    'client_msg_no': _value(item, ['client_msg_no']),
+    if (_intValue(item, ['message_seq']) > 0)
+      'message_seq': _intValue(item, ['message_seq']),
+    if (_value(item, ['channel_id']).isNotEmpty)
+      'channel_id': _value(item, ['channel_id']),
+    if (_intValue(item, ['channel_type']) > 0)
+      'channel_type': _intValue(item, ['channel_type']),
+    if (_value(item, ['from_uid']).isNotEmpty)
+      'sender_uid': _value(item, ['from_uid']),
+    'sender_name': _boolValue(item['is_me']) ? '我' : _messageSenderName(item),
+    'content_type': contentType,
+    'content_preview': preview,
+    'status': 'normal',
+  };
+}
+
+String _quoteSenderName(Map<String, Object?> quote) {
+  return _value(quote, ['sender_name', 'nickname', 'from_nickname']);
+}
+
+String _quotePreviewText(Map<String, Object?> quote) {
+  final status = _value(quote, ['status']).toLowerCase();
+  if (status == 'recalled' || status == 'recall') {
+    return '原消息已撤回';
+  }
+  if (status == 'burned' || status == 'burn_after_read') {
+    return '阅后即焚消息';
+  }
+  if (status == 'unavailable') {
+    return '原消息不可查看';
+  }
+  final preview = _value(quote, [
+    'content_preview',
+    'preview',
+    'content',
+    'text',
+  ]);
+  if (preview.isNotEmpty && preview != '[消息]') {
+    return preview;
+  }
+  return _quoteContentTypeText(_value(quote, ['content_type']));
+}
+
+String _quotePreviewForMessage(
+  Map<String, Object?> item,
+  Map<String, Object?> payload,
+  String contentType,
+) {
+  final content = _messageContentText(item, payload).trim();
+  if (content.isNotEmpty && content != '[消息]') {
+    return content.length > 80 ? '${content.substring(0, 80)}...' : content;
+  }
+  return _quoteContentTypeText(contentType);
+}
+
+String _quoteContentTypeText(String contentType) {
+  return switch (contentType) {
+    ChatContentTypes.image => '[图片]',
+    ChatContentTypes.emoji => '[表情]',
+    ChatContentTypes.gif => '[GIF]',
+    ChatContentTypes.sticker => '[贴纸]',
+    ChatContentTypes.voice => '[语音]',
+    ChatContentTypes.video => '[视频]',
+    ChatContentTypes.file => '[文件]',
+    ChatContentTypes.contactCard => '[名片]',
+    _ => '[消息]',
+  };
+}
+
 bool _isSystemNoticeMessage(Map<String, Object?> item) {
   final contentType = _messageContentType(item);
   return contentType == ChatContentTypes.redPacketReceived ||
@@ -236,14 +383,6 @@ String _paymentNoticeText(
     return '$actorName已收取$senderName的转账';
   }
   return actorIsMe ? '你完成了操作' : '$actorName完成了操作';
-}
-
-String _durationLabel(Map<String, Object?> payload) {
-  final seconds = _value(payload, ['duration']);
-  if (seconds.isEmpty) {
-    return '';
-  }
-  return '$seconds 秒';
 }
 
 String _paymentAmount(Map<String, Object?> payload) {

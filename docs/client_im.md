@@ -76,7 +76,7 @@ flutter run \
 
 私聊额外传 `receiver_id`，群聊额外传 `group_id`。
 
-消息内容不再以明文表单字段提交。客户端把 `content`、`money`、`asset_type`、`remark`、`url`、`card_user_id`、`mention_user_ids`、`reply_client_msg_no`、`burn_after_read` 等业务字段归一化后放入 `secure_payload`，再按业务端文档使用 AES-128-CBC 加密。签名只覆盖外层字段和密文，不覆盖明文字段。
+消息内容不再以明文表单字段提交。客户端把 `content`、`money`、`asset_type`、`remark`、`url`、`card_user_id`、`mention_user_ids`、`reply_client_msg_no`、`quote_client_msg_no`、`quote`、`quote_json`、`burn_after_read` 等业务字段归一化后放入 `secure_payload`，再按业务端文档使用 AES-128-CBC 加密。签名只覆盖外层字段和密文，不覆盖明文字段。
 
 图片、语音、视频、文件等本地附件不会用明文 `file` 字段上传。客户端先把原文件字节加密到临时密文文件，通过 multipart 字段 `secure_file` 上传，并提交 `secure_file_name`、`secure_file_size`、`secure_file_sha256` 等外层字段。请求完成后会删除本地临时密文文件。
 
@@ -193,8 +193,9 @@ MMKV 存储：
 - 聊天：文本、图片、表情、GIF、贴纸、语音、视频、文件、名片、转账、红包。
 - 私聊规则：非好友只能发送文字，且单向最多三条；图片、语音、视频、文件、转账、红包等由业务端拦截。
 - 群聊：文本、图片、表情、GIF、贴纸、语音、视频、文件、名片、红包、指定转账。
-- 群聊文本支持 `mention_user_ids`、`mention_all`、`reply_client_msg_no`、`burn_after_read`。
-- 私聊文本支持 `reply_client_msg_no`、`burn_after_read`。
+- 群聊文本支持 `mention_user_ids`、`mention_all`、`reply_client_msg_no`、`quote`、`burn_after_read`。
+- 私聊文本支持 `reply_client_msg_no`、`quote`、`burn_after_read`。
+- 引用消息：文本、图片、表情、GIF、贴纸、语音、视频、文件、名片可被引用；红包、转账、领取/收款回执、系统通知、撤回消息、阅后即焚消息不可引用。客户端发送时同时带 `reply_client_msg_no`、`quote_client_msg_no`、`quote` 和 `quote_json` 快照，`quote` 包含原消息发送人昵称、类型和摘要，用于实时消息、历史同步和换设备后的稳定展示。
 - 回执和动作：已读回执、回执状态、撤回、阅后即焚、红包领取、转账收款。
 - 好友：本地已添加好友可按昵称/用户名过滤；添加朋友只能按用户名搜索；支持申请、处理申请、状态查询、删除好友。
 - 群管理：建群、更新群资料、成员列表、加人、踢人、退出、解散、设置管理员、转让群主、禁言、解除禁言。

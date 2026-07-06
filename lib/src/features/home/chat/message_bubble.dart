@@ -20,6 +20,7 @@ class _MessageBubble extends StatelessWidget {
     final contentType = _messageContentType(item);
     final payload = _asObjectMap(item['payload']);
     final content = _messageContentText(item, payload);
+    final quote = _messageQuote(item);
     final isImageLike =
         contentType == ChatContentTypes.image ||
         contentType == ChatContentTypes.gif ||
@@ -34,6 +35,17 @@ class _MessageBubble extends StatelessWidget {
       redPacketReceiving: redPacketReceiving,
       onRetry: onRetry,
     );
+    final child = quote.isEmpty
+        ? bubble
+        : Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              _QuoteMessagePreview(quote: quote, isMe: isMe),
+              const SizedBox(height: 5),
+              bubble,
+            ],
+          );
     return Container(
       constraints: BoxConstraints(
         maxWidth: _bubbleMaxWidth(context, contentType),
@@ -43,7 +55,7 @@ class _MessageBubble extends StatelessWidget {
         color: _bubbleColor(contentType),
         borderRadius: BorderRadius.circular(isImageLike ? 8 : 9),
       ),
-      child: bubble,
+      child: child,
     );
   }
 
@@ -278,6 +290,43 @@ class _MessageBubbleContent extends StatelessWidget {
         ),
       ),
     };
+  }
+}
+
+class _QuoteMessagePreview extends StatelessWidget {
+  const _QuoteMessagePreview({required this.quote, required this.isMe});
+
+  final Map<String, Object?> quote;
+  final bool isMe;
+
+  @override
+  Widget build(BuildContext context) {
+    final sender = _quoteSenderName(quote);
+    final preview = _quotePreviewText(quote);
+    final text = sender.isEmpty ? preview : '$sender：$preview';
+    final borderColor = isMe
+        ? const Color(0xff96d58c)
+        : const Color(0xffd8dce3);
+    final background = isMe ? const Color(0x55ffffff) : const Color(0xfff4f5f7);
+    return Container(
+      constraints: const BoxConstraints(minHeight: 34),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+      decoration: BoxDecoration(
+        color: background,
+        border: Border(left: BorderSide(color: borderColor, width: 3)),
+      ),
+      child: Text(
+        text.isEmpty ? '原消息不可查看' : text,
+        maxLines: 2,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(
+          color: Color(0xff6f7785),
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
+          height: 1.25,
+        ),
+      ),
+    );
   }
 }
 

@@ -261,10 +261,3 @@ String _nestedValue(Map<String, Object?> payload, List<String> paths) {
   }
   return '';
 }
-
-String _shortNo(String value) {
-  if (value.length <= 10) {
-    return value;
-  }
-  return '${value.substring(0, 6)}...${value.substring(value.length - 4)}';
-}

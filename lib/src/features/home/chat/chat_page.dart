@@ -33,6 +33,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   int _burnSeconds = 0;
   List<String> _mentionUserIds = const [];
   String _replyClientMsgNo = '';
+  Map<String, Object?> _replyQuote = const {};
   String _selectedClientMsgNo = '';
   Map<String, Object?> _selectedPayload = const {};
   Map<String, Object?> _selectedMessage = const {};
@@ -891,7 +892,13 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     final incomingPayload = _asObjectMap(incoming['payload']);
     if (existingPayload.isNotEmpty || incomingPayload.isNotEmpty) {
       final payload = _mergeUiNonEmpty(existingPayload, incomingPayload);
-      for (final key in ['red_packet', 'transfer', 'media', 'receipt']) {
+      for (final key in [
+        'red_packet',
+        'transfer',
+        'media',
+        'receipt',
+        'quote',
+      ]) {
         final existingNested = _asObjectMap(existingPayload[key]);
         final incomingNested = _asObjectMap(incomingPayload[key]);
         if (existingNested.isNotEmpty || incomingNested.isNotEmpty) {
@@ -909,6 +916,8 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         'url',
         'cover',
         'thumbnail',
+        'reply_client_msg_no',
+        'quote_client_msg_no',
       ]);
       merged['payload'] = payload;
     }
@@ -1127,7 +1136,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                           onVoiceCall: () => _showCallPending('语音通话'),
                           onVideoCall: () => _showCallPending('视频通话'),
                         ),
-                        if (_replyClientMsgNo.isNotEmpty ||
+                        if (_replyQuote.isNotEmpty ||
                             _burnAfterRead ||
                             _mentionAll ||
                             _mentionUserIds.isNotEmpty)
@@ -1324,7 +1333,12 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     final canRecall = item['is_me'] == true && !paymentLike;
     final copyText = _selectedMessageCopyText(item);
     final actions = <_MessageActionItem>[
-      _MessageActionItem(label: '引用', icon: Icons.reply, onTap: _replySelected),
+      if (_canQuoteMessage(item))
+        _MessageActionItem(
+          label: '引用',
+          icon: Icons.reply,
+          onTap: _replySelected,
+        ),
       if (!paymentLike)
         _MessageActionItem(
           label: '转发',
@@ -1376,8 +1390,14 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     if (_selectedClientMsgNo.isEmpty) {
       return;
     }
+    final quote = _quoteSnapshotFromMessage(_selectedMessage);
+    if (quote.isEmpty) {
+      _clearSelectedMessageMenu();
+      return;
+    }
     setState(() {
       _replyClientMsgNo = _selectedClientMsgNo;
+      _replyQuote = quote;
       _selectedClientMsgNo = '';
       _selectedPayload = const {};
       _selectedMessage = const {};
@@ -1449,6 +1469,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     final mentionUserIds = List<String>.from(_mentionUserIds);
     final mentionAll = _mentionAll;
     final replyClientMsgNo = _replyClientMsgNo;
+    final replyQuote = Map<String, Object?>.from(_replyQuote);
     final burnAfterRead = _burnAfterRead;
     final burnSeconds = _burnSeconds;
     final hadInputFocus = _inputFocusNode.hasFocus;
@@ -1462,6 +1483,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
           mentionUserIds: mentionUserIds,
           mentionAll: mentionAll,
           replyClientMsgNo: replyClientMsgNo,
+          quote: replyQuote,
           burnAfterRead: burnAfterRead,
           burnAfterReadSeconds: burnSeconds,
         );
@@ -1470,6 +1492,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         _textController.clear();
         setState(() {
           _replyClientMsgNo = '';
+          _replyQuote = const {};
           _mentionUserIds = const [];
           _mentionAll = false;
         });
@@ -1500,32 +1523,46 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     final url = data['url'] ?? '';
     final filePath = data['file_path'] ?? '';
     final params = Map<String, Object?>.from(data)..remove('url');
+    if (_replyQuote.isNotEmpty) {
+      params['quote'] = Map<String, Object?>.from(_replyQuote);
+      params['quote_json'] = jsonEncode(_replyQuote);
+      params['quote_client_msg_no'] = _replyClientMsgNo;
+      params['reply_client_msg_no'] = _replyClientMsgNo;
+    }
     if (_burnAfterRead) {
       params['burn_after_read'] = '1';
       if (_burnSeconds > 0) {
         params['burn_after_read_seconds'] = _burnSeconds.toString();
       }
     }
-    await _runSending(() async {
-      if (_isGroup) {
-        await widget.controller.sendGroupMedia(
-          groupId: _groupId,
-          channelId: widget.channelId,
-          contentType: contentType,
-          url: url,
-          filePath: filePath,
-          params: params,
-        );
-      } else {
-        await widget.controller.sendPrivateMedia(
-          receiverId: _receiverId,
-          contentType: contentType,
-          url: url,
-          filePath: filePath,
-          params: params,
-        );
-      }
-    });
+    await _runSending(
+      () async {
+        if (_isGroup) {
+          await widget.controller.sendGroupMedia(
+            groupId: _groupId,
+            channelId: widget.channelId,
+            contentType: contentType,
+            url: url,
+            filePath: filePath,
+            params: params,
+          );
+        } else {
+          await widget.controller.sendPrivateMedia(
+            receiverId: _receiverId,
+            contentType: contentType,
+            url: url,
+            filePath: filePath,
+            params: params,
+          );
+        }
+      },
+      beforeTask: () {
+        setState(() {
+          _replyClientMsgNo = '';
+          _replyQuote = const {};
+        });
+      },
+    );
   }
 
   Future<Map<String, String>?> _selectMediaPayload(String contentType) {
@@ -1567,20 +1604,37 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       setState(() => _error = '名片用户不能为空');
       return;
     }
-    await _runSending(() async {
-      if (_isGroup) {
-        await widget.controller.sendGroupContactCard(
-          groupId: _groupId,
-          channelId: widget.channelId,
-          cardUserId: cardUserId,
-        );
-      } else {
-        await widget.controller.sendPrivateContactCard(
-          receiverId: _receiverId,
-          cardUserId: cardUserId,
-        );
-      }
-    });
+    final params = <String, Object?>{};
+    if (_replyQuote.isNotEmpty) {
+      params['quote'] = Map<String, Object?>.from(_replyQuote);
+      params['quote_json'] = jsonEncode(_replyQuote);
+      params['quote_client_msg_no'] = _replyClientMsgNo;
+      params['reply_client_msg_no'] = _replyClientMsgNo;
+    }
+    await _runSending(
+      () async {
+        if (_isGroup) {
+          await widget.controller.sendGroupContactCard(
+            groupId: _groupId,
+            channelId: widget.channelId,
+            cardUserId: cardUserId,
+            params: params,
+          );
+        } else {
+          await widget.controller.sendPrivateContactCard(
+            receiverId: _receiverId,
+            cardUserId: cardUserId,
+            params: params,
+          );
+        }
+      },
+      beforeTask: () {
+        setState(() {
+          _replyClientMsgNo = '';
+          _replyQuote = const {};
+        });
+      },
+    );
   }
 
   VoidCallback? _messageTapHandler(Map<String, Object?> item) {
@@ -2203,6 +2257,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   void _clearOptions() {
     setState(() {
       _replyClientMsgNo = '';
+      _replyQuote = const {};
       _mentionUserIds = const [];
       _mentionAll = false;
       _burnAfterRead = false;
@@ -2336,8 +2391,10 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
 
   String _optionText() {
     final parts = <String>[];
-    if (_replyClientMsgNo.isNotEmpty) {
-      parts.add('引用 ${_shortNo(_replyClientMsgNo)}');
+    if (_replyQuote.isNotEmpty) {
+      final sender = _quoteSenderName(_replyQuote);
+      final preview = _quotePreviewText(_replyQuote);
+      parts.add(sender.isEmpty ? '引用 $preview' : '引用 $sender：$preview');
     }
     if (_mentionAll) {
       parts.add('@所有人');

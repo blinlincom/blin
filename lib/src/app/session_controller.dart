@@ -453,6 +453,7 @@ class SessionController extends ChangeNotifier {
     List<String> mentionUserIds = const [],
     bool mentionAll = false,
     String replyClientMsgNo = '',
+    Map<String, Object?> quote = const {},
     bool burnAfterRead = false,
     int burnAfterReadSeconds = 0,
   }) async {
@@ -479,6 +480,7 @@ class SessionController extends ChangeNotifier {
       mentionUserIds: mentionUserIds,
       mentionAll: mentionAll,
       replyClientMsgNo: replyClientMsgNo,
+      quote: quote,
       burnAfterRead: burnAfterRead,
       burnAfterReadSeconds: burnAfterReadSeconds,
     );
@@ -690,13 +692,14 @@ class SessionController extends ChangeNotifier {
   Future<Map<String, Object?>> sendPrivateContactCard({
     required String receiverId,
     required String cardUserId,
+    Map<String, Object?> params = const {},
   }) async {
     _requireSession();
     await _sendBusinessMessage(
       channelId: _uidFromUserId(receiverId),
       channelType: 1,
       contentType: ChatContentTypes.contactCard,
-      payload: {'card_user_id': cardUserId},
+      payload: {'card_user_id': cardUserId, ...params},
     );
     return const {'msg': '已发送'};
   }
@@ -705,6 +708,7 @@ class SessionController extends ChangeNotifier {
     required String groupId,
     required String cardUserId,
     String channelId = '',
+    Map<String, Object?> params = const {},
   }) async {
     _requireSession();
     await _sendBusinessMessage(
@@ -712,7 +716,7 @@ class SessionController extends ChangeNotifier {
       channelType: 2,
       contentType: ChatContentTypes.contactCard,
       groupId: groupId,
-      payload: {'group_id': groupId, 'card_user_id': cardUserId},
+      payload: {'group_id': groupId, 'card_user_id': cardUserId, ...params},
     );
     return const {'msg': '已发送'};
   }
