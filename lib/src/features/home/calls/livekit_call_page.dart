@@ -108,6 +108,10 @@ class _LiveKitCallPageState extends State<LiveKitCallPage> {
       if (!mounted) {
         return;
       }
+      if (_ending) {
+        unawaited(widget.controller.cancelLiveKitCall(call.callId));
+        return;
+      }
       setState(() => _call = call);
       await _connectRoom(call);
     } catch (error, stackTrace) {
@@ -143,7 +147,7 @@ class _LiveKitCallPageState extends State<LiveKitCallPage> {
     });
     try {
       final call = await widget.controller.acceptLiveKitCall(callId);
-      if (!mounted) {
+      if (!mounted || _ending) {
         return;
       }
       setState(() => _call = call);
@@ -166,14 +170,37 @@ class _LiveKitCallPageState extends State<LiveKitCallPage> {
   }
 
   Future<void> _reject() async {
+    if (_ending) {
+      return;
+    }
     final callId = _call?.callId ?? 0;
     _ending = true;
+    setState(() {
+      _connecting = true;
+      _statusText = '正在拒绝';
+    });
     if (callId > 0) {
-      await widget.controller.rejectLiveKitCall(callId).catchError((error) {
-        AppLogger.warn('call', 'reject call failed', data: {'error': '$error'});
-        return _call ?? LiveKitCallInfo.fromJson(const {});
-      });
+      try {
+        await widget.controller.rejectLiveKitCall(callId);
+      } catch (error, stackTrace) {
+        AppLogger.error(
+          'call',
+          'reject call failed',
+          error: error,
+          stackTrace: stackTrace,
+          data: {'call_id': callId},
+        );
+        if (mounted) {
+          setState(() {
+            _ending = false;
+            _connecting = false;
+            _statusText = '拒绝失败，请重试';
+          });
+        }
+        return;
+      }
     }
+    await _disconnectRoom();
     if (mounted) {
       Navigator.of(context).maybePop();
     }
@@ -356,41 +383,69 @@ class _LiveKitCallPageState extends State<LiveKitCallPage> {
     }
     _ending = true;
     final call = _call;
-    setState(() => _statusText = '正在结束通话');
-    await _room?.disconnect().catchError((Object error) {
+    setState(() {
+      _connecting = true;
+      _statusText = '正在结束通话';
+    });
+    try {
+      if (call != null && call.callId > 0) {
+        if (!_connected && !widget.incoming) {
+          await widget.controller.cancelLiveKitCall(call.callId);
+        } else if (!_connected && widget.incoming) {
+          await widget.controller.rejectLiveKitCall(call.callId);
+        } else {
+          await widget.controller.hangupLiveKitCall(
+            call.callId,
+            endCall: call.isPrivate,
+          );
+        }
+      }
+      await _disconnectRoom();
+      if (mounted) {
+        Navigator.of(context).maybePop();
+      }
+    } catch (error, stackTrace) {
+      AppLogger.error(
+        'call',
+        'hangup request failed',
+        error: error,
+        stackTrace: stackTrace,
+        data: {
+          'call_id': call?.callId,
+          'connected': _connected,
+          'incoming': widget.incoming,
+          'call_type': call?.callType,
+        },
+      );
+      if (mounted) {
+        setState(() {
+          _ending = false;
+          _connecting = false;
+          _statusText = '结束通话失败，请重试';
+        });
+      }
+    }
+  }
+
+  Future<void> _disconnectRoom() async {
+    final room = _room;
+    if (room == null) {
+      return;
+    }
+    await room.disconnect().catchError((Object error) {
       AppLogger.warn(
         'call',
         'room disconnect failed',
         data: {'error': '$error'},
       );
     });
-    if (call != null && call.callId > 0) {
-      if (!_connected && !widget.incoming) {
-        await widget.controller.cancelLiveKitCall(call.callId).catchError((
-          Object error,
-        ) {
-          AppLogger.warn(
-            'call',
-            'cancel call failed',
-            data: {'error': '$error'},
-          );
-          return call;
-        });
-      } else {
-        await widget.controller
-            .hangupLiveKitCall(call.callId, endCall: call.isPrivate)
-            .catchError((Object error) {
-              AppLogger.warn(
-                'call',
-                'hangup call failed',
-                data: {'error': '$error'},
-              );
-              return call;
-            });
-      }
-    }
+    _durationTimer?.cancel();
+    _connectedAt = null;
     if (mounted) {
-      Navigator.of(context).maybePop();
+      setState(() {
+        _room = null;
+        _connecting = false;
+      });
     }
   }
 
