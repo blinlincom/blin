@@ -50,6 +50,7 @@ class SessionController extends ChangeNotifier {
   String? _error;
   int _lastColdLaunchAt = 0;
   int _lastHotResumeAt = 0;
+  int _lastResumeLifecycleHandledAt = 0;
   int _lastSessionVerifiedAt = 0;
   DateTime? _lastHotRefreshAt;
   String _lastImStatusText = '';
@@ -77,7 +78,9 @@ class SessionController extends ChangeNotifier {
   bool get booting => _booting;
   bool get busy => _busy;
   String? get error => _error;
-  bool get isLoggedIn => _session?.userToken.isNotEmpty == true;
+  bool get isLoggedIn =>
+      _session?.userToken.isNotEmpty == true ||
+      _store.readSession()?.userToken.isNotEmpty == true;
   int get lastColdLaunchAt => _lastColdLaunchAt;
   int get lastHotResumeAt => _lastHotResumeAt;
   int get lastSessionVerifiedAt => _lastSessionVerifiedAt;
@@ -93,7 +96,17 @@ class SessionController extends ChangeNotifier {
   Stream<BusinessImPresenceEvent> get presenceEvents => _im.presenceEvents;
   Stream<BusinessImCallEvent> get callEvents => _im.callEvents;
 
-  List<Map<String, Object?>> cachedConversations() => _im.cachedConversations();
+  List<Map<String, Object?>> cachedConversations() {
+    final memoryCache = _im.cachedConversations();
+    if (memoryCache.isNotEmpty) {
+      return memoryCache;
+    }
+    final current = _session ?? _store.readSession();
+    if (current == null) {
+      return const [];
+    }
+    return _cachedConversationsForSession(current);
+  }
 
   void _hydrateCachedLaunchState() {
     _device = _store.ensureDeviceId();
@@ -501,6 +514,16 @@ class SessionController extends ChangeNotifier {
     AppLogger.info('session', 'app lifecycle', data: {'state': state.name});
     switch (state) {
       case AppLifecycleState.resumed:
+        final now = DateTime.now().millisecondsSinceEpoch;
+        if (now - _lastResumeLifecycleHandledAt < 1200) {
+          AppLogger.info(
+            'session',
+            'hot resume skipped by lifecycle debounce',
+            data: {'elapsed_ms': now - _lastResumeLifecycleHandledAt},
+          );
+          return;
+        }
+        _lastResumeLifecycleHandledAt = now;
         hotResume();
         break;
       case AppLifecycleState.inactive:
@@ -622,21 +645,46 @@ class SessionController extends ChangeNotifier {
   }
 
   Future<List<Map<String, Object?>>> loadConversations() async {
-    _requireSession();
+    final current = _requireSession();
+    final cached = _cachedConversationsForSession(current);
     AppLogger.info('session', 'load conversations start');
-    final local = await _im.loadConversations().timeout(
-      const Duration(seconds: 8),
-      onTimeout: () {
-        AppLogger.warn('session', 'local conversations timeout');
-        return _im.cachedConversations();
-      },
-    );
-    AppLogger.info(
-      'session',
-      'load conversations local success',
-      data: {'count': local.length},
-    );
-    return local;
+    try {
+      final local = await _im.loadConversations().timeout(
+        const Duration(seconds: 8),
+        onTimeout: () {
+          AppLogger.warn(
+            'session',
+            'local conversations timeout, use cached conversations',
+            data: {'cached_count': cached.length},
+          );
+          final memoryCache = _im.cachedConversations();
+          return memoryCache.isNotEmpty ? memoryCache : cached;
+        },
+      );
+      AppLogger.info(
+        'session',
+        'load conversations local success',
+        data: {'count': local.length},
+      );
+      return local;
+    } catch (error, stackTrace) {
+      final memoryCache = _im.cachedConversations();
+      final fallback = memoryCache.isNotEmpty ? memoryCache : cached;
+      if (fallback.isNotEmpty) {
+        AppLogger.warn(
+          'session',
+          'load conversations failed, keep cached conversations',
+          data: {
+            'cached_count': fallback.length,
+            'error': error.toString(),
+            'stack': stackTrace.toString(),
+          },
+        );
+        _startCachedImForPersistentLogin(source: 'load_conversations_fallback');
+        return fallback;
+      }
+      rethrow;
+    }
   }
 
   Future<List<Map<String, Object?>>> loadFriends({
@@ -1763,11 +1811,32 @@ class SessionController extends ChangeNotifier {
   }
 
   UserSession _requireSession() {
-    final current = _session;
+    var current = _session;
+    if (current == null) {
+      current = _store.readSession();
+      if (current != null) {
+        _session = current;
+        AppLogger.warn(
+          'session',
+          'session restored from persistent cache on demand',
+          data: {'user_id': current.userId},
+        );
+      }
+    }
     if (current == null) {
       throw ApiException('请先登录', code: 401);
     }
     return current;
+  }
+
+  List<Map<String, Object?>> _cachedConversationsForSession(
+    UserSession session,
+  ) {
+    final uid = session.chat?.uid ?? '';
+    if (uid.isEmpty) {
+      return const [];
+    }
+    return _copyList(_cache.readConversations(uid));
   }
 
   Future<void> _refreshLoggedInSession() async {

@@ -10,6 +10,8 @@ const _groupCallVideoEncoding = lk.VideoEncoding(
   maxBitrate: 2200 * 1000,
   maxFramerate: 30,
 );
+const _callCloseAfterToneDelay = Duration(milliseconds: 360);
+const _remoteCallCloseDelay = Duration(milliseconds: 680);
 
 lk.RoomOptions _callRoomOptions(LiveKitCallInfo call) {
   return lk.RoomOptions(
@@ -80,6 +82,90 @@ List<lk.VideoParameters> _callVideoSimulcastLayers(LiveKitCallInfo? call) {
   ];
 }
 
+class _CallSoundController {
+  _CallSoundController()
+    : _ringPlayer = AudioPlayer(),
+      _effectPlayer = AudioPlayer();
+
+  final AudioPlayer _ringPlayer;
+  final AudioPlayer _effectPlayer;
+  String _loopingAsset = '';
+  bool _disposed = false;
+
+  Future<void> playOutgoing() {
+    return _playLoop('sounds/call_outgoing.wav', volume: 0.62);
+  }
+
+  Future<void> playIncoming() {
+    return _playLoop('sounds/call_incoming.wav', volume: 0.78);
+  }
+
+  Future<void> playEndTone() async {
+    if (_disposed) {
+      return;
+    }
+    await stopRing();
+    try {
+      await _effectPlayer.stop();
+      await _effectPlayer.setReleaseMode(ReleaseMode.release);
+      await _effectPlayer.play(
+        AssetSource('sounds/call_end.wav'),
+        volume: 0.72,
+      );
+    } catch (error, stackTrace) {
+      AppLogger.warn(
+        'call',
+        'call end tone failed',
+        data: {'error': error.toString(), 'stack': stackTrace.toString()},
+      );
+    }
+  }
+
+  Future<void> stopRing() async {
+    if (_disposed) {
+      return;
+    }
+    _loopingAsset = '';
+    await _ringPlayer.stop().catchError((Object error) {
+      AppLogger.warn(
+        'call',
+        'call ring stop failed',
+        data: {'error': '$error'},
+      );
+    });
+  }
+
+  Future<void> dispose() async {
+    _disposed = true;
+    await Future.wait([
+      _ringPlayer.dispose().catchError((Object _) {}),
+      _effectPlayer.dispose().catchError((Object _) {}),
+    ]);
+  }
+
+  Future<void> _playLoop(String asset, {required double volume}) async {
+    if (_disposed || _loopingAsset == asset) {
+      return;
+    }
+    _loopingAsset = asset;
+    try {
+      await _ringPlayer.stop();
+      await _ringPlayer.setReleaseMode(ReleaseMode.loop);
+      await _ringPlayer.play(AssetSource(asset), volume: volume);
+    } catch (error, stackTrace) {
+      AppLogger.warn(
+        'call',
+        'call ring play failed',
+        data: {
+          'asset': asset,
+          'error': error.toString(),
+          'stack': stackTrace.toString(),
+        },
+      );
+    }
+  }
+}
+
 class LiveKitCallPage extends StatefulWidget {
   const LiveKitCallPage.create({
     required this.controller,
@@ -121,6 +207,7 @@ class _LiveKitCallPageState extends State<LiveKitCallPage> {
   lk.Room? _room;
   lk.EventsListener<lk.RoomEvent>? _listener;
   StreamSubscription<BusinessImCallEvent>? _callSub;
+  late final _sound = _CallSoundController();
   Timer? _durationTimer;
   DateTime? _connectedAt;
   var _statusText = '正在准备通话';
@@ -131,6 +218,8 @@ class _LiveKitCallPageState extends State<LiveKitCallPage> {
   var _speakerEnabled = true;
   var _cameraFront = true;
   var _durationLabel = '00:00';
+  var _pageClosing = false;
+  var _callAnswered = false;
 
   bool get _connected => _connectedAt != null;
   bool get _incomingWaiting => widget.incoming && !_connected && !_connecting;
@@ -150,7 +239,9 @@ class _LiveKitCallPageState extends State<LiveKitCallPage> {
     _callSub = widget.controller.callEvents.listen(_onCallEvent);
     if (widget.incoming) {
       _statusText = _incomingStatusText;
+      unawaited(_sound.playIncoming());
     } else {
+      unawaited(_sound.playOutgoing());
       unawaited(_createAndConnect());
     }
   }
@@ -159,6 +250,7 @@ class _LiveKitCallPageState extends State<LiveKitCallPage> {
   void dispose() {
     _durationTimer?.cancel();
     _callSub?.cancel();
+    unawaited(_sound.dispose());
     _room?.removeListener(_onRoomChanged);
     unawaited(_listener?.dispose());
     final room = _room;
@@ -185,10 +277,11 @@ class _LiveKitCallPageState extends State<LiveKitCallPage> {
         groupId: widget.groupId,
         title: widget.title,
       );
-      if (!mounted) {
+      if (_ending) {
+        unawaited(widget.controller.cancelLiveKitCall(call.callId));
         return;
       }
-      if (_ending) {
+      if (!mounted) {
         unawaited(widget.controller.cancelLiveKitCall(call.callId));
         return;
       }
@@ -208,6 +301,7 @@ class _LiveKitCallPageState extends State<LiveKitCallPage> {
         },
       );
       if (mounted) {
+        unawaited(_sound.stopRing());
         setState(() {
           _connecting = false;
           _statusText = error.toString();
@@ -221,6 +315,7 @@ class _LiveKitCallPageState extends State<LiveKitCallPage> {
     if (callId <= 0) {
       return;
     }
+    unawaited(_sound.stopRing());
     setState(() {
       _connecting = true;
       _statusText = '正在接听';
@@ -230,6 +325,7 @@ class _LiveKitCallPageState extends State<LiveKitCallPage> {
       if (!mounted || _ending) {
         return;
       }
+      _callAnswered = true;
       setState(() => _call = call);
       await _connectRoom(call);
     } catch (error, stackTrace) {
@@ -241,6 +337,9 @@ class _LiveKitCallPageState extends State<LiveKitCallPage> {
         data: {'call_id': callId},
       );
       if (mounted) {
+        if (!_ending) {
+          unawaited(_sound.playIncoming());
+        }
         setState(() {
           _connecting = false;
           _statusText = error.toString();
@@ -280,22 +379,17 @@ class _LiveKitCallPageState extends State<LiveKitCallPage> {
         return;
       }
     }
-    await _disconnectRoom();
-    if (mounted) {
-      Navigator.of(context).maybePop();
-    }
+    await _finishAndClose(playEndTone: true);
   }
 
   Future<void> _connectRoom(LiveKitCallInfo call) async {
     if (call.liveKitUrl.isEmpty || call.liveKitToken.isEmpty) {
       throw ApiException('音视频连接参数缺失');
     }
-    final room = lk.Room(
-      roomOptions: _callRoomOptions(call),
-    );
+    final room = lk.Room(roomOptions: _callRoomOptions(call));
     _listener = room.createListener()
       ..on<lk.RoomConnectedEvent>((_) {
-        _markConnected();
+        _onRoomConnected();
         unawaited(_preferHighQualityRemoteVideo(source: 'connected'));
       })
       ..on<lk.RoomReconnectingEvent>((_) => _setStatus('正在重连音视频'))
@@ -303,8 +397,14 @@ class _LiveKitCallPageState extends State<LiveKitCallPage> {
         _setStatus('通话中');
         unawaited(_preferHighQualityRemoteVideo(source: 'reconnected'));
       })
-      ..on<lk.ParticipantConnectedEvent>((_) => _onRoomChanged())
-      ..on<lk.ParticipantDisconnectedEvent>((_) => _onRoomChanged())
+      ..on<lk.ParticipantConnectedEvent>((_) {
+        _onRoomChanged();
+        _maybeMarkConnected(source: 'participant_connected');
+      })
+      ..on<lk.ParticipantDisconnectedEvent>((_) {
+        _onRoomChanged();
+        _closePrivateCallWhenRemoteLeft();
+      })
       ..on<lk.TrackSubscribedEvent>((_) {
         _onRoomChanged();
         unawaited(_preferHighQualityRemoteVideo(source: 'subscribed'));
@@ -314,7 +414,7 @@ class _LiveKitCallPageState extends State<LiveKitCallPage> {
       ..on<lk.TrackUnmutedEvent>((_) => _onRoomChanged())
       ..on<lk.RoomDisconnectedEvent>((_) {
         if (!_ending) {
-          _setStatus('通话已断开');
+          unawaited(_finishRemoteCall('通话已断开'));
         }
       });
     room.addListener(_onRoomChanged);
@@ -331,6 +431,10 @@ class _LiveKitCallPageState extends State<LiveKitCallPage> {
         camera: lk.TrackOption(enabled: call.isVideo),
       ),
     );
+    if (_ending || !mounted) {
+      await room.disconnect().catchError((Object _) {});
+      return;
+    }
     AppLogger.info(
       'call',
       'livekit video quality configured',
@@ -397,10 +501,39 @@ class _LiveKitCallPageState extends State<LiveKitCallPage> {
     }
   }
 
-  void _markConnected() {
+  void _onRoomConnected() {
     if (!mounted) {
       return;
     }
+    if (_gridCall) {
+      _maybeMarkConnected(source: 'room_connected');
+      return;
+    }
+    if (_room?.remoteParticipants.isNotEmpty == true) {
+      _maybeMarkConnected(source: 'room_connected_with_remote');
+      return;
+    }
+    setState(() {
+      _connecting = false;
+      _statusText = '等待对方加入';
+    });
+  }
+
+  void _maybeMarkConnected({required String source}) {
+    if (!mounted || _connectedAt != null) {
+      return;
+    }
+    final room = _room;
+    if (!_gridCall && (room == null || room.remoteParticipants.isEmpty)) {
+      AppLogger.info(
+        'call',
+        'call connected delayed until remote joins',
+        data: {'source': source, 'call_id': _call?.callId},
+      );
+      return;
+    }
+    _callAnswered = true;
+    unawaited(_sound.stopRing());
     _durationTimer?.cancel();
     _connectedAt = DateTime.now();
     _durationTimer = Timer.periodic(const Duration(seconds: 1), (_) {
@@ -440,18 +573,31 @@ class _LiveKitCallPageState extends State<LiveKitCallPage> {
     if (callId <= 0 || event.event.call.callId != callId) {
       return;
     }
-    if (event.event.isCancel || event.event.isReject || event.event.isHangup) {
-      _ending = true;
-      unawaited(_room?.disconnect());
-      if (mounted) {
-        setState(() => _statusText = _remoteEndText(event.event));
-        Future<void>.delayed(const Duration(milliseconds: 650), () {
-          if (mounted) {
-            Navigator.of(context).maybePop();
-          }
-        });
+    if (event.event.event == 'call.accept') {
+      _callAnswered = true;
+      unawaited(_sound.stopRing());
+      if (!_connected) {
+        _setStatus('正在连接音视频');
       }
+      return;
     }
+    if (event.event.isCancel || event.event.isReject || event.event.isHangup) {
+      unawaited(_finishRemoteCall(_remoteEndText(event.event)));
+    }
+  }
+
+  void _closePrivateCallWhenRemoteLeft() {
+    final call = _call;
+    final room = _room;
+    if (call == null ||
+        room == null ||
+        !call.isPrivate ||
+        !_connected ||
+        room.remoteParticipants.isNotEmpty ||
+        _ending) {
+      return;
+    }
+    unawaited(_finishRemoteCall('对方已挂断'));
   }
 
   String _remoteEndText(LiveKitCallEvent event) {
@@ -538,44 +684,76 @@ class _LiveKitCallPageState extends State<LiveKitCallPage> {
       _connecting = true;
       _statusText = '正在结束通话';
     });
-    try {
-      if (call != null && call.callId > 0) {
-        if (!_connected && !widget.incoming) {
-          await widget.controller.cancelLiveKitCall(call.callId);
-        } else if (!_connected && widget.incoming) {
-          await widget.controller.rejectLiveKitCall(call.callId);
-        } else {
-          await widget.controller.hangupLiveKitCall(
-            call.callId,
-            endCall: call.isPrivate,
-          );
-        }
-      }
-      await _disconnectRoom();
-      if (mounted) {
-        Navigator.of(context).maybePop();
-      }
-    } catch (error, stackTrace) {
-      AppLogger.error(
-        'call',
-        'hangup request failed',
-        error: error,
-        stackTrace: stackTrace,
-        data: {
-          'call_id': call?.callId,
-          'connected': _connected,
-          'incoming': widget.incoming,
-          'call_type': call?.callType,
-        },
-      );
-      if (mounted) {
-        setState(() {
-          _ending = false;
-          _connecting = false;
-          _statusText = '结束通话失败，请重试';
-        });
-      }
+    _sendEndRequestInBackground(call);
+    await _finishAndClose(playEndTone: true);
+  }
+
+  void _sendEndRequestInBackground(LiveKitCallInfo? call) {
+    if (call == null || call.callId <= 0) {
+      return;
     }
+    Future<void> request;
+    if (!_connected && !_callAnswered && !widget.incoming) {
+      request = widget.controller.cancelLiveKitCall(call.callId).then((_) {});
+    } else if (!_connected && !_callAnswered && widget.incoming) {
+      request = widget.controller.rejectLiveKitCall(call.callId).then((_) {});
+    } else {
+      request = widget.controller
+          .hangupLiveKitCall(call.callId, endCall: call.isPrivate)
+          .then((_) {});
+    }
+    unawaited(
+      request.catchError((Object error, StackTrace stackTrace) {
+        AppLogger.error(
+          'call',
+          'hangup request failed after local close',
+          error: error,
+          stackTrace: stackTrace,
+          data: {
+            'call_id': call.callId,
+            'connected': _connected,
+            'incoming': widget.incoming,
+            'call_type': call.callType,
+          },
+        );
+      }),
+    );
+  }
+
+  Future<void> _finishRemoteCall(String statusText) async {
+    if (_ending) {
+      return;
+    }
+    _ending = true;
+    unawaited(_disconnectRoom());
+    unawaited(_sound.playEndTone());
+    if (mounted) {
+      setState(() {
+        _connecting = false;
+        _statusText = statusText;
+      });
+    }
+    await Future<void>.delayed(_remoteCallCloseDelay);
+    _popCallPage();
+  }
+
+  Future<void> _finishAndClose({required bool playEndTone}) async {
+    await _disconnectRoom();
+    if (playEndTone) {
+      await _sound.playEndTone();
+      await Future<void>.delayed(_callCloseAfterToneDelay);
+    } else {
+      await _sound.stopRing();
+    }
+    _popCallPage();
+  }
+
+  void _popCallPage() {
+    if (_pageClosing || !mounted) {
+      return;
+    }
+    _pageClosing = true;
+    Navigator.of(context).pop();
   }
 
   Future<void> _disconnectRoom() async {

@@ -105,9 +105,30 @@ class _MessagesTabState extends State<MessagesTab> {
       if (!mounted || token != _loadToken) {
         return;
       }
+      final cached = widget.controller.cachedConversations();
+      if (cached.isNotEmpty) {
+        _precacheConversationAvatars(context, cached);
+        AppLogger.warn(
+          'ui',
+          'conversation load failed, keep visible cache',
+          data: {'count': cached.length, 'error': error.toString()},
+        );
+        setState(() {
+          _conversations = cached;
+          _loading = false;
+          _error = null;
+        });
+        return;
+      }
+      final isLoginRace = error.toString().contains('请先登录');
+      AppLogger.warn(
+        'ui',
+        'conversation load failed without local cache',
+        data: {'login_race': isLoginRace, 'error': error.toString()},
+      );
       setState(() {
         _loading = false;
-        _error = error.toString();
+        _error = isLoginRace ? null : error.toString();
       });
     }
   }

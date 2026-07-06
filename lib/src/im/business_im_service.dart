@@ -2727,23 +2727,6 @@ class BusinessImService extends ChangeNotifier {
     if (key.isEmpty) {
       return false;
     }
-    if (eventSeconds > 0 &&
-        _presenceRealtimeAfterSeconds > 0 &&
-        eventSeconds < _presenceRealtimeAfterSeconds) {
-      AppLogger.info(
-        'im',
-        'gateway presence ignored',
-        data: {
-          'reason': 'before_realtime_window',
-          'uid': event.uid,
-          'user_id': event.userId,
-          'online': event.online,
-          'event_time': event.eventTime,
-          'presence_realtime_after': _presenceRealtimeAfterSeconds,
-        },
-      );
-      return false;
-    }
     final previous = _presenceLatestEventSeconds[key] ?? 0;
     if (eventSeconds > 0 && previous > 0 && eventSeconds < previous) {
       AppLogger.info(
