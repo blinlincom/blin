@@ -1,5 +1,85 @@
 part of 'package:bim/src/features/home/home_page.dart';
 
+const _privateCallVideoDimensions = lk.VideoDimensions(1920, 1080);
+const _groupCallVideoDimensions = lk.VideoDimensions(1280, 720);
+const _privateCallVideoEncoding = lk.VideoEncoding(
+  maxBitrate: 3600 * 1000,
+  maxFramerate: 30,
+);
+const _groupCallVideoEncoding = lk.VideoEncoding(
+  maxBitrate: 2200 * 1000,
+  maxFramerate: 30,
+);
+
+lk.RoomOptions _callRoomOptions(LiveKitCallInfo call) {
+  return lk.RoomOptions(
+    defaultCameraCaptureOptions: _callCameraCaptureOptions(call),
+    defaultVideoPublishOptions: _callVideoPublishOptions(call),
+    adaptiveStream: !call.isPrivate,
+    dynacast: !call.isPrivate,
+  );
+}
+
+lk.CameraCaptureOptions _callCameraCaptureOptions(LiveKitCallInfo? call) {
+  return lk.CameraCaptureOptions(
+    params: lk.VideoParameters(
+      dimensions: _callVideoDimensions(call),
+      encoding: _callVideoEncoding(call),
+    ),
+    maxFrameRate: 30,
+  );
+}
+
+lk.VideoPublishOptions _callVideoPublishOptions(LiveKitCallInfo? call) {
+  return lk.VideoPublishOptions(
+    videoEncoding: _callVideoEncoding(call),
+    simulcast: true,
+    videoSimulcastLayers: _callVideoSimulcastLayers(call),
+    degradationPreference: lk.DegradationPreference.maintainResolution,
+  );
+}
+
+lk.VideoDimensions _callVideoDimensions(LiveKitCallInfo? call) {
+  return call?.isPrivate ?? true
+      ? _privateCallVideoDimensions
+      : _groupCallVideoDimensions;
+}
+
+lk.VideoEncoding _callVideoEncoding(LiveKitCallInfo? call) {
+  return call?.isPrivate ?? true
+      ? _privateCallVideoEncoding
+      : _groupCallVideoEncoding;
+}
+
+List<lk.VideoParameters> _callVideoSimulcastLayers(LiveKitCallInfo? call) {
+  if (call?.isPrivate ?? true) {
+    return const [
+      lk.VideoParameters(
+        dimensions: lk.VideoDimensions(320, 180),
+        encoding: lk.VideoEncoding(maxBitrate: 180 * 1000, maxFramerate: 15),
+      ),
+      lk.VideoParameters(
+        dimensions: lk.VideoDimensions(640, 360),
+        encoding: lk.VideoEncoding(maxBitrate: 520 * 1000, maxFramerate: 20),
+      ),
+      lk.VideoParameters(
+        dimensions: lk.VideoDimensions(1280, 720),
+        encoding: lk.VideoEncoding(maxBitrate: 1800 * 1000, maxFramerate: 30),
+      ),
+    ];
+  }
+  return const [
+    lk.VideoParameters(
+      dimensions: lk.VideoDimensions(320, 180),
+      encoding: lk.VideoEncoding(maxBitrate: 180 * 1000, maxFramerate: 15),
+    ),
+    lk.VideoParameters(
+      dimensions: lk.VideoDimensions(640, 360),
+      encoding: lk.VideoEncoding(maxBitrate: 520 * 1000, maxFramerate: 20),
+    ),
+  ];
+}
+
 class LiveKitCallPage extends StatefulWidget {
   const LiveKitCallPage.create({
     required this.controller,
@@ -211,15 +291,24 @@ class _LiveKitCallPageState extends State<LiveKitCallPage> {
       throw ApiException('音视频连接参数缺失');
     }
     final room = lk.Room(
-      roomOptions: const lk.RoomOptions(adaptiveStream: true, dynacast: true),
+      roomOptions: _callRoomOptions(call),
     );
     _listener = room.createListener()
-      ..on<lk.RoomConnectedEvent>((_) => _markConnected())
+      ..on<lk.RoomConnectedEvent>((_) {
+        _markConnected();
+        unawaited(_preferHighQualityRemoteVideo(source: 'connected'));
+      })
       ..on<lk.RoomReconnectingEvent>((_) => _setStatus('正在重连音视频'))
-      ..on<lk.RoomReconnectedEvent>((_) => _setStatus('通话中'))
+      ..on<lk.RoomReconnectedEvent>((_) {
+        _setStatus('通话中');
+        unawaited(_preferHighQualityRemoteVideo(source: 'reconnected'));
+      })
       ..on<lk.ParticipantConnectedEvent>((_) => _onRoomChanged())
       ..on<lk.ParticipantDisconnectedEvent>((_) => _onRoomChanged())
-      ..on<lk.TrackSubscribedEvent>((_) => _onRoomChanged())
+      ..on<lk.TrackSubscribedEvent>((_) {
+        _onRoomChanged();
+        unawaited(_preferHighQualityRemoteVideo(source: 'subscribed'));
+      })
       ..on<lk.TrackUnsubscribedEvent>((_) => _onRoomChanged())
       ..on<lk.TrackMutedEvent>((_) => _onRoomChanged())
       ..on<lk.TrackUnmutedEvent>((_) => _onRoomChanged())
@@ -242,11 +331,70 @@ class _LiveKitCallPageState extends State<LiveKitCallPage> {
         camera: lk.TrackOption(enabled: call.isVideo),
       ),
     );
+    AppLogger.info(
+      'call',
+      'livekit video quality configured',
+      data: {
+        'call_id': call.callId,
+        'call_type': call.callType,
+        'media_type': call.mediaType,
+        'capture_width': _callVideoDimensions(call).width,
+        'capture_height': _callVideoDimensions(call).height,
+        'max_bitrate': _callVideoEncoding(call).maxBitrate,
+        'max_framerate': _callVideoEncoding(call).maxFramerate,
+        'adaptive_stream': !call.isPrivate,
+        'dynacast': !call.isPrivate,
+      },
+    );
     await room.setSpeakerOn(true, forceSpeakerOutput: false).catchError((
       Object error,
     ) {
       AppLogger.warn('call', 'set speaker failed', data: {'error': '$error'});
     });
+  }
+
+  Future<void> _preferHighQualityRemoteVideo({required String source}) async {
+    final room = _room;
+    final call = _call;
+    if (room == null || call == null || !call.isVideo) {
+      return;
+    }
+    final dimensions = _callVideoDimensions(call);
+    for (final participant in room.remoteParticipants.values) {
+      for (final publication in participant.videoTrackPublications) {
+        try {
+          await publication.enable();
+          await publication.setVideoDimensions(dimensions);
+          await publication.setVideoFPS(30);
+          AppLogger.info(
+            'call',
+            'remote video quality requested',
+            data: {
+              'source': source,
+              'call_id': call.callId,
+              'participant': participant.identity,
+              'track_sid': publication.sid,
+              'width': dimensions.width,
+              'height': dimensions.height,
+              'fps': 30,
+            },
+          );
+        } catch (error, stackTrace) {
+          AppLogger.warn(
+            'call',
+            'remote video quality request failed',
+            data: {
+              'source': source,
+              'call_id': call.callId,
+              'participant': participant.identity,
+              'track_sid': publication.sid,
+              'error': error.toString(),
+              'stack': stackTrace.toString(),
+            },
+          );
+        }
+      }
+    }
   }
 
   void _markConnected() {
@@ -334,7 +482,10 @@ class _LiveKitCallPageState extends State<LiveKitCallPage> {
       return;
     }
     final next = !_cameraEnabled;
-    await participant.setCameraEnabled(next);
+    await participant.setCameraEnabled(
+      next,
+      cameraCaptureOptions: _callCameraCaptureOptions(_call),
+    );
     if (mounted) {
       setState(() => _cameraEnabled = next);
     }
