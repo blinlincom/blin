@@ -197,8 +197,34 @@ class SessionController extends ChangeNotifier {
     AppLogger.info('session', 'hot resume');
     _lastHotResumeAt = _store.markHotResume();
     _lastSessionVerifiedAt = _store.readSessionVerifiedAt();
-    _session = _store.readSession();
-    notifyListeners();
+    final memorySession = _session;
+    final storedSession = _store.readSession();
+    if (storedSession == null) {
+      if (memorySession == null) {
+        AppLogger.info('session', 'hot resume without cached session');
+        return;
+      }
+      _session = memorySession;
+      _store.writeSession(memorySession);
+      AppLogger.warn(
+        'session',
+        'hot resume kept memory session after empty disk cache',
+        data: {
+          'user_id': memorySession.userId,
+          'last_session_verified_at': _lastSessionVerifiedAt,
+        },
+      );
+    } else {
+      _session = storedSession;
+      if (!_isSameSessionIdentity(memorySession, storedSession)) {
+        AppLogger.info(
+          'session',
+          'hot resume restored persisted session',
+          data: {'user_id': storedSession.userId},
+        );
+        notifyListeners();
+      }
+    }
     if (_session == null) {
       return;
     }
@@ -234,6 +260,12 @@ class SessionController extends ChangeNotifier {
       );
       notifyListeners();
     }
+  }
+
+  bool _isSameSessionIdentity(UserSession? left, UserSession? right) {
+    return left?.userId == right?.userId &&
+        left?.userToken == right?.userToken &&
+        left?.chat?.uid == right?.chat?.uid;
   }
 
   void _refreshAppInfoInBackground({
