@@ -174,6 +174,10 @@ Map<String, Object?> _messageQuote(Map<String, Object?> item) {
   if (quote.isNotEmpty) {
     return quote;
   }
+  final replyQuote = _quoteMapFromReply(payload);
+  if (replyQuote.isNotEmpty) {
+    return replyQuote;
+  }
   final clientMsgNo = _value(payload, [
     'quote_client_msg_no',
     'reply_client_msg_no',
@@ -200,6 +204,91 @@ Map<String, Object?> _quoteMapFromPayload(Map<String, Object?> payload) {
     return direct;
   }
   final raw = _value(payload, ['quote', 'quote_json']);
+  if (raw.isEmpty || !raw.trimLeft().startsWith('{')) {
+    return const {};
+  }
+  try {
+    final decoded = jsonDecode(raw);
+    return _asObjectMap(decoded);
+  } on Object {
+    return const {};
+  }
+}
+
+Map<String, Object?> _quoteMapFromReply(Map<String, Object?> payload) {
+  final reply = _replyMapFromPayload(payload);
+  if (reply.isEmpty) {
+    return const {};
+  }
+  final replyPayload = _asObjectMap(reply['payload']);
+  final clientMsgNo = _value(reply, [
+    'client_msg_no',
+    'quote_client_msg_no',
+    'reply_client_msg_no',
+  ], fallback: _value(replyPayload, ['client_msg_no']));
+  final messageId = _value(reply, [
+    'message_id',
+    'message_idstr',
+    'root_mid',
+  ], fallback: _value(replyPayload, ['message_id', 'message_idstr']));
+  var messageSeq = _intValue(reply, ['message_seq']);
+  if (messageSeq <= 0) {
+    messageSeq = _intValue(replyPayload, ['message_seq']);
+  }
+  final contentType = _value(reply, [
+    'content_type',
+  ], fallback: _value(replyPayload, ['content_type']));
+  final preview = _value(reply, [
+    'content_preview',
+    'preview',
+    'content',
+    'text',
+  ], fallback: _value(replyPayload, ['content', 'text', 'remark']));
+  final senderName = _value(
+    reply,
+    ['sender_name', 'from_name', 'nickname', 'from_nickname'],
+    fallback: _value(replyPayload, [
+      'sender_nickname',
+      'sender_username',
+      'from_nickname',
+      'from_username',
+    ]),
+  );
+  final senderUid = _value(reply, [
+    'sender_uid',
+    'from_uid',
+  ], fallback: _value(replyPayload, ['sender_uid', 'from_uid']));
+  if (clientMsgNo.isEmpty &&
+      messageId.isEmpty &&
+      messageSeq <= 0 &&
+      preview.isEmpty &&
+      contentType.isEmpty) {
+    return const {};
+  }
+  return {
+    if (clientMsgNo.isNotEmpty) 'client_msg_no': clientMsgNo,
+    if (messageId.isNotEmpty) 'message_id': messageId,
+    if (messageSeq > 0) 'message_seq': messageSeq,
+    if (_value(replyPayload, ['channel_id']).isNotEmpty)
+      'channel_id': _value(replyPayload, ['channel_id']),
+    if (_intValue(replyPayload, ['channel_type']) > 0)
+      'channel_type': _intValue(replyPayload, ['channel_type']),
+    if (senderUid.isNotEmpty) 'sender_uid': senderUid,
+    if (senderName.isNotEmpty) 'sender_name': senderName,
+    if (contentType.isNotEmpty) 'content_type': contentType,
+    'content_preview': preview.isNotEmpty
+        ? preview
+        : _quoteContentTypeText(contentType),
+    'status': 'normal',
+  };
+}
+
+Map<String, Object?> _replyMapFromPayload(Map<String, Object?> payload) {
+  final direct = _asObjectMap(payload['reply']);
+  if (direct.isNotEmpty) {
+    return direct;
+  }
+  final raw = _value(payload, ['reply']);
   if (raw.isEmpty || !raw.trimLeft().startsWith('{')) {
     return const {};
   }
@@ -263,7 +352,17 @@ Map<String, Object?> _quoteSnapshotFromMessage(Map<String, Object?> item) {
 }
 
 String _quoteSenderName(Map<String, Object?> quote) {
-  return _value(quote, ['sender_name', 'nickname', 'from_nickname']);
+  final payload = _asObjectMap(quote['payload']);
+  return _value(
+    quote,
+    ['sender_name', 'from_name', 'nickname', 'from_nickname'],
+    fallback: _value(payload, [
+      'sender_nickname',
+      'sender_username',
+      'from_nickname',
+      'from_username',
+    ]),
+  );
 }
 
 String _quotePreviewText(Map<String, Object?> quote) {
@@ -286,7 +385,16 @@ String _quotePreviewText(Map<String, Object?> quote) {
   if (preview.isNotEmpty && preview != '[消息]') {
     return preview;
   }
-  return _quoteContentTypeText(_value(quote, ['content_type']));
+  final payload = _asObjectMap(quote['payload']);
+  final payloadPreview = _value(payload, ['content', 'text', 'remark']);
+  if (payloadPreview.isNotEmpty && payloadPreview != '[消息]') {
+    return payloadPreview;
+  }
+  return _quoteContentTypeText(
+    _value(quote, [
+      'content_type',
+    ], fallback: _value(payload, ['content_type'])),
+  );
 }
 
 String _quotePreviewForMessage(

@@ -81,6 +81,11 @@ class _InAppMediaPickerPageState extends State<_InAppMediaPickerPage> {
         return;
       }
       if (albums.isEmpty) {
+        AppLogger.warn(
+          'chat',
+          'media picker albums empty',
+          data: {'content_type': widget.contentType},
+        );
         setState(() {
           _loading = false;
           _albums = const [];
@@ -142,6 +147,17 @@ class _InAppMediaPickerPageState extends State<_InAppMediaPickerPage> {
         _loadingAssets = false;
         _loadingMore = false;
       });
+      AppLogger.info(
+        'chat',
+        'media picker assets loaded',
+        data: {
+          'content_type': widget.contentType,
+          'album_id': album.id,
+          'album_name': album.name,
+          'asset_count': assets.length,
+          'has_more': _hasMore,
+        },
+      );
       if (_gridController.hasClients) {
         _gridController.jumpTo(0);
       }
@@ -261,12 +277,6 @@ class _InAppMediaPickerPageState extends State<_InAppMediaPickerPage> {
       resizeToAvoidBottomInset: true,
       backgroundColor: _pageColor,
       appBar: _PickerAppBar(title: title),
-      bottomNavigationBar: _MediaPickerFooter(
-        selected: _selectedAsset,
-        sending: _selectingAssetId.isNotEmpty,
-        onPreview: _selectedAsset == null ? null : _openPreview,
-        onSend: _selectedAsset == null ? null : _sendSelectedAsset,
-      ),
       body: SafeArea(
         top: false,
         bottom: false,
@@ -280,6 +290,12 @@ class _InAppMediaPickerPageState extends State<_InAppMediaPickerPage> {
                 onChanged: (album) => _loadAssets(album),
               ),
             Expanded(child: _buildBody()),
+            _MediaPickerFooter(
+              selected: _selectedAsset,
+              sending: _selectingAssetId.isNotEmpty,
+              onPreview: _selectedAsset == null ? null : _openPreview,
+              onSend: _selectedAsset == null ? null : _sendSelectedAsset,
+            ),
           ],
         ),
       ),
@@ -414,6 +430,11 @@ class _InAppFilePickerPageState extends State<_InAppFilePickerPage> {
         _files = files;
         _loading = false;
       });
+      AppLogger.info(
+        'chat',
+        'in-app files loaded',
+        data: {'directory_count': dirs.length, 'file_count': files.length},
+      );
     } catch (error, stackTrace) {
       AppLogger.error(
         'chat',
@@ -563,11 +584,6 @@ class _InAppFilePickerPageState extends State<_InAppFilePickerPage> {
           ),
         ],
       ),
-      bottomNavigationBar: _FilePickerFooter(
-        selected: _selectedFile,
-        sending: _selectingPath.isNotEmpty,
-        onSend: _selectedFile == null ? null : _sendSelectedFile,
-      ),
       body: SafeArea(
         top: false,
         bottom: false,
@@ -580,6 +596,11 @@ class _InAppFilePickerPageState extends State<_InAppFilePickerPage> {
               onFilterChanged: _changeFilter,
             ),
             Expanded(child: _buildBody()),
+            _FilePickerFooter(
+              selected: _selectedFile,
+              sending: _selectingPath.isNotEmpty,
+              onSend: _selectedFile == null ? null : _sendSelectedFile,
+            ),
           ],
         ),
       ),
@@ -720,13 +741,15 @@ class _MediaAssetTile extends StatelessWidget {
                 ),
                 builder: (context, snapshot) {
                   final bytes = snapshot.data;
-                  if (bytes == null) {
+                  if (snapshot.hasError || bytes == null || bytes.isEmpty) {
                     return _MediaAssetPlaceholder(isVideo: isVideo);
                   }
                   return Image.memory(
                     bytes,
                     fit: BoxFit.cover,
                     gaplessPlayback: true,
+                    errorBuilder: (_, __, ___) =>
+                        _MediaAssetPlaceholder(isVideo: isVideo),
                   );
                 },
               ),
@@ -850,13 +873,26 @@ class _AssetImagePreview extends StatelessWidget {
       ),
       builder: (context, snapshot) {
         final bytes = snapshot.data;
-        if (bytes == null) {
+        if (snapshot.hasError) {
+          return const _FullScreenMediaError(text: '图片无法预览');
+        }
+        if (bytes == null || bytes.isEmpty) {
+          if (snapshot.connectionState == ConnectionState.done) {
+            return const _FullScreenMediaError(text: '图片无法预览');
+          }
           return const _FullScreenMediaLoading();
         }
         return InteractiveViewer(
           minScale: 1,
           maxScale: 4,
-          child: Center(child: Image.memory(bytes, fit: BoxFit.contain)),
+          child: Center(
+            child: Image.memory(
+              bytes,
+              fit: BoxFit.contain,
+              errorBuilder: (_, __, ___) =>
+                  const _FullScreenMediaError(text: '图片无法预览'),
+            ),
+          ),
         );
       },
     );
@@ -1677,7 +1713,7 @@ class _FileListSkeleton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ListView.separated(
-      padding: const EdgeInsets.only(top: 4, bottom: 86),
+      padding: const EdgeInsets.only(top: 4, bottom: 12),
       itemCount: 10,
       separatorBuilder: (_, __) =>
           const Divider(height: 1, color: _lightBorderColor),

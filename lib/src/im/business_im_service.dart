@@ -5541,6 +5541,7 @@ class BusinessImService extends ChangeNotifier {
         'media',
         'receipt',
         'quote',
+        'reply',
       ]) {
         final existingNested = _asMap(existingPayload[key]);
         final incomingNested = _asMap(incomingPayload[key]);
@@ -6217,7 +6218,9 @@ class BusinessImService extends ChangeNotifier {
             'reply_client_msg_no',
             'quote_client_msg_no',
           ]).isNotEmpty ||
-          _asMap(payload['quote']).isNotEmpty,
+          _asMap(payload['quote']).isNotEmpty ||
+          _asMap(payload['reply']).isNotEmpty ||
+          _value(payload, ['reply']).isNotEmpty,
       'has_file_path': _value(payload, ['file_path']).isNotEmpty,
       'has_image_path': _value(payload, ['image_path']).isNotEmpty,
       'has_video_path': _value(payload, ['video_path']).isNotEmpty,
