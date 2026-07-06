@@ -14,25 +14,40 @@
 
 ```ini
 [LIVEKIT]
-ENABLED = false
-URL =
-API_KEY =
-API_SECRET =
+; 已部署 LiveKit Server 后设为 true。
+ENABLED = true
+; 当前生产入口，Flutter SDK 会连接 wss://blcold.cn/livekit/rtc。
+URL = wss://blcold.cn/livekit
+; 只允许放在服务端 .env，不允许下发客户端。
+API_KEY = <服务端已配置>
+API_SECRET = <服务端已配置>
 TOKEN_TTL = 3600
 PRIVATE_TIMEOUT = 45
 GROUP_TIMEOUT = 90
 MEETING_TIMEOUT = 300
 MAX_GROUP_PARTICIPANTS = 16
 MAX_MEETING_PARTICIPANTS = 50
+; 官方 webhook 已使用 Authorization JWT + body sha256 校验，此项默认留空。
 WEBHOOK_SECRET =
 ```
 
-部署 LiveKit Server 后配置：
+当前服务器部署：
 
-- `ENABLED = true`
-- `URL = wss://你的音视频域名`
-- `API_KEY` 和 `API_SECRET` 填 LiveKit Server 配置中的 key/secret
-- `WEBHOOK_SECRET` 建议设置随机长密钥
+- LiveKit Server：`1.13.3`
+- systemd 服务：`livekit.service`
+- LiveKit 配置：`/etc/livekit/livekit.yaml`
+- 信令入口：`https://blcold.cn/livekit/` 反向代理到本机 `127.0.0.1:7880`
+- SDK 连接地址：业务端返回 `wss://blcold.cn/livekit`
+- 媒体 TCP：`7881`
+- 媒体 UDP：`50000-60000`
+- Redis：`127.0.0.1:6379`
+- Webhook：`https://blcold.cn/api/livekit_webhook`
+
+阿里云安全组必须放行：
+
+- `443/TCP`：HTTPS/WSS 信令入口。
+- `7881/TCP`：ICE/TCP 备用媒体通道。
+- `50000-60000/UDP`：WebRTC 主媒体通道。
 
 ## 新增接口
 
@@ -64,7 +79,9 @@ WEBHOOK_SECRET =
   - `call_id`
 
 - `livekit_webhook`：LiveKit 回调
-  - Header 携带 `Authorization: Bearer {WEBHOOK_SECRET}` 或 `X-LiveKit-Secret`
+  - LiveKit 官方回调会在 `Authorization` 放置签名 JWT。
+  - 业务端校验 JWT 的 `iss`、`exp/nbf`、HS256 签名和请求体 `sha256`。
+  - 如果以后在前置安全网关增加静态密钥，也支持 `Authorization: Bearer {WEBHOOK_SECRET}` 或 `X-LiveKit-Secret`。
 
 ## 客户端 UI
 
@@ -94,3 +111,4 @@ WEBHOOK_SECRET =
 - LiveKit `API_SECRET` 只允许放服务端，客户端只拿短期 token。
 - LiveKit 未配置时，业务端会直接返回“音视频服务未配置”。
 - Gateway 必须正常在线，否则来电信令不能实时送达。
+- 当前服务器本机防火墙为放行状态；如果公网 `7881/TCP` 或 `50000-60000/UDP` 不通，需要在阿里云安全组放行。
