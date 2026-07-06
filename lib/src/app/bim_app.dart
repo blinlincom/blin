@@ -49,9 +49,6 @@ class _BimAppState extends State<BimApp> with WidgetsBindingObserver {
   }
 
   Widget _root() {
-    if (widget.controller.booting) {
-      return const _SplashPage();
-    }
     if (widget.controller.isLoggedIn) {
       return HomePage(controller: widget.controller);
     }
@@ -150,22 +147,6 @@ class _BimAppState extends State<BimApp> with WidgetsBindingObserver {
         behavior: SnackBarBehavior.fixed,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.all(Radius.circular(12)),
-        ),
-      ),
-    );
-  }
-}
-
-class _SplashPage extends StatelessWidget {
-  const _SplashPage();
-
-  @override
-  Widget build(BuildContext context) {
-    return const Scaffold(
-      body: Center(
-        child: Text(
-          AppConfig.appName,
-          style: TextStyle(fontSize: 28, fontWeight: FontWeight.w800),
         ),
       ),
     );

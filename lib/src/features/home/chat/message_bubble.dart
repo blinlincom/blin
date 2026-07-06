@@ -6,6 +6,7 @@ class _MessageBubble extends StatelessWidget {
     required this.isMe,
     required this.status,
     required this.redPacketReceiving,
+    required this.onQuoteTap,
     required this.onRetry,
   });
 
@@ -13,6 +14,7 @@ class _MessageBubble extends StatelessWidget {
   final bool isMe;
   final String status;
   final bool redPacketReceiving;
+  final ValueChanged<Map<String, Object?>> onQuoteTap;
   final VoidCallback onRetry;
 
   @override
@@ -41,7 +43,11 @@ class _MessageBubble extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              _QuoteMessagePreview(quote: quote, isMe: isMe),
+              _QuoteMessagePreview(
+                quote: quote,
+                isMe: isMe,
+                onTap: () => onQuoteTap(quote),
+              ),
               const SizedBox(height: 5),
               bubble,
             ],
@@ -294,10 +300,15 @@ class _MessageBubbleContent extends StatelessWidget {
 }
 
 class _QuoteMessagePreview extends StatelessWidget {
-  const _QuoteMessagePreview({required this.quote, required this.isMe});
+  const _QuoteMessagePreview({
+    required this.quote,
+    required this.isMe,
+    required this.onTap,
+  });
 
   final Map<String, Object?> quote;
   final bool isMe;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -308,22 +319,36 @@ class _QuoteMessagePreview extends StatelessWidget {
         ? const Color(0xff96d58c)
         : const Color(0xffd8dce3);
     final background = isMe ? const Color(0x55ffffff) : const Color(0xfff4f5f7);
-    return Container(
-      constraints: const BoxConstraints(minHeight: 34),
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-      decoration: BoxDecoration(
-        color: background,
-        border: Border(left: BorderSide(color: borderColor, width: 3)),
-      ),
-      child: Text(
-        text.isEmpty ? '原消息不可查看' : text,
-        maxLines: 2,
-        overflow: TextOverflow.ellipsis,
-        style: const TextStyle(
-          color: Color(0xff6f7785),
-          fontSize: 12,
-          fontWeight: FontWeight.w600,
-          height: 1.25,
+    return Semantics(
+      button: true,
+      label: '跳转到引用消息',
+      child: Material(
+        type: MaterialType.transparency,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 34),
+          child: Ink(
+            decoration: BoxDecoration(
+              color: background,
+              border: Border(left: BorderSide(color: borderColor, width: 3)),
+            ),
+            child: InkWell(
+              onTap: onTap,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                child: Text(
+                  text.isEmpty ? '原消息不可查看' : text,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Color(0xff6f7785),
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    height: 1.25,
+                  ),
+                ),
+              ),
+            ),
+          ),
         ),
       ),
     );

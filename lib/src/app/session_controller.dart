@@ -25,6 +25,7 @@ class SessionController extends ChangeNotifier {
        _im = im,
        _chat = chat,
        _cache = cache {
+    _hydrateCachedLaunchState();
     _lastImStatusText = _im.statusText;
     _im.addListener(_onImServiceChanged);
     _presenceSub = _im.presenceEvents.listen(_onPresenceEvent);
@@ -44,6 +45,7 @@ class SessionController extends ChangeNotifier {
   String? _error;
   int _lastColdLaunchAt = 0;
   int _lastHotResumeAt = 0;
+  int _lastSessionVerifiedAt = 0;
   DateTime? _lastHotRefreshAt;
   String _lastImStatusText = '';
   Future<void>? _presenceRefreshRequest;
@@ -73,6 +75,7 @@ class SessionController extends ChangeNotifier {
   bool get isLoggedIn => _session?.userToken.isNotEmpty == true;
   int get lastColdLaunchAt => _lastColdLaunchAt;
   int get lastHotResumeAt => _lastHotResumeAt;
+  int get lastSessionVerifiedAt => _lastSessionVerifiedAt;
   String get imStatusText => _im.statusText;
   String? get imError => _im.lastError;
   int get conversationVersion => _im.conversationVersion;
@@ -85,6 +88,22 @@ class SessionController extends ChangeNotifier {
   Stream<BusinessImPresenceEvent> get presenceEvents => _im.presenceEvents;
 
   List<Map<String, Object?>> cachedConversations() => _im.cachedConversations();
+
+  void _hydrateCachedLaunchState() {
+    _device = _store.ensureDeviceId();
+    _session = _store.readSession();
+    _appInfo = _store.readAppInfo() ?? const AppInfo(name: AppConfig.appName);
+    _lastSessionVerifiedAt = _store.readSessionVerifiedAt();
+    AppLogger.info(
+      'session',
+      'launch cache hydrated',
+      data: {
+        'logged_in': _session != null,
+        'device': _device,
+        'last_session_verified_at': _lastSessionVerifiedAt,
+      },
+    );
+  }
 
   List<Map<String, Object?>> cachedFriends({bool allowDisk = true}) {
     if (_friendCache.isNotEmpty) {
@@ -132,10 +151,16 @@ class SessionController extends ChangeNotifier {
     _device = _store.ensureDeviceId();
     _lastColdLaunchAt = _store.markColdLaunch();
     _lastHotResumeAt = _store.readResumeAt();
+    _lastSessionVerifiedAt = _store.readSessionVerifiedAt();
     _session = _store.readSession();
+    final cachedAppInfo = _store.readAppInfo();
+    _appInfo = cachedAppInfo ?? const AppInfo(name: AppConfig.appName);
+    _refreshAppInfoInBackground(
+      source: 'cold_start',
+      hasCachedAppInfo: cachedAppInfo != null,
+    );
 
     try {
-      _appInfo = await _api.getAppInfo();
       if (_session != null) {
         await _refreshLoggedInSession();
       }
@@ -144,21 +169,18 @@ class SessionController extends ChangeNotifier {
         'cold start success',
         data: {'logged_in': _session != null, 'device': _device},
       );
-    } on ApiException catch (error) {
-      if (error.code == 401 || error.code == 403) {
-        _store.clearSession();
-        _session = null;
-      }
-      _error = error.message;
-      AppLogger.error(
-        'session',
-        'cold start api error',
-        error: error,
-        data: {'code': error.code},
+    } on ApiException catch (error, stackTrace) {
+      _handleSessionRefreshApiError(
+        error,
+        source: 'cold_start',
+        stackTrace: stackTrace,
       );
-    } catch (error) {
-      _error = error.toString();
-      AppLogger.error('session', 'cold start failed', error: error);
+    } catch (error, stackTrace) {
+      _handleSessionRefreshUnexpectedError(
+        error,
+        source: 'cold_start',
+        stackTrace: stackTrace,
+      );
     } finally {
       _booting = false;
       notifyListeners();
@@ -168,6 +190,7 @@ class SessionController extends ChangeNotifier {
   Future<void> hotResume() async {
     AppLogger.info('session', 'hot resume');
     _lastHotResumeAt = _store.markHotResume();
+    _lastSessionVerifiedAt = _store.readSessionVerifiedAt();
     _session = _store.readSession();
     notifyListeners();
     if (_session == null) {
@@ -190,23 +213,249 @@ class SessionController extends ChangeNotifier {
       _im.resumeConnection();
       _lastHotRefreshAt = DateTime.now();
       AppLogger.info('session', 'hot resume success');
-    } on ApiException catch (error) {
-      if (error.code == 401 || error.code == 403) {
-        _store.clearSession();
-        _session = null;
-      }
-      _error = error.message;
-      AppLogger.error(
-        'session',
-        'hot resume api error',
-        error: error,
-        data: {'code': error.code},
+    } on ApiException catch (error, stackTrace) {
+      _handleSessionRefreshApiError(
+        error,
+        source: 'hot_resume',
+        stackTrace: stackTrace,
       );
       notifyListeners();
-    } catch (error) {
-      _error = error.toString();
-      AppLogger.error('session', 'hot resume failed', error: error);
+    } catch (error, stackTrace) {
+      _handleSessionRefreshUnexpectedError(
+        error,
+        source: 'hot_resume',
+        stackTrace: stackTrace,
+      );
       notifyListeners();
+    }
+  }
+
+  void _refreshAppInfoInBackground({
+    required String source,
+    required bool hasCachedAppInfo,
+  }) {
+    AppLogger.info(
+      'session',
+      'app info refresh scheduled',
+      data: {'source': source, 'has_cached_app_info': hasCachedAppInfo},
+    );
+    unawaited(_refreshAppInfo(source: source));
+  }
+
+  Future<void> _refreshAppInfo({required String source}) async {
+    try {
+      final appInfo = await _api.getAppInfo();
+      _appInfo = appInfo;
+      _store.writeAppInfo(appInfo);
+      AppLogger.info(
+        'session',
+        'app info refreshed',
+        data: {'source': source, 'app_name': appInfo.name},
+      );
+      notifyListeners();
+    } catch (error, stackTrace) {
+      AppLogger.warn(
+        'session',
+        'app info refresh failed',
+        data: {
+          'source': source,
+          'error': error.toString(),
+          'stack': stackTrace.toString(),
+        },
+      );
+    }
+  }
+
+  void _handleSessionRefreshApiError(
+    ApiException error, {
+    required String source,
+    required StackTrace stackTrace,
+  }) {
+    if (_shouldEndCachedLogin(error)) {
+      _endCachedLogin(
+        source: source,
+        message: error.message.isEmpty ? '登录状态已失效' : error.message,
+        error: error,
+        stackTrace: stackTrace,
+      );
+      return;
+    }
+    _error = null;
+    AppLogger.warn(
+      'session',
+      'session refresh failed, keep cached login',
+      data: {
+        'source': source,
+        'code': error.code,
+        'message': error.message,
+        'last_session_verified_at': _lastSessionVerifiedAt,
+      },
+    );
+    _startCachedImForPersistentLogin(source: source);
+  }
+
+  void _handleSessionRefreshUnexpectedError(
+    Object error, {
+    required String source,
+    required StackTrace stackTrace,
+  }) {
+    if (_session == null) {
+      _error = error.toString();
+      AppLogger.error(
+        'session',
+        '$source failed without cached login',
+        error: error,
+        stackTrace: stackTrace,
+      );
+      return;
+    }
+    _error = null;
+    AppLogger.warn(
+      'session',
+      'session refresh crashed, keep cached login',
+      data: {
+        'source': source,
+        'error': error.toString(),
+        'stack': stackTrace.toString(),
+        'last_session_verified_at': _lastSessionVerifiedAt,
+      },
+    );
+    _startCachedImForPersistentLogin(source: source);
+  }
+
+  bool _shouldEndCachedLogin(ApiException error) {
+    final text = error.message.toLowerCase();
+    return _containsAny(text, const [
+      'account disabled',
+      'account banned',
+      'account frozen',
+      'account deleted',
+      'password changed',
+      'token revoked',
+      'session revoked',
+      'credential revoked',
+      'device kicked',
+      'forced logout',
+      'force logout',
+      '账号已禁用',
+      '账户已禁用',
+      '账号被禁用',
+      '账户被禁用',
+      '账号已冻结',
+      '账户已冻结',
+      '账号被冻结',
+      '账户被冻结',
+      '账号已注销',
+      '账户已注销',
+      '账号被注销',
+      '账户被注销',
+      '密码已修改',
+      '密码被修改',
+      '登录密码已修改',
+      'token已吊销',
+      'token被吊销',
+      '登录态已吊销',
+      '会话已吊销',
+      '凭证已吊销',
+      '凭证被吊销',
+      '设备已被踢',
+      '设备被踢',
+      '被踢下线',
+      '踢下线',
+      '强制下线',
+      '强制退出',
+    ]);
+  }
+
+  bool _containsAny(String text, List<String> needles) {
+    for (final needle in needles) {
+      if (text.contains(needle)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  void _endCachedLogin({
+    required String source,
+    required String message,
+    required Object error,
+    required StackTrace stackTrace,
+  }) {
+    _store.clearSession();
+    _session = null;
+    _clearListCaches();
+    _error = message;
+    AppLogger.error(
+      'session',
+      'cached login ended by explicit server revocation',
+      error: error,
+      stackTrace: stackTrace,
+      data: {'source': source, 'message': message},
+    );
+    unawaited(
+      _im.stop(logout: true).catchError((Object stopError) {
+        AppLogger.warn(
+          'session',
+          'im stop after session revocation failed',
+          data: {'source': source, 'error': stopError.toString()},
+        );
+      }),
+    );
+  }
+
+  void _startCachedImForPersistentLogin({required String source}) {
+    final current = _session ?? _store.readSession();
+    if (current == null) {
+      return;
+    }
+    if (_im.isStarted) {
+      AppLogger.info(
+        'session',
+        'cached login keeps existing im session',
+        data: {'source': source},
+      );
+      _im.resumeConnection();
+      return;
+    }
+    final chat = current.chat;
+    if (chat == null || chat.uid.isEmpty || chat.token.isEmpty) {
+      AppLogger.warn(
+        'session',
+        'cached im start skipped without chat materials',
+        data: {'source': source, 'has_chat': chat != null},
+      );
+      return;
+    }
+    AppLogger.info(
+      'session',
+      'cached im start scheduled for persistent login',
+      data: {'source': source, 'uid': chat.uid},
+    );
+    unawaited(_startCachedIm(current, source: source));
+  }
+
+  Future<void> _startCachedIm(
+    UserSession session, {
+    required String source,
+  }) async {
+    try {
+      await _im.start(session, device: _device);
+      AppLogger.info(
+        'session',
+        'cached im start success',
+        data: {'source': source},
+      );
+    } catch (error, stackTrace) {
+      AppLogger.warn(
+        'session',
+        'cached im start failed, keep cached login',
+        data: {
+          'source': source,
+          'error': error.toString(),
+          'stack': stackTrace.toString(),
+        },
+      );
     }
   }
 
@@ -239,7 +488,24 @@ class SessionController extends ChangeNotifier {
       );
       _session = session;
       _store.writeSession(session);
-      await _refreshLoggedInSession();
+      try {
+        await _refreshLoggedInSession();
+      } on ApiException catch (error, stackTrace) {
+        _handleSessionRefreshApiError(
+          error,
+          source: 'login_password',
+          stackTrace: stackTrace,
+        );
+        if (_shouldEndCachedLogin(error)) {
+          rethrow;
+        }
+      } catch (error, stackTrace) {
+        _handleSessionRefreshUnexpectedError(
+          error,
+          source: 'login_password',
+          stackTrace: stackTrace,
+        );
+      }
     });
   }
 
@@ -257,7 +523,24 @@ class SessionController extends ChangeNotifier {
       );
       _session = session;
       _store.writeSession(session);
-      await _refreshLoggedInSession();
+      try {
+        await _refreshLoggedInSession();
+      } on ApiException catch (error, stackTrace) {
+        _handleSessionRefreshApiError(
+          error,
+          source: 'login_mobile',
+          stackTrace: stackTrace,
+        );
+        if (_shouldEndCachedLogin(error)) {
+          rethrow;
+        }
+      } catch (error, stackTrace) {
+        _handleSessionRefreshUnexpectedError(
+          error,
+          source: 'login_mobile',
+          stackTrace: stackTrace,
+        );
+      }
     });
   }
 
@@ -1224,10 +1507,13 @@ class SessionController extends ChangeNotifier {
     AppLogger.info('session', 'refresh logged in session start');
     final chat = await _api.connectIm(session: current, device: _device);
     final withChat = current.copyWith(chat: chat);
+    _session = withChat;
+    _store.writeSession(withChat);
     final withProfile = await _api.getCurrentUser(withChat, device: _device);
     _session = withProfile;
     _store.writeSession(withProfile);
-    await _im.start(withProfile, device: _device);
+    _lastSessionVerifiedAt = _store.markSessionVerified();
+    await _im.start(withProfile, device: _device, chatIsFresh: true);
     unawaited(_warmBasicData());
     AppLogger.info(
       'session',

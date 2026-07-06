@@ -142,7 +142,6 @@ class _ChatHeader extends StatelessWidget {
             imageUrl: avatarUrl,
             size: 36,
             color: isGroup ? const Color(0xff34c759) : _primaryColor,
-            circle: true,
           ),
           const SizedBox(width: 9),
           Expanded(

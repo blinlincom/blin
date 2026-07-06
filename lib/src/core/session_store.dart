@@ -11,8 +11,10 @@ class SessionStore {
   final MMKV _kv;
 
   static const _sessionKey = 'session';
+  static const _appInfoKey = 'app_info';
   static const _deviceKey = 'device';
   static const _legacyPackageDevicePrefix = 'bimotc.com-';
+  static const _sessionVerifiedAtKey = 'session_verified_at';
   static const _launchAtKey = 'last_launch_at';
   static const _resumeAtKey = 'last_resume_at';
 
@@ -41,6 +43,33 @@ class SessionStore {
 
   void clearSession() {
     _kv.removeValue(_sessionKey);
+    _kv.removeValue(_sessionVerifiedAtKey);
+  }
+
+  int readSessionVerifiedAt() => _kv.decodeInt(_sessionVerifiedAtKey);
+
+  int markSessionVerified() {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    _kv.encodeInt(_sessionVerifiedAtKey, now);
+    return now;
+  }
+
+  AppInfo? readAppInfo() {
+    final raw = _kv.decodeString(_appInfoKey);
+    if (raw == null || raw.isEmpty) {
+      return null;
+    }
+    try {
+      final decoded = jsonDecode(raw);
+      return AppInfo.fromJson(decoded);
+    } catch (_) {
+      _kv.removeValue(_appInfoKey);
+      return null;
+    }
+  }
+
+  void writeAppInfo(AppInfo appInfo) {
+    _kv.encodeString(_appInfoKey, jsonEncode(appInfo.toJson()));
   }
 
   String ensureDeviceId() {

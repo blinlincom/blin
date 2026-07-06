@@ -33,9 +33,9 @@ class _Composer extends StatelessWidget {
       child: Padding(
         padding: EdgeInsets.fromLTRB(
           10,
-          7,
+          8,
           10,
-          MediaQuery.viewPaddingOf(context).bottom > 0 ? 7 : 8,
+          MediaQuery.viewPaddingOf(context).bottom > 0 ? 13 : 12,
         ),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.end,
@@ -48,7 +48,7 @@ class _Composer extends StatelessWidget {
             const SizedBox(width: 6),
             Expanded(
               child: Container(
-                constraints: const BoxConstraints(minHeight: 40),
+                constraints: const BoxConstraints(minHeight: 42),
                 decoration: BoxDecoration(
                   color: _fillColor,
                   borderRadius: BorderRadius.circular(6),
@@ -93,7 +93,7 @@ class _Composer extends StatelessWidget {
                     ),
                     contentPadding: const EdgeInsets.symmetric(
                       horizontal: 14,
-                      vertical: 10,
+                      vertical: 11,
                     ),
                   ),
                 ),
@@ -122,14 +122,14 @@ class _Composer extends StatelessWidget {
                   children: [
                     const SizedBox(width: 4),
                     SizedBox(
-                      height: 36,
+                      height: 40,
                       child: TextButton(
                         onPressed: onSend,
                         style: TextButton.styleFrom(
                           foregroundColor: Colors.white,
                           backgroundColor: _chatAckColor,
                           padding: const EdgeInsets.symmetric(horizontal: 8),
-                          minimumSize: const Size(40, 36),
+                          minimumSize: const Size(42, 40),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(6),
                           ),
@@ -168,8 +168,8 @@ class _ComposerIconButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      width: 40,
-      height: 40,
+      width: 42,
+      height: 42,
       child: IconButton(
         tooltip: tooltip,
         onPressed: onPressed,

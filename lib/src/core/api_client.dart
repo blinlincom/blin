@@ -37,7 +37,7 @@ class ApiClient {
   Future<AppInfo> getAppInfo() async {
     final result = await post<Map<String, Object?>>('get_app_info', {
       'timestamp': _timestamp(),
-    });
+    }, logDioErrorAsWarn: true);
     if (!result.isSuccess) {
       throw ApiException(result.message, code: result.code);
     }
@@ -757,6 +757,7 @@ class ApiClient {
     String fileFieldName = 'file',
     void Function(double progress)? onUploadProgress,
     _SecureResponseContext? secureResponse,
+    bool logDioErrorAsWarn = false,
   }) async {
     final stopwatch = Stopwatch()..start();
     final requestId = AppLogger.traceId('api');
@@ -821,19 +822,28 @@ class ApiClient {
       return result;
     } on DioException catch (error) {
       final response = error.response?.data;
-      AppLogger.error(
-        'api',
-        'post dio error',
-        error: error.message,
-        data: {
-          'request_id': requestId,
-          'action': action,
-          'type': error.type.name,
-          'status_code': error.response?.statusCode,
-          'response_summary': _responseBodySummary(response),
-          'ms': stopwatch.elapsedMilliseconds,
-        },
-      );
+      final errorData = {
+        'request_id': requestId,
+        'action': action,
+        'type': error.type.name,
+        'status_code': error.response?.statusCode,
+        'response_summary': _responseBodySummary(response),
+        'ms': stopwatch.elapsedMilliseconds,
+      };
+      if (logDioErrorAsWarn) {
+        AppLogger.warn(
+          'api',
+          'post dio warning',
+          data: {...errorData, 'error': error.message},
+        );
+      } else {
+        AppLogger.error(
+          'api',
+          'post dio error',
+          error: error.message,
+          data: errorData,
+        );
+      }
       if (response != null) {
         final result = _parse<T>(response, secureResponse: secureResponse);
         AppLogger.warn(

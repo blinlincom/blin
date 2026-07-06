@@ -334,6 +334,19 @@ class AppAuthConfig {
   bool get hasAnyRegisterMode =>
       usernameRegisterEnabled || mobileRegisterEnabled || emailRegisterEnabled;
 
+  Map<String, Object?> toJson() => {
+    'password_login_enabled': passwordLoginEnabled,
+    'mobile_login_enabled': mobileLoginEnabled,
+    'login_captcha_enabled': loginCaptchaEnabled,
+    'register_enabled': registerEnabled,
+    'username_register_enabled': usernameRegisterEnabled,
+    'mobile_register_enabled': mobileRegisterEnabled,
+    'email_register_enabled': emailRegisterEnabled,
+    'register_captcha_enabled': registerCaptchaEnabled,
+    'invite_code_enabled': inviteCodeEnabled,
+    'invite_code_required': inviteCodeRequired,
+  };
+
   factory AppAuthConfig.fromAppInfoMap(Map<String, Object?> map) {
     final sources = <Map<String, Object?>>[];
     void collect(Object? value, [int depth = 0]) {
@@ -507,6 +520,13 @@ class AppInfo {
       auth: AppAuthConfig.fromAppInfoMap(map),
     );
   }
+
+  Map<String, Object?> toJson() => {
+    'appname': name,
+    'appicon': icon,
+    'application_introduction': introduction,
+    'auth': auth.toJson(),
+  };
 }
 
 Map<String, Object?> _objectMap(Object? value) {

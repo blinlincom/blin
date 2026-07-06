@@ -27,6 +27,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   final _textController = TextEditingController();
   final _scrollController = ScrollController();
   final _inputFocusNode = FocusNode();
+  final Map<String, GlobalKey> _messageRowKeys = <String, GlobalKey>{};
   bool _toolsOpen = false;
   bool _burnAfterRead = false;
   bool _mentionAll = false;
@@ -67,6 +68,8 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   final Map<String, int> _burnRetryAttempts = <String, int>{};
   final Set<String> _receivingRedPacketIds = <String>{};
   final Set<String> _receivingTransferIds = <String>{};
+  String _highlightedMessageKey = '';
+  Timer? _quoteHighlightTimer;
 
   bool get _isGroup => widget.channelType == _groupChannelType;
   String get _groupId =>
@@ -183,6 +186,9 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       _historyLoadingTimer?.cancel();
       _runningMessageLoad = null;
       _runningMessageLoadKey = '';
+      _messageRowKeys.clear();
+      _highlightedMessageKey = '';
+      _quoteHighlightTimer?.cancel();
       _clearSelectedMessageMenu();
       _didInitialScroll = false;
       _burnTriggeredClientMsgNos.clear();
@@ -498,17 +504,21 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         _messagesLoading = false;
         _groupPresenceLoading = false;
         _groupMuteState = const {};
+        _messageRowKeys.clear();
+        _highlightedMessageKey = '';
       } else if (_isMessageDeleteEvent(event.source)) {
         final target = _value(event.message, ['client_msg_no']);
         _messages = _messages
             .where((item) => _value(item, ['client_msg_no']) != target)
             .toList(growable: false);
+        _pruneMessageRowKeys(_messages);
       } else {
         _messages = _mergeMessageList(
           _messages,
           event.message,
           limit: _messageUiLimit,
         );
+        _pruneMessageRowKeys(_messages);
       }
       _messagesLoading = false;
       _messageRevision = _currentMessageRevision();
@@ -677,6 +687,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         _messages = nextMessages;
         _messagesLoading = false;
         _historyLoadingSlow = false;
+        _pruneMessageRowKeys(nextMessages);
       });
       _historyLoadingTimer?.cancel();
       _scheduleBurnAfterReadForMessages(nextMessages);
@@ -784,6 +795,8 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     if (!mounted) {
       _channelInvalid = true;
       _historyLoadingSlow = false;
+      _messageRowKeys.clear();
+      _highlightedMessageKey = '';
       return;
     }
     setState(() {
@@ -793,6 +806,8 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       _historyLoadingSlow = false;
       _groupPresenceLoading = false;
       _groupMuteState = const {};
+      _messageRowKeys.clear();
+      _highlightedMessageKey = '';
     });
   }
 
@@ -814,6 +829,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     _messageSub?.cancel();
     _presenceSub?.cancel();
     _historyLoadingTimer?.cancel();
+    _quoteHighlightTimer?.cancel();
     _scrollController.removeListener(_onMessageListScrolled);
     _scrollController.dispose();
     _inputFocusNode.removeListener(_onInputFocusChanged);
@@ -866,21 +882,145 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   }
 
   String _messageStableKey(Map<String, Object?> item, int index) {
-    final clientMsgNo = _value(item, ['client_msg_no']);
-    if (clientMsgNo.isNotEmpty) {
-      return 'client:$clientMsgNo';
-    }
-    final messageSeq = _intValue(item, ['message_seq']);
-    if (messageSeq > 0) {
-      return 'seq:$messageSeq';
-    }
-    final messageId = _value(item, ['message_id', 'msg_id', 'id']);
-    if (messageId.isNotEmpty) {
-      return 'id:$messageId';
+    final lookupKey = _messageLookupKey(item);
+    if (lookupKey.isNotEmpty) {
+      return lookupKey;
     }
     final timestamp = _value(item, ['timestamp', 'create_time']);
     final sender = _value(item, ['from_uid', 'sender_uid', 'uid']);
     return 'local:$index:$timestamp:$sender:${_messageContentType(item)}';
+  }
+
+  String _messageLookupKey(Map<String, Object?> item) {
+    final payload = _asObjectMap(item['payload']);
+    final clientMsgNo = _value(item, [
+      'client_msg_no',
+    ], fallback: _value(payload, ['client_msg_no']));
+    if (clientMsgNo.isNotEmpty) {
+      return 'client:$clientMsgNo';
+    }
+    final messageId = _value(item, [
+      'message_id',
+      'message_idstr',
+      'msg_id',
+      'id',
+    ], fallback: _value(payload, ['message_id', 'message_idstr', 'msg_id']));
+    if (messageId.isNotEmpty) {
+      return 'id:$messageId';
+    }
+    var messageSeq = _intValue(item, ['message_seq']);
+    if (messageSeq <= 0) {
+      messageSeq = _intValue(payload, ['message_seq']);
+    }
+    if (messageSeq > 0) {
+      return 'seq:$messageSeq';
+    }
+    return '';
+  }
+
+  void _pruneMessageRowKeys(List<Map<String, Object?>> messages) {
+    final liveKeys = messages
+        .map(_messageLookupKey)
+        .where((key) => key.isNotEmpty)
+        .toSet();
+    _messageRowKeys.removeWhere((key, _) => !liveKeys.contains(key));
+    if (_highlightedMessageKey.isNotEmpty &&
+        !liveKeys.contains(_highlightedMessageKey)) {
+      _highlightedMessageKey = '';
+    }
+  }
+
+  int _findQuotedMessageIndex(Map<String, Object?> quote) {
+    for (var index = _messages.length - 1; index >= 0; index -= 1) {
+      final item = _messages[index];
+      if (_messageMatchesQuote(item, quote)) {
+        return index;
+      }
+    }
+    return -1;
+  }
+
+  bool _messageMatchesQuote(
+    Map<String, Object?> item,
+    Map<String, Object?> quote,
+  ) {
+    if (!_quoteChannelMatches(item, quote)) {
+      return false;
+    }
+    final itemPayload = _asObjectMap(item['payload']);
+    final quotePayload = _asObjectMap(quote['payload']);
+    final itemClientMsgNo = _value(item, [
+      'client_msg_no',
+    ], fallback: _value(itemPayload, ['client_msg_no']));
+    final quoteClientMsgNo = _value(
+      quote,
+      ['client_msg_no', 'quote_client_msg_no', 'reply_client_msg_no'],
+      fallback: _value(quotePayload, [
+        'client_msg_no',
+        'quote_client_msg_no',
+        'reply_client_msg_no',
+      ]),
+    );
+    if (itemClientMsgNo.isNotEmpty &&
+        quoteClientMsgNo.isNotEmpty &&
+        itemClientMsgNo == quoteClientMsgNo) {
+      return true;
+    }
+    final itemMessageId = _value(
+      item,
+      ['message_id', 'message_idstr', 'msg_id', 'id'],
+      fallback: _value(itemPayload, ['message_id', 'message_idstr', 'msg_id']),
+    );
+    final quoteMessageId = _value(
+      quote,
+      ['message_id', 'message_idstr', 'root_mid', 'msg_id', 'id'],
+      fallback: _value(quotePayload, [
+        'message_id',
+        'message_idstr',
+        'root_mid',
+        'msg_id',
+      ]),
+    );
+    if (itemMessageId.isNotEmpty &&
+        quoteMessageId.isNotEmpty &&
+        itemMessageId == quoteMessageId) {
+      return true;
+    }
+    var itemMessageSeq = _intValue(item, ['message_seq']);
+    if (itemMessageSeq <= 0) {
+      itemMessageSeq = _intValue(itemPayload, ['message_seq']);
+    }
+    var quoteMessageSeq = _intValue(quote, ['message_seq']);
+    if (quoteMessageSeq <= 0) {
+      quoteMessageSeq = _intValue(quotePayload, ['message_seq']);
+    }
+    return itemMessageSeq > 0 &&
+        quoteMessageSeq > 0 &&
+        itemMessageSeq == quoteMessageSeq;
+  }
+
+  bool _quoteChannelMatches(
+    Map<String, Object?> item,
+    Map<String, Object?> quote,
+  ) {
+    final quotePayload = _asObjectMap(quote['payload']);
+    final quoteChannelType = _intValue(quote, ['channel_type']);
+    final payloadChannelType = _intValue(quotePayload, ['channel_type']);
+    final channelType = quoteChannelType > 0
+        ? quoteChannelType
+        : payloadChannelType;
+    if (channelType > 0 && channelType != widget.channelType) {
+      return false;
+    }
+    final itemChannelId = _value(item, [
+      'channel_id',
+    ], fallback: widget.channelId);
+    final quoteChannelId = _value(quote, [
+      'channel_id',
+    ], fallback: _value(quotePayload, ['channel_id']));
+    return quoteChannelId.isEmpty ||
+        quoteChannelId == widget.channelId ||
+        quoteChannelId == itemChannelId;
   }
 
   Map<String, Object?> _mergeUiMessage(
@@ -1073,6 +1213,160 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     });
   }
 
+  void _jumpToQuotedMessage(Map<String, Object?> quote) {
+    final messageIndex = _findQuotedMessageIndex(quote);
+    if (messageIndex < 0) {
+      AppLogger.warn(
+        'ui',
+        'quoted message not found in current chat',
+        data: {
+          'channel_id': widget.channelId,
+          'channel_type': widget.channelType,
+          'quote_client_msg_no': _value(quote, [
+            'client_msg_no',
+            'quote_client_msg_no',
+            'reply_client_msg_no',
+          ]),
+          'quote_message_id': _value(quote, [
+            'message_id',
+            'message_idstr',
+            'root_mid',
+            'msg_id',
+            'id',
+          ]),
+          'quote_message_seq': _intValue(quote, ['message_seq']),
+          'message_count': _messages.length,
+        },
+      );
+      if (mounted) {
+        setState(() {
+          _error = null;
+          _message = '原消息不在当前聊天记录中';
+        });
+      }
+      return;
+    }
+    final target = _messages[messageIndex];
+    final targetKey = _messageLookupKey(target);
+    if (targetKey.isEmpty) {
+      AppLogger.warn(
+        'ui',
+        'quoted message has no stable lookup key',
+        data: {
+          'channel_id': widget.channelId,
+          'channel_type': widget.channelType,
+          'message_index': messageIndex,
+          'message': _chatUiMessageSummary(target),
+        },
+      );
+      return;
+    }
+    AppLogger.info(
+      'ui',
+      'jump to quoted message',
+      data: {
+        'channel_id': widget.channelId,
+        'channel_type': widget.channelType,
+        'message_index': messageIndex,
+        'target_key': targetKey,
+      },
+    );
+    _highlightMessage(targetKey);
+    _scrollQuotedMessageIntoView(targetKey, messageIndex);
+  }
+
+  void _highlightMessage(String targetKey) {
+    _quoteHighlightTimer?.cancel();
+    setState(() {
+      _highlightedMessageKey = targetKey;
+      _error = null;
+      _message = '';
+    });
+    _quoteHighlightTimer = Timer(const Duration(milliseconds: 1600), () {
+      if (!mounted || _highlightedMessageKey != targetKey) {
+        return;
+      }
+      setState(() => _highlightedMessageKey = '');
+    });
+  }
+
+  void _scrollQuotedMessageIntoView(String targetKey, int messageIndex) {
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) {
+        return;
+      }
+      if (_ensureMessageVisible(targetKey)) {
+        return;
+      }
+      await _scrollNearMessage(messageIndex);
+      if (!mounted) {
+        return;
+      }
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && !_ensureMessageVisible(targetKey)) {
+          AppLogger.warn(
+            'ui',
+            'quoted message visible context unavailable after scroll',
+            data: {
+              'channel_id': widget.channelId,
+              'channel_type': widget.channelType,
+              'target_key': targetKey,
+              'message_index': messageIndex,
+              'message_count': _messages.length,
+            },
+          );
+        }
+      });
+    });
+  }
+
+  bool _ensureMessageVisible(String targetKey) {
+    final targetContext = _messageRowKeys[targetKey]?.currentContext;
+    if (targetContext == null) {
+      return false;
+    }
+    unawaited(
+      Scrollable.ensureVisible(
+        targetContext,
+        duration: const Duration(milliseconds: 260),
+        curve: Curves.easeOutCubic,
+        alignment: 0.36,
+        alignmentPolicy: ScrollPositionAlignmentPolicy.explicit,
+      ),
+    );
+    return true;
+  }
+
+  Future<void> _scrollNearMessage(int messageIndex) async {
+    if (!_scrollController.hasClients || _messages.length <= 1) {
+      return;
+    }
+    final position = _scrollController.position;
+    final builderIndex = _messages.length - 1 - messageIndex;
+    final ratio = builderIndex / max(1, _messages.length - 1);
+    final targetOffset =
+        (position.minScrollExtent +
+                (position.maxScrollExtent - position.minScrollExtent) * ratio)
+            .clamp(position.minScrollExtent, position.maxScrollExtent)
+            .toDouble();
+    if ((position.pixels - targetOffset).abs() < 1) {
+      return;
+    }
+    try {
+      await _scrollController.animateTo(
+        targetOffset,
+        duration: const Duration(milliseconds: 240),
+        curve: Curves.easeOutCubic,
+      );
+    } on Object catch (error) {
+      AppLogger.warn(
+        'ui',
+        'scroll near quoted message failed',
+        data: {'error': error.toString(), 'message_index': messageIndex},
+      );
+    }
+  }
+
   void _stickToBottomDuringKeyboard() {
     _scrollToBottom(animated: false);
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -1174,6 +1468,35 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                                       item,
                                       messageIndex,
                                     );
+                                    final lookupKey = _messageLookupKey(item);
+                                    final rowKey = lookupKey.isEmpty
+                                        ? null
+                                        : _messageRowKeys.putIfAbsent(
+                                            lookupKey,
+                                            () => GlobalKey(),
+                                          );
+                                    final row = _MessageRow(
+                                      key: ValueKey('row:$stableKey'),
+                                      item: item,
+                                      showSenderName: _isGroup,
+                                      currentUserAvatarUrl:
+                                          widget.controller.session?.avatar ??
+                                          '',
+                                      highlighted:
+                                          lookupKey.isNotEmpty &&
+                                          lookupKey == _highlightedMessageKey,
+                                      onLongPressStart: (details) =>
+                                          _selectMessage(
+                                            item,
+                                            details.globalPosition,
+                                          ),
+                                      onTap: _messageTapHandler(item),
+                                      onQuoteTap: _jumpToQuotedMessage,
+                                      redPacketReceiving: _redPacketIsReceiving(
+                                        item,
+                                      ),
+                                      onRetry: () => _retryMessage(item),
+                                    );
                                     return Column(
                                       key: ValueKey(stableKey),
                                       children: [
@@ -1181,26 +1504,10 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                                           _TimeDivider(
                                             text: _messageTimeLabel(item),
                                           ),
-                                        _MessageRow(
-                                          key: ValueKey('row:$stableKey'),
-                                          item: item,
-                                          showSenderName: _isGroup,
-                                          currentUserAvatarUrl:
-                                              widget
-                                                  .controller
-                                                  .session
-                                                  ?.avatar ??
-                                              '',
-                                          onLongPressStart: (details) =>
-                                              _selectMessage(
-                                                item,
-                                                details.globalPosition,
-                                              ),
-                                          onTap: _messageTapHandler(item),
-                                          redPacketReceiving:
-                                              _redPacketIsReceiving(item),
-                                          onRetry: () => _retryMessage(item),
-                                        ),
+                                        if (rowKey == null)
+                                          row
+                                        else
+                                          KeyedSubtree(key: rowKey, child: row),
                                       ],
                                     );
                                   },

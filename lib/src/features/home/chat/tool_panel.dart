@@ -151,7 +151,7 @@ class _ChatToolsPanelState extends State<_ChatToolsPanel> {
       pages.add(items.sublist(index, (index + 8).clamp(0, items.length)));
     }
     return Container(
-      height: 172,
+      height: 196,
       decoration: const BoxDecoration(
         color: _surfaceColor,
         border: Border(top: BorderSide(color: _lightBorderColor)),
@@ -167,7 +167,7 @@ class _ChatToolsPanelState extends State<_ChatToolsPanel> {
               itemBuilder: (context, pageIndex) {
                 final pageItems = pages[pageIndex];
                 return Padding(
-                  padding: const EdgeInsets.fromLTRB(18, 13, 18, 8),
+                  padding: const EdgeInsets.fromLTRB(18, 16, 18, 10),
                   child: _ToolPageGrid(items: pageItems),
                 );
               },
@@ -175,7 +175,7 @@ class _ChatToolsPanelState extends State<_ChatToolsPanel> {
           ),
           if (pages.length > 1)
             Padding(
-              padding: const EdgeInsets.only(bottom: 10),
+              padding: const EdgeInsets.only(bottom: 14),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
@@ -197,7 +197,7 @@ class _ChatToolsPanelState extends State<_ChatToolsPanel> {
               ),
             )
           else
-            const SizedBox(height: 10),
+            const SizedBox(height: 14),
         ],
       ),
     );
@@ -221,8 +221,8 @@ class _ToolPageGrid extends StatelessWidget {
                   Expanded(
                     child: Padding(
                       padding: EdgeInsets.only(
-                        left: column == 0 ? 0 : 5,
-                        right: column == 3 ? 0 : 5,
+                        left: column == 0 ? 0 : 6,
+                        right: column == 3 ? 0 : 6,
                       ),
                       child: Builder(
                         builder: (context) {
@@ -238,7 +238,7 @@ class _ToolPageGrid extends StatelessWidget {
               ],
             ),
           ),
-          if (row == 0) const SizedBox(height: 6),
+          if (row == 0) const SizedBox(height: 10),
         ],
       ],
     );
@@ -268,18 +268,18 @@ class _ToolButton extends StatelessWidget {
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           Container(
-            width: 36,
-            height: 36,
+            width: 40,
+            height: 40,
             alignment: Alignment.center,
             decoration: BoxDecoration(
               color: item.color,
               borderRadius: BorderRadius.circular(
-                item.icon == Icons.attach_money_rounded ? 18 : 8,
+                item.icon == Icons.attach_money_rounded ? 20 : 8,
               ),
             ),
-            child: Icon(item.icon, size: 22, color: Colors.white),
+            child: Icon(item.icon, size: 23, color: Colors.white),
           ),
-          const SizedBox(height: 7),
+          const SizedBox(height: 8),
           Text(
             item.label,
             maxLines: 1,

@@ -66,6 +66,7 @@ class BusinessImService extends ChangeNotifier {
   String _gatewayTicket = '';
   String _gatewayAckUrl = '';
   DateTime? _gatewayTicketExpiresAt;
+  DateTime? _gatewayChatIssuedAt;
   final Queue<GatewayFrame> _gatewayAckQueue = Queue<GatewayFrame>();
   Timer? _reconnectTimer;
   bool _started = false;
@@ -209,7 +210,11 @@ class BusinessImService extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> start(UserSession session, {required String device}) async {
+  Future<void> start(
+    UserSession session, {
+    required String device,
+    bool chatIsFresh = false,
+  }) async {
     final chat = session.chat;
     if (chat == null || chat.uid.isEmpty || chat.token.isEmpty) {
       throw ApiException('IM 登录材料缺失');
@@ -218,6 +223,7 @@ class BusinessImService extends ChangeNotifier {
     _started = true;
     _session = session;
     _device = device;
+    _gatewayChatIssuedAt = chatIsFresh ? DateTime.now() : null;
     _groupMuteStates.clear();
     _historySyncedChannels.clear();
     _historyRetryAfter.clear();
@@ -279,6 +285,7 @@ class BusinessImService extends ChangeNotifier {
     _gatewayTicket = '';
     _gatewayAckUrl = '';
     _gatewayTicketExpiresAt = null;
+    _gatewayChatIssuedAt = null;
     _gatewayAckQueue.clear();
     _gatewayAckDraining = false;
     _syncingConversations = null;
@@ -941,7 +948,7 @@ class BusinessImService extends ChangeNotifier {
       return _latestConversations;
     }
     final statusBeforeSync = _statusText;
-    if (statusBeforeSync == '已连接') {
+    if (initialSync && statusBeforeSync == '已连接') {
       _setStatus('同步中');
     }
     try {
@@ -1021,7 +1028,7 @@ class BusinessImService extends ChangeNotifier {
         error: null,
         notify: false,
       );
-      if (_statusText == '同步中') {
+      if (initialSync && _statusText == '同步中') {
         _setStatus('已连接');
       }
       notifyListeners();
@@ -1034,7 +1041,7 @@ class BusinessImService extends ChangeNotifier {
         error: initialSync ? '聊天数据同步失败，请检查网络后重试' : null,
         notify: false,
       );
-      if (_statusText == '同步中') {
+      if (initialSync && _statusText == '同步中') {
         _setStatus(statusBeforeSync);
       }
       AppLogger.error(
@@ -2316,7 +2323,7 @@ class BusinessImService extends ChangeNotifier {
     _reconnectTimer = null;
     await _closeRealtimeOnly();
     try {
-      final chat = await _refreshGatewayChat();
+      final chat = await _gatewayChatForConnect();
       final stream = chat.stream;
       final openUrl = _gatewayOpenUrl(chat);
       if (stream == null || stream.ticket.isEmpty || openUrl.isEmpty) {
@@ -2394,8 +2401,11 @@ class BusinessImService extends ChangeNotifier {
         stackTrace: stackTrace,
       );
       if (error is ApiException && (error.code == 401 || error.code == 403)) {
-        _started = false;
-        return;
+        AppLogger.warn(
+          'im',
+          'gateway auth refresh failed, keep session alive',
+          data: {'code': error.code, 'message': error.message},
+        );
       }
       _scheduleReconnect('connect_failed');
     }
@@ -2405,6 +2415,42 @@ class BusinessImService extends ChangeNotifier {
     final session = _requireSession();
     final chat = await _api.connectIm(session: session, device: _device);
     _session = session.copyWith(chat: chat);
+    _gatewayChatIssuedAt = DateTime.now();
+    return chat;
+  }
+
+  Future<ChatSession> _gatewayChatForConnect() async {
+    final cached = _validCachedGatewayChat();
+    if (cached != null) {
+      AppLogger.info(
+        'im',
+        'reuse fresh gateway chat for connect',
+        data: {
+          'uid': cached.uid,
+          'expire_in': cached.stream?.expireIn ?? 0,
+          'issued_at': _gatewayChatIssuedAt?.toIso8601String() ?? '',
+        },
+      );
+      return cached;
+    }
+    return _refreshGatewayChat();
+  }
+
+  ChatSession? _validCachedGatewayChat() {
+    final chat = _session?.chat;
+    final stream = chat?.stream;
+    final issuedAt = _gatewayChatIssuedAt;
+    if (chat == null ||
+        stream == null ||
+        !stream.isAvailable ||
+        _gatewayOpenUrl(chat).isEmpty ||
+        issuedAt == null) {
+      return null;
+    }
+    final expiresAt = issuedAt.add(Duration(seconds: max(30, stream.expireIn)));
+    if (!expiresAt.isAfter(DateTime.now().add(const Duration(seconds: 15)))) {
+      return null;
+    }
     return chat;
   }
 
@@ -3406,6 +3452,8 @@ class BusinessImService extends ChangeNotifier {
       return current;
     }
     final serverClientMsgNos = <String>{};
+    final serverMessageIds = <String>{};
+    final serverPaymentActionKeys = <String>{};
     final serverSeqs = <int>{};
     var minSeq = 0;
     var minTimestamp = 0;
@@ -3414,6 +3462,11 @@ class BusinessImService extends ChangeNotifier {
       if (clientMsgNo.isNotEmpty) {
         serverClientMsgNos.add(clientMsgNo);
       }
+      final messageId = _value(message, ['message_id', 'message_idstr']);
+      if (messageId.isNotEmpty) {
+        serverMessageIds.add(messageId);
+      }
+      serverPaymentActionKeys.addAll(_paymentActionMessageKeys(message));
       final seq = _intValue(message, ['message_seq']);
       if (seq > 0) {
         serverSeqs.add(seq);
@@ -3438,10 +3491,14 @@ class BusinessImService extends ChangeNotifier {
         continue;
       }
       final clientMsgNo = _value(message, ['client_msg_no']);
+      final messageId = _value(message, ['message_id', 'message_idstr']);
+      final actionKeys = _paymentActionMessageKeys(message);
       final seq = _intValue(message, ['message_seq']);
       final knownByServer =
           (clientMsgNo.isNotEmpty &&
               serverClientMsgNos.contains(clientMsgNo)) ||
+          (messageId.isNotEmpty && serverMessageIds.contains(messageId)) ||
+          actionKeys.any(serverPaymentActionKeys.contains) ||
           (seq > 0 && serverSeqs.contains(seq));
       if (knownByServer) {
         filtered.add(message);
@@ -3453,6 +3510,10 @@ class BusinessImService extends ChangeNotifier {
         minTimestamp: minTimestamp,
       );
       if (insideServerWindow) {
+        if (_serverWindowPruneLocalOnly(message)) {
+          filtered.add(message);
+          continue;
+        }
         removed++;
         if (clientMsgNo.isNotEmpty) {
           _cache.rememberDeletedMessage(
@@ -3479,6 +3540,12 @@ class BusinessImService extends ChangeNotifier {
       );
     }
     return filtered;
+  }
+
+  bool _serverWindowPruneLocalOnly(Map<String, Object?> message) {
+    return _isSystemActionMessage(message) ||
+        _paymentActionMessageKeys(message).isNotEmpty ||
+        _isLocalOnlyPendingMessage(message);
   }
 
   bool _isLocalOnlyPendingMessage(Map<String, Object?> message) {
@@ -5452,8 +5519,25 @@ class BusinessImService extends ChangeNotifier {
     Map<String, Object?> left,
     Map<String, Object?> right,
   ) {
-    final leftKey = _paymentActionMessageKey(left);
-    return leftKey.isNotEmpty && leftKey == _paymentActionMessageKey(right);
+    final leftKeys = _paymentActionMessageKeys(left);
+    if (leftKeys.isEmpty) {
+      return false;
+    }
+    final rightKeys = _paymentActionMessageKeys(right);
+    return leftKeys.any(rightKeys.contains);
+  }
+
+  Set<String> _paymentActionMessageKeys(Map<String, Object?> message) {
+    final keys = <String>{};
+    final key = _paymentActionMessageKey(message);
+    if (key.isNotEmpty) {
+      keys.add(key);
+    }
+    final compactKey = _paymentActionCompactMessageKey(message);
+    if (compactKey.isNotEmpty) {
+      keys.add(compactKey);
+    }
+    return keys;
   }
 
   String _paymentActionMessageKey(Map<String, Object?> message) {
@@ -5499,6 +5583,34 @@ class BusinessImService extends ChangeNotifier {
       return '';
     }
     return '$action:$actionTarget:$idValue:$actor';
+  }
+
+  String _paymentActionCompactMessageKey(Map<String, Object?> message) {
+    final payload = _asMap(message['payload']);
+    final action = _value(message, [
+      'content_type',
+    ], fallback: _value(payload, ['content_type', 'action']));
+    if (action != ChatContentTypes.redPacketReceived &&
+        action != ChatContentTypes.transferReceived) {
+      return '';
+    }
+    final nestedKey = action == ChatContentTypes.redPacketReceived
+        ? 'red_packet'
+        : 'transfer';
+    final idKey = action == ChatContentTypes.redPacketReceived
+        ? 'red_packet_id'
+        : 'transfer_id';
+    final idValue = _paymentActionId(payload, nestedKey, idKey);
+    if (idValue.isEmpty) {
+      return '';
+    }
+    final actorKey = _paymentActionActorId(payload, nestedKey);
+    final actorUid = _paymentActionActorUid(message, payload, nestedKey);
+    final actor = actorKey.isNotEmpty ? actorKey : actorUid;
+    if (actor.isEmpty) {
+      return '';
+    }
+    return '$action:$idValue:$actor';
   }
 
   String _readReceiptKey(
@@ -6135,20 +6247,32 @@ class BusinessImService extends ChangeNotifier {
     final deduped = <Map<String, Object?>>[];
     final actionIndexes = <String, int>{};
     for (final message in sorted) {
-      final actionKey = _paymentActionMessageKey(message);
-      if (actionKey.isEmpty) {
+      final actionKeys = _paymentActionMessageKeys(message);
+      if (actionKeys.isEmpty) {
         deduped.add(message);
         continue;
       }
-      final existingIndex = actionIndexes[actionKey];
+      int? existingIndex;
+      for (final actionKey in actionKeys) {
+        final index = actionIndexes[actionKey];
+        if (index != null) {
+          existingIndex = index;
+          break;
+        }
+      }
       if (existingIndex == null) {
-        actionIndexes[actionKey] = deduped.length;
+        for (final actionKey in actionKeys) {
+          actionIndexes[actionKey] = deduped.length;
+        }
         deduped.add(message);
       } else {
         deduped[existingIndex] = _mergeMessageFields(
           deduped[existingIndex],
           message,
         );
+        for (final actionKey in actionKeys) {
+          actionIndexes[actionKey] = existingIndex;
+        }
       }
     }
     if (deduped.length <= limit) {
