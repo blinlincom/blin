@@ -75,6 +75,9 @@ class SessionController extends ChangeNotifier {
   String? get imError => _im.lastError;
   int get conversationVersion => _im.conversationVersion;
   bool get initialHistorySyncing => _im.initialHistorySyncing;
+  bool get initialHistorySyncBlocked => _im.initialHistorySyncBlocked;
+  BusinessImInitialSyncState get initialHistorySyncState =>
+      _im.initialHistorySyncState;
   bool get hasLoadedFriends => _friendCacheAt != null;
   Stream<BusinessImMessageEvent> get messageEvents => _im.messageEvents;
   Stream<BusinessImPresenceEvent> get presenceEvents => _im.presenceEvents;

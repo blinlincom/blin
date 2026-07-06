@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
@@ -29,12 +30,14 @@ part 'contacts/group_pages.dart';
 part 'contacts/private_chat_actions_page.dart';
 part 'chat/chat_page.dart';
 part 'chat/action_input_pages.dart';
+part 'chat/media_picker_pages.dart';
 part 'common/list_tiles.dart';
 part 'common/avatar.dart';
 part 'chat/message_list.dart';
 part 'chat/chat_header.dart';
 part 'chat/message_bubble.dart';
 part 'common/media_preview.dart';
+part 'chat/media_viewer_pages.dart';
 part 'chat/tool_panel.dart';
 part 'chat/composer_bar.dart';
 part 'common/section_header.dart';
@@ -117,6 +120,7 @@ class _HomePageState extends State<HomePage> {
 
   @override
   Widget build(BuildContext context) {
+    final showInitialSyncOverlay = _showInitialSyncOverlay;
     final pages = [
       MessagesTab(controller: widget.controller),
       ContactsTab(controller: widget.controller),
@@ -139,10 +143,26 @@ class _HomePageState extends State<HomePage> {
                 fontSize: 17,
                 fontWeight: FontWeight.w700,
               ),
-              actions: _actions(),
+              actions: _actions(showInitialSyncOverlay),
             ),
       backgroundColor: _pageColor,
-      body: SafeArea(child: pages[_index]),
+      body: SafeArea(
+        child: Stack(
+          children: [
+            AbsorbPointer(
+              absorbing: showInitialSyncOverlay,
+              child: pages[_index],
+            ),
+            if (showInitialSyncOverlay)
+              Positioned.fill(
+                child: _InitialHistorySyncOverlay(
+                  state: widget.controller.initialHistorySyncState,
+                  onRetry: _retryInitialSync,
+                ),
+              ),
+          ],
+        ),
+      ),
       bottomNavigationBar: Container(
         decoration: const BoxDecoration(
           border: Border(top: BorderSide(color: _borderColor)),
@@ -150,7 +170,9 @@ class _HomePageState extends State<HomePage> {
         ),
         child: BottomNavigationBar(
           currentIndex: _index,
-          onTap: (value) => setState(() => _index = value),
+          onTap: showInitialSyncOverlay
+              ? (_) => _showInitialSyncLockedTip()
+              : (value) => setState(() => _index = value),
           type: BottomNavigationBarType.fixed,
           elevation: 0,
           backgroundColor: _surfaceColor,
@@ -187,16 +209,42 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  List<Widget> _actions() {
+  bool get _showInitialSyncOverlay {
+    return widget.controller.initialHistorySyncBlocked;
+  }
+
+  List<Widget> _actions(bool showInitialSyncOverlay) {
     return [
       if (_index == 0 || _index == 1)
         IconButton(
           tooltip: '更多',
-          onPressed: () =>
-              _open(QuickActionsPage(controller: widget.controller)),
+          onPressed: showInitialSyncOverlay
+              ? _showInitialSyncLockedTip
+              : () => _open(QuickActionsPage(controller: widget.controller)),
           icon: const Icon(Icons.add_circle_outline, size: 23),
         ),
     ];
+  }
+
+  Future<void> _retryInitialSync() async {
+    try {
+      await widget.controller.loadConversations();
+    } catch (error, stackTrace) {
+      AppLogger.warn(
+        'ui',
+        'retry initial history sync failed',
+        data: {'error': error.toString(), 'stack': stackTrace.toString()},
+      );
+    }
+  }
+
+  void _showInitialSyncLockedTip() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('聊天数据同步完成后可操作'),
+        duration: Duration(seconds: 2),
+      ),
+    );
   }
 
   Future<void> _open(Widget page) async {
@@ -218,8 +266,8 @@ class _HomePageState extends State<HomePage> {
   }
 
   String get _messagesTitle {
-    if (widget.controller.initialHistorySyncing) {
-      return '同步中...';
+    if (_showInitialSyncOverlay) {
+      return '消息';
     }
     final status = widget.controller.imStatusText;
     if (status == '连接中') {
@@ -247,6 +295,107 @@ int _conversationUnreadTotal(Iterable<Map<String, Object?>> conversations) {
     total += _intValue(item, ['unread_quantity', 'unread']);
   }
   return total;
+}
+
+class _InitialHistorySyncOverlay extends StatelessWidget {
+  const _InitialHistorySyncOverlay({
+    required this.state,
+    required this.onRetry,
+  });
+
+  final BusinessImInitialSyncState state;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    final progress = state.progress.clamp(0, 1).toDouble();
+    final failed = state.error != null;
+    final width = min(MediaQuery.sizeOf(context).width - 64, 280).toDouble();
+    return ColoredBox(
+      color: _surfaceColor,
+      child: Center(
+        child: Semantics(
+          liveRegion: true,
+          label: failed ? '聊天数据同步失败' : '正在同步聊天数据',
+          value: '${(progress * 100).round()}%',
+          child: SizedBox(
+            width: width,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                SizedBox(
+                  width: 42,
+                  height: 42,
+                  child: failed
+                      ? const Icon(
+                          Icons.error_outline,
+                          color: _dangerColor,
+                          size: 38,
+                        )
+                      : CircularProgressIndicator(
+                          value: progress <= 0 ? null : progress,
+                          strokeWidth: 3,
+                          color: _primaryColor,
+                          backgroundColor: _lightBorderColor,
+                        ),
+                ),
+                const SizedBox(height: 18),
+                Text(
+                  failed ? '聊天数据同步失败' : '正在同步聊天数据',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: _textColor,
+                    fontSize: 17,
+                    fontWeight: FontWeight.w700,
+                    height: 1.25,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  state.error ?? state.text,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: _secondaryTextColor,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500,
+                    height: 1.35,
+                  ),
+                ),
+                const SizedBox(height: 18),
+                TweenAnimationBuilder<double>(
+                  tween: Tween<double>(begin: 0, end: progress),
+                  duration: const Duration(milliseconds: 240),
+                  curve: Curves.easeOutCubic,
+                  builder: (context, value, _) {
+                    return LinearProgressIndicator(
+                      minHeight: 3,
+                      value: failed ? null : value,
+                      color: failed ? _dangerColor : _primaryColor,
+                      backgroundColor: _lightBorderColor,
+                    );
+                  },
+                ),
+                const SizedBox(height: 9),
+                Text(
+                  failed ? '请重新同步' : '${(progress * 100).round()}%',
+                  style: const TextStyle(
+                    color: _mutedColor,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    height: 1.2,
+                  ),
+                ),
+                if (failed) ...[
+                  const SizedBox(height: 16),
+                  TextButton(onPressed: onRetry, child: const Text('重新同步')),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class _BottomNavIcon extends StatelessWidget {

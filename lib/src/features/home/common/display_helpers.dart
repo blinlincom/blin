@@ -47,37 +47,3 @@ String _friendStatusText(Map<String, Object?> result) {
   final max = limit <= 0 ? 3 : limit;
   return '还不是好友，只能先发送文字消息，当前已发送 $count/$max 条。';
 }
-
-String _receiptText(Map<String, Object?> result, {required bool isGroup}) {
-  final receipt = _asObjectMap(result['receipt']);
-  final redPacket = _asObjectMap(result['red_packet']);
-  final transfer = _asObjectMap(result['transfer']);
-  final parts = <String>[];
-  final readCount = _intValue(receipt, ['read_count']);
-  final unreadCount = _intValue(receipt, ['unread_count']);
-  final total = _intValue(receipt, ['total_receivers']);
-  if (isGroup) {
-    if (total > 0) {
-      parts.add('$readCount/$total 人已读');
-    } else {
-      parts.add('$readCount 人已读');
-    }
-  } else {
-    parts.add(readCount > 0 ? '对方已读' : '对方未读');
-  }
-  if (unreadCount > 0 && isGroup) {
-    parts.add('$unreadCount 人未读');
-  }
-  if (redPacket.isNotEmpty) {
-    final receiveCount = _intValue(redPacket, ['receive_count']);
-    final quantity = _intValue(redPacket, ['quantity']);
-    final status = _value(redPacket, ['status']);
-    final progress = quantity > 0 ? '$receiveCount/$quantity' : '$receiveCount';
-    parts.add('红包领取 $progress${status.isEmpty ? '' : ' · $status'}');
-  }
-  if (transfer.isNotEmpty) {
-    final status = _value(transfer, ['status']);
-    parts.add(status.isEmpty ? '转账待处理' : '转账$status');
-  }
-  return parts.join('\n');
-}

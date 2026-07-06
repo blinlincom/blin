@@ -5,7 +5,7 @@ class _MessageRow extends StatelessWidget {
     required this.item,
     required this.showSenderName,
     required this.currentUserAvatarUrl,
-    required this.onLongPress,
+    required this.onLongPressStart,
     required this.onTap,
     required this.redPacketReceiving,
     required this.onRetry,
@@ -15,7 +15,7 @@ class _MessageRow extends StatelessWidget {
   final Map<String, Object?> item;
   final bool showSenderName;
   final String currentUserAvatarUrl;
-  final VoidCallback onLongPress;
+  final GestureLongPressStartCallback onLongPressStart;
   final VoidCallback? onTap;
   final bool redPacketReceiving;
   final VoidCallback onRetry;
@@ -93,7 +93,7 @@ class _MessageRow extends StatelessWidget {
                     ],
                     GestureDetector(
                       onTap: onTap,
-                      onLongPress: onLongPress,
+                      onLongPressStart: onLongPressStart,
                       child: _MessageBubble(
                         item: item,
                         isMe: isMe,

@@ -15,6 +15,22 @@ import 'im_cache_store.dart';
 import 'im_message_types.dart';
 import 'message_notification_sound.dart';
 
+class BusinessImInitialSyncState {
+  const BusinessImInitialSyncState({
+    required this.syncing,
+    required this.progress,
+    required this.text,
+    this.error,
+  });
+
+  final bool syncing;
+  final double progress;
+  final String text;
+  final String? error;
+
+  bool get blocked => syncing || error != null;
+}
+
 class BusinessImService extends ChangeNotifier {
   BusinessImService({required ApiClient api, required ImCacheStore cache})
     : _api = api,
@@ -61,6 +77,9 @@ class BusinessImService extends ChangeNotifier {
   final Set<String> _invalidMessageChannels = <String>{};
   bool _serverConversationsSynced = false;
   bool _initialHistorySyncing = false;
+  double _initialHistorySyncProgress = 0;
+  String _initialHistorySyncText = '准备同步聊天数据';
+  String? _initialHistorySyncError;
   bool _hasRealtimeConnectedOnce = false;
   bool _suppressCatchupSoundOnNextConnect = true;
   int _soundFreshAfterSeconds = 0;
@@ -81,6 +100,15 @@ class BusinessImService extends ChangeNotifier {
   String? get lastError => _lastError;
   int get conversationVersion => _conversationVersion;
   bool get initialHistorySyncing => _initialHistorySyncing;
+  bool get initialHistorySyncBlocked =>
+      _initialHistorySyncing || _initialHistorySyncError != null;
+  BusinessImInitialSyncState get initialHistorySyncState =>
+      BusinessImInitialSyncState(
+        syncing: _initialHistorySyncing,
+        progress: _initialHistorySyncProgress,
+        text: _initialHistorySyncText,
+        error: _initialHistorySyncError,
+      );
 
   bool isInvalidChannel({required String channelID, required int channelType}) {
     channelID = _canonicalChannelId(channelID, channelType);
@@ -196,8 +224,14 @@ class BusinessImService extends ChangeNotifier {
           .map(_hydrateConversationProfile)
           .toList(growable: false),
     );
-    _initialHistorySyncing =
-        _latestConversations.isEmpty && _conversationHistorySyncEnabled(chat);
+    _setInitialHistorySyncState(
+      syncing:
+          _latestConversations.isEmpty && _conversationHistorySyncEnabled(chat),
+      progress: 0.04,
+      text: '准备同步聊天数据',
+      error: null,
+      notify: false,
+    );
     _cache.writeConversations(
       uid: chat.uid,
       conversations: _latestConversations,
@@ -235,7 +269,13 @@ class BusinessImService extends ChangeNotifier {
     _gatewayAckQueue.clear();
     _gatewayAckDraining = false;
     _syncingConversations = null;
-    _initialHistorySyncing = false;
+    _setInitialHistorySyncState(
+      syncing: false,
+      progress: 0,
+      text: '准备同步聊天数据',
+      error: null,
+      notify: false,
+    );
     _soundFreshAfterSeconds = 0;
     _presenceRealtimeAfterSeconds = 0;
     _presenceLatestEventSeconds.clear();
@@ -794,13 +834,70 @@ class BusinessImService extends ChangeNotifier {
     }
   }
 
+  void _setInitialHistorySyncState({
+    required bool syncing,
+    required double progress,
+    required String text,
+    String? error,
+    bool notify = true,
+  }) {
+    final normalizedProgress = progress.clamp(0, 1).toDouble();
+    final changed =
+        _initialHistorySyncing != syncing ||
+        _initialHistorySyncProgress != normalizedProgress ||
+        _initialHistorySyncText != text ||
+        _initialHistorySyncError != error;
+    _initialHistorySyncing = syncing;
+    _initialHistorySyncProgress = normalizedProgress;
+    _initialHistorySyncText = text;
+    _initialHistorySyncError = error;
+    if (changed && notify) {
+      notifyListeners();
+    }
+  }
+
+  void _updateInitialHistorySyncProgress(double progress, String text) {
+    if (!_initialHistorySyncing) {
+      return;
+    }
+    _setInitialHistorySyncState(
+      syncing: true,
+      progress: progress,
+      text: text,
+      error: null,
+    );
+  }
+
   Future<List<Map<String, Object?>>> _syncConversationsFromServerOnce() async {
     final session = _requireSession();
     final chat = _requireChat();
     final initialLocal = _currentLocalConversations(chat);
+    final shouldGateInitialSync =
+        initialLocal.isEmpty &&
+        _latestConversations.isEmpty &&
+        !_serverConversationsSynced &&
+        _conversationHistorySyncEnabled(chat);
+    if (shouldGateInitialSync && !_initialHistorySyncing) {
+      _setInitialHistorySyncState(
+        syncing: true,
+        progress: 0.06,
+        text: '准备同步聊天数据',
+        error: null,
+      );
+    }
+    final initialSync = _initialHistorySyncing;
     if (!_conversationHistorySyncEnabled(chat)) {
       _latestConversations = initialLocal;
       _serverConversationsSynced = true;
+      if (initialSync) {
+        _setInitialHistorySyncState(
+          syncing: false,
+          progress: 1,
+          text: '同步完成',
+          error: null,
+          notify: false,
+        );
+      }
       AppLogger.info(
         'im',
         'server conversation sync skipped',
@@ -818,11 +915,14 @@ class BusinessImService extends ChangeNotifier {
       _setStatus('同步中');
     }
     try {
+      _updateInitialHistorySyncProgress(0.12, '正在连接消息服务');
+      _updateInitialHistorySyncProgress(0.22, '正在获取会话列表');
       final list = await _api.conversations(
         session: session,
         device: _device,
         limit: 50,
       );
+      _updateInitialHistorySyncProgress(0.36, '正在整理会话资料');
       final normalizedServerConversations = list
           .map(_normalizeConversation)
           .where(
@@ -837,7 +937,18 @@ class BusinessImService extends ChangeNotifier {
           .toList();
       final serverConversations = await _hydrateEmptyConversationsFromHistory(
         normalizedServerConversations,
+        onProgress: initialSync
+            ? (completed, total) {
+                final ratio = total <= 0 ? 1.0 : completed / total;
+                final progress = 0.42 + ratio.clamp(0, 1).toDouble() * 0.43;
+                _updateInitialHistorySyncProgress(
+                  progress,
+                  total <= 0 ? '正在恢复聊天记录' : '正在恢复聊天记录 $completed/$total',
+                );
+              }
+            : null,
       );
+      _updateInitialHistorySyncProgress(0.88, '正在合并聊天数据');
       final latestBeforeMerge = _latestConversations
           .map(_normalizeConversation)
           .where(_conversationVisibleAfterClear)
@@ -851,12 +962,14 @@ class BusinessImService extends ChangeNotifier {
               .map(_rememberConversationProfile)
               .map(_hydrateConversationProfile)
               .toList(growable: false);
+      _updateInitialHistorySyncProgress(0.94, '正在写入本地缓存');
       _cache.writeConversations(
         uid: chat.uid,
         conversations: _latestConversations,
       );
       _serverConversationsSynced = true;
       _bumpConversations('server_sync');
+      _updateInitialHistorySyncProgress(0.98, '正在刷新首页');
       AppLogger.info(
         'im',
         'server conversations synced',
@@ -871,14 +984,26 @@ class BusinessImService extends ChangeNotifier {
           'group_history_sync_enabled': chat.groupHistorySyncEnabled,
         },
       );
-      _initialHistorySyncing = false;
+      _setInitialHistorySyncState(
+        syncing: false,
+        progress: 1,
+        text: '同步完成',
+        error: null,
+        notify: false,
+      );
       if (_statusText == '同步中') {
         _setStatus('已连接');
       }
       notifyListeners();
       return _latestConversations;
     } catch (error, stackTrace) {
-      _initialHistorySyncing = false;
+      _setInitialHistorySyncState(
+        syncing: false,
+        progress: _initialHistorySyncProgress,
+        text: '同步失败',
+        error: initialSync ? '聊天数据同步失败，请检查网络后重试' : null,
+        notify: false,
+      );
       if (_statusText == '同步中') {
         _setStatus(statusBeforeSync);
       }
@@ -1313,41 +1438,53 @@ class BusinessImService extends ChangeNotifier {
   }
 
   Future<List<Map<String, Object?>>> _hydrateEmptyConversationsFromHistory(
-    List<Map<String, Object?>> conversations,
-  ) async {
+    List<Map<String, Object?>> conversations, {
+    void Function(int completed, int total)? onProgress,
+  }) async {
     final hydrated = <Map<String, Object?>>[];
+    final total = conversations.length;
+    if (total == 0) {
+      onProgress?.call(0, 0);
+      return hydrated;
+    }
+    var completed = 0;
     for (final item in conversations) {
-      final channelId = _value(item, ['channel_id']);
-      final channelType = _intValue(item, ['channel_type']);
-      final hasSummary =
-          _value(item, ['content']).isNotEmpty &&
-          _value(item, ['content_type']).isNotEmpty &&
-          _value(item, ['msg_time', 'timestamp', 'create_time']).isNotEmpty;
-      if (hasSummary ||
-          !_historySyncEnabledForType(channelType, _requireChat())) {
-        hydrated.add(item);
-        continue;
-      }
-      final messages = await syncChannelMessages(
-        channelID: channelId,
-        channelType: channelType,
-        groupId: _value(item, ['group_id', 'id'], fallback: channelId),
-        limit: _historySyncLimit,
-      );
-      final lastMessage = _lastConversationMessage(messages);
-      if (lastMessage.isEmpty) {
-        AppLogger.info(
-          'im',
-          'empty conversation dropped after history hydration',
-          data: {
-            'channel_id': channelId,
-            'channel_type': channelType,
-            'reason': 'no_displayable_history_message',
-          },
+      try {
+        final channelId = _value(item, ['channel_id']);
+        final channelType = _intValue(item, ['channel_type']);
+        final hasSummary =
+            _value(item, ['content']).isNotEmpty &&
+            _value(item, ['content_type']).isNotEmpty &&
+            _value(item, ['msg_time', 'timestamp', 'create_time']).isNotEmpty;
+        if (hasSummary ||
+            !_historySyncEnabledForType(channelType, _requireChat())) {
+          hydrated.add(item);
+          continue;
+        }
+        final messages = await syncChannelMessages(
+          channelID: channelId,
+          channelType: channelType,
+          groupId: _value(item, ['group_id', 'id'], fallback: channelId),
+          limit: _historySyncLimit,
         );
-        continue;
+        final lastMessage = _lastConversationMessage(messages);
+        if (lastMessage.isEmpty) {
+          AppLogger.info(
+            'im',
+            'empty conversation dropped after history hydration',
+            data: {
+              'channel_id': channelId,
+              'channel_type': channelType,
+              'reason': 'no_displayable_history_message',
+            },
+          );
+          continue;
+        }
+        hydrated.add(_conversationSummaryFromMessage(item, lastMessage));
+      } finally {
+        completed++;
+        onProgress?.call(completed, total);
       }
-      hydrated.add(_conversationSummaryFromMessage(item, lastMessage));
     }
     return hydrated;
   }

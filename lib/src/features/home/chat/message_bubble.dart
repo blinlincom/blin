@@ -620,62 +620,142 @@ class _TimeDivider extends StatelessWidget {
   }
 }
 
-class _SelectedMessageBar extends StatelessWidget {
-  const _SelectedMessageBar({
-    required this.onReply,
-    required this.onReceipt,
-    required this.onRecall,
-    required this.onDelete,
-    required this.onBurn,
-    required this.onReceiveTransfer,
-    required this.onClear,
+class _MessageActionItem {
+  const _MessageActionItem({
+    required this.label,
+    required this.icon,
+    required this.onTap,
+    this.destructive = false,
   });
 
-  final VoidCallback onReply;
-  final VoidCallback onReceipt;
-  final VoidCallback onRecall;
-  final VoidCallback onDelete;
-  final VoidCallback onBurn;
-  final VoidCallback onReceiveTransfer;
-  final VoidCallback onClear;
+  final String label;
+  final IconData icon;
+  final VoidCallback onTap;
+  final bool destructive;
+}
+
+class _MessageActionOverlay extends StatelessWidget {
+  const _MessageActionOverlay({
+    required this.anchor,
+    required this.actions,
+    required this.onDismiss,
+  });
+
+  final Offset anchor;
+  final List<_MessageActionItem> actions;
+  final VoidCallback onDismiss;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(10, 6, 6, 6),
-      decoration: const BoxDecoration(
-        color: _surfaceColor,
-        border: Border(bottom: BorderSide(color: _lightBorderColor)),
+    if (actions.isEmpty) {
+      return const SizedBox.shrink();
+    }
+    return Positioned.fill(
+      child: GestureDetector(
+        behavior: HitTestBehavior.translucent,
+        onTap: onDismiss,
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            const actionWidth = 58.0;
+            const menuHeight = 64.0;
+            final maxWidth = max(120.0, constraints.maxWidth - 24);
+            final menuWidth = min(maxWidth, actions.length * actionWidth + 12);
+            final left = (anchor.dx - menuWidth / 2)
+                .clamp(12.0, max(12.0, constraints.maxWidth - menuWidth - 12))
+                .toDouble();
+            final showAbove = anchor.dy > menuHeight + 92;
+            final rawTop = showAbove
+                ? anchor.dy - menuHeight - 14
+                : anchor.dy + 14;
+            final top = rawTop
+                .clamp(8.0, max(8.0, constraints.maxHeight - menuHeight - 14))
+                .toDouble();
+            return Stack(
+              children: [
+                Positioned(
+                  left: left,
+                  top: top,
+                  width: menuWidth,
+                  height: menuHeight,
+                  child: _MessageActionMenu(actions: actions),
+                ),
+              ],
+            );
+          },
+        ),
       ),
-      child: Wrap(
-        spacing: 6,
-        runSpacing: 6,
-        crossAxisAlignment: WrapCrossAlignment.center,
-        children: [
-          const Padding(
-            padding: EdgeInsets.only(right: 2),
-            child: Text(
-              '已选中消息',
-              style: TextStyle(
-                color: _secondaryTextColor,
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-              ),
+    );
+  }
+}
+
+class _MessageActionMenu extends StatelessWidget {
+  const _MessageActionMenu({required this.actions});
+
+  final List<_MessageActionItem> actions;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: const Color(0xee202124),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(8),
+        child: SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          physics: const BouncingScrollPhysics(),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              for (final action in actions)
+                _MessageActionButton(action: action),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _MessageActionButton extends StatelessWidget {
+  const _MessageActionButton({required this.action});
+
+  final _MessageActionItem action;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = action.destructive ? const Color(0xffffb4ab) : Colors.white;
+    return Semantics(
+      button: true,
+      label: action.label,
+      child: SizedBox(
+        width: 58,
+        height: 64,
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: action.onTap,
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(action.icon, color: color, size: 20),
+                const SizedBox(height: 5),
+                Text(
+                  action.label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: color,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    height: 1,
+                  ),
+                ),
+              ],
             ),
           ),
-          _MiniButton(label: '引用', onTap: onReply),
-          _MiniButton(label: '已读', onTap: onReceipt),
-          _MiniButton(label: '撤回', onTap: onRecall),
-          _MiniButton(label: '删除', onTap: onDelete),
-          _MiniButton(label: '焚毁', onTap: onBurn),
-          _MiniButton(label: '收转账', onTap: onReceiveTransfer),
-          IconButton(
-            tooltip: '取消选择',
-            onPressed: onClear,
-            icon: const Icon(Icons.close),
-          ),
-        ],
+        ),
       ),
     );
   }

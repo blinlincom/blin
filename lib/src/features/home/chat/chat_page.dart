@@ -23,6 +23,7 @@ class ChatPage extends StatefulWidget {
 class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   static const int _messageUiLimit = 1000;
 
+  final _chatStackKey = GlobalKey();
   final _textController = TextEditingController();
   final _scrollController = ScrollController();
   final _inputFocusNode = FocusNode();
@@ -33,8 +34,9 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   List<String> _mentionUserIds = const [];
   String _replyClientMsgNo = '';
   String _selectedClientMsgNo = '';
-  int _selectedMessageSeq = 0;
   Map<String, Object?> _selectedPayload = const {};
+  Map<String, Object?> _selectedMessage = const {};
+  Offset? _selectedMenuAnchor;
   Map<String, Object?> _groupMuteState = const {};
   String? _error;
   String _message = '';
@@ -82,6 +84,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     _messageSub = widget.controller.messageEvents.listen(_onMessageEvent);
     _presenceSub = widget.controller.presenceEvents.listen(_onPresenceEvent);
     _inputFocusNode.addListener(_onInputFocusChanged);
+    _scrollController.addListener(_onMessageListScrolled);
     unawaited(
       widget.controller.openConversation(
         channelId: widget.channelId,
@@ -120,11 +123,18 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     if (!_inputFocusNode.hasFocus) {
       return;
     }
+    _clearSelectedMessageMenu();
     if (_toolsOpen) {
       setState(() => _toolsOpen = false);
     }
     if (_isNearBottom()) {
       _stickToBottomDuringKeyboard();
+    }
+  }
+
+  void _onMessageListScrolled() {
+    if (_selectedClientMsgNo.isNotEmpty && mounted) {
+      _clearSelectedMessageMenu();
     }
   }
 
@@ -147,6 +157,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       _messageRevision = _currentMessageRevision();
       _lastImStatusText = widget.controller.imStatusText;
       _messages = const [];
+      _clearSelectedMessageMenu();
       _didInitialScroll = false;
       _burnTriggeredClientMsgNos.clear();
       _receivingRedPacketIds.clear();
@@ -656,6 +667,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     WidgetsBinding.instance.removeObserver(this);
     _messageSub?.cancel();
     _presenceSub?.cancel();
+    _scrollController.removeListener(_onMessageListScrolled);
     _scrollController.dispose();
     _inputFocusNode.removeListener(_onInputFocusChanged);
     _inputFocusNode.dispose();
@@ -825,6 +837,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
               animation: widget.controller,
               builder: (context, _) {
                 return Stack(
+                  key: _chatStackKey,
                   children: [
                     Column(
                       children: [
@@ -847,22 +860,6 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                           _ChatOptionBar(
                             text: _optionText(),
                             onClear: _clearOptions,
-                          ),
-                        if (_selectedClientMsgNo.isNotEmpty)
-                          _SelectedMessageBar(
-                            onReply: () => setState(() {
-                              _replyClientMsgNo = _selectedClientMsgNo;
-                              _selectedClientMsgNo = '';
-                            }),
-                            onReceipt: _queryReceipt,
-                            onRecall: _recallSelected,
-                            onDelete: _deleteSelected,
-                            onBurn: _burnSelected,
-                            onReceiveTransfer: _receiveSelectedTransfer,
-                            onClear: () => setState(() {
-                              _selectedClientMsgNo = '';
-                              _selectedPayload = const {};
-                            }),
                           ),
                         Expanded(
                           child: _messagesLoading && _messages.isEmpty
@@ -908,13 +905,12 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                                                   .session
                                                   ?.avatar ??
                                               '',
-                                          onLongPress: () =>
-                                              _selectMessage(item),
-                                          onTap:
-                                              _messageContentType(item) ==
-                                                  ChatContentTypes.redPacket
-                                              ? () => _receiveRedPacket(item)
-                                              : null,
+                                          onLongPressStart: (details) =>
+                                              _selectMessage(
+                                                item,
+                                                details.globalPosition,
+                                              ),
+                                          onTap: _messageTapHandler(item),
                                           redPacketReceiving:
                                               _redPacketIsReceiving(item),
                                           onRetry: () => _retryMessage(item),
@@ -956,6 +952,13 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                           ),
                       ],
                     ),
+                    if (_selectedClientMsgNo.isNotEmpty &&
+                        _selectedMenuAnchor != null)
+                      _MessageActionOverlay(
+                        anchor: _selectedMenuAnchor!,
+                        actions: _selectedMessageActions(),
+                        onDismiss: _clearSelectedMessageMenu,
+                      ),
                     if (toastText.isNotEmpty)
                       Positioned(
                         top: 72,
@@ -987,12 +990,166 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     );
   }
 
-  void _selectMessage(Map<String, Object?> item) {
+  void _selectMessage(Map<String, Object?> item, Offset globalPosition) {
+    final clientMsgNo = _value(item, ['client_msg_no']);
+    final anchor = _messageMenuAnchor(globalPosition);
     setState(() {
-      _selectedClientMsgNo = _value(item, ['client_msg_no']);
-      _selectedMessageSeq = _intValue(item, ['message_seq']);
+      _selectedClientMsgNo = clientMsgNo;
       _selectedPayload = _asObjectMap(item['payload']);
-      _message = _selectedClientMsgNo.isEmpty ? '当前消息暂不可操作' : '已选中消息';
+      _selectedMessage = Map<String, Object?>.from(item);
+      _selectedMenuAnchor = anchor;
+      _message = '';
+      if (clientMsgNo.isEmpty) {
+        _selectedMessage = const {};
+        _selectedMenuAnchor = null;
+      }
+    });
+  }
+
+  Offset _messageMenuAnchor(Offset globalPosition) {
+    final context = _chatStackKey.currentContext;
+    final renderObject = context?.findRenderObject();
+    if (renderObject is RenderBox) {
+      return renderObject.globalToLocal(globalPosition);
+    }
+    return globalPosition;
+  }
+
+  void _clearSelectedMessageMenu() {
+    if (_selectedClientMsgNo.isEmpty &&
+        _selectedPayload.isEmpty &&
+        _selectedMessage.isEmpty &&
+        _selectedMenuAnchor == null) {
+      return;
+    }
+    if (!mounted) {
+      _selectedClientMsgNo = '';
+      _selectedPayload = const {};
+      _selectedMessage = const {};
+      _selectedMenuAnchor = null;
+      return;
+    }
+    setState(() {
+      _selectedClientMsgNo = '';
+      _selectedPayload = const {};
+      _selectedMessage = const {};
+      _selectedMenuAnchor = null;
+    });
+  }
+
+  List<_MessageActionItem> _selectedMessageActions() {
+    final item = _selectedMessage;
+    if (item.isEmpty) {
+      return const [];
+    }
+    final contentType = _messageContentType(item);
+    final paymentLike = _messageActionPaymentLike(contentType);
+    final canRecall = item['is_me'] == true && !paymentLike;
+    final copyText = _selectedMessageCopyText(item);
+    final actions = <_MessageActionItem>[
+      _MessageActionItem(label: '引用', icon: Icons.reply, onTap: _replySelected),
+      if (!paymentLike)
+        _MessageActionItem(
+          label: '转发',
+          icon: Icons.shortcut,
+          onTap: _forwardSelected,
+        ),
+      if (copyText.isNotEmpty)
+        _MessageActionItem(label: '复制', icon: Icons.copy, onTap: _copySelected),
+      _MessageActionItem(
+        label: '收藏',
+        icon: Icons.bookmark_border,
+        onTap: _favoriteSelected,
+      ),
+      if (canRecall)
+        _MessageActionItem(
+          label: '撤回',
+          icon: Icons.undo,
+          destructive: true,
+          onTap: _recallSelected,
+        ),
+      _MessageActionItem(
+        label: '删除',
+        icon: Icons.delete_outline,
+        destructive: true,
+        onTap: _deleteSelected,
+      ),
+    ];
+    return actions;
+  }
+
+  bool _messageActionPaymentLike(String contentType) {
+    return contentType == ChatContentTypes.redPacket ||
+        contentType == ChatContentTypes.transfer ||
+        contentType == ChatContentTypes.redPacketReceived ||
+        contentType == ChatContentTypes.transferReceived;
+  }
+
+  String _selectedMessageCopyText(Map<String, Object?> item) {
+    final contentType = _messageContentType(item);
+    if (contentType != ChatContentTypes.text &&
+        contentType != ChatContentTypes.emoji) {
+      return '';
+    }
+    final payload = _asObjectMap(item['payload']);
+    return _messageContentText(item, payload).trim();
+  }
+
+  void _replySelected() {
+    if (_selectedClientMsgNo.isEmpty) {
+      return;
+    }
+    setState(() {
+      _replyClientMsgNo = _selectedClientMsgNo;
+      _selectedClientMsgNo = '';
+      _selectedPayload = const {};
+      _selectedMessage = const {};
+      _selectedMenuAnchor = null;
+    });
+  }
+
+  Future<void> _copySelected() async {
+    final text = _selectedMessageCopyText(_selectedMessage);
+    if (text.isEmpty) {
+      _clearSelectedMessageMenu();
+      return;
+    }
+    await Clipboard.setData(ClipboardData(text: text));
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _message = '已复制';
+      _selectedClientMsgNo = '';
+      _selectedPayload = const {};
+      _selectedMessage = const {};
+      _selectedMenuAnchor = null;
+    });
+  }
+
+  void _forwardSelected() {
+    if (_selectedClientMsgNo.isEmpty) {
+      return;
+    }
+    setState(() {
+      _message = '转发功能待接入';
+      _selectedClientMsgNo = '';
+      _selectedPayload = const {};
+      _selectedMessage = const {};
+      _selectedMenuAnchor = null;
+    });
+  }
+
+  void _favoriteSelected() {
+    if (_selectedClientMsgNo.isEmpty) {
+      return;
+    }
+    setState(() {
+      _message = '收藏功能待接入';
+      _selectedClientMsgNo = '';
+      _selectedPayload = const {};
+      _selectedMessage = const {};
+      _selectedMenuAnchor = null;
     });
   }
 
@@ -1147,6 +1304,42 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         );
       }
     });
+  }
+
+  VoidCallback? _messageTapHandler(Map<String, Object?> item) {
+    final contentType = _messageContentType(item);
+    if (contentType == ChatContentTypes.redPacket) {
+      return () => _receiveRedPacket(item);
+    }
+    if (contentType == ChatContentTypes.transfer) {
+      return () => _receiveTransfer(item);
+    }
+    if (contentType == ChatContentTypes.image ||
+        contentType == ChatContentTypes.video ||
+        contentType == ChatContentTypes.file) {
+      return () => _openMediaMessage(item);
+    }
+    return null;
+  }
+
+  Future<void> _openMediaMessage(Map<String, Object?> item) async {
+    final status = _messageStatus(item);
+    if (status == 'sending' || status == 'queued') {
+      setState(() => _message = '媒体正在发送中');
+      return;
+    }
+    if (status == 'failed') {
+      setState(() => _error = '媒体发送失败，请点击感叹号重发');
+      return;
+    }
+    final media = _ChatMediaItem.fromMessage(item);
+    if (!media.hasSource) {
+      setState(() => _error = '媒体资源不存在');
+      return;
+    }
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(builder: (_) => _MediaViewerPage(media: media)),
+    );
   }
 
   Future<void> _sendTransfer() async {
@@ -1328,22 +1521,6 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     });
   }
 
-  Future<void> _queryReceipt() async {
-    if (_selectedClientMsgNo.isEmpty) {
-      return;
-    }
-    await _runAction(() async {
-      await widget.controller.readReceipt(
-        targetClientMsgNo: _selectedClientMsgNo,
-        messageSeq: _selectedMessageSeq,
-      );
-      final status = await widget.controller.receiptStatus(
-        _selectedClientMsgNo,
-      );
-      _message = _receiptText(status, isGroup: _isGroup);
-    });
-  }
-
   Future<void> _recallSelected() async {
     if (_selectedClientMsgNo.isEmpty) {
       return;
@@ -1362,8 +1539,9 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
           .where((item) => _value(item, ['client_msg_no']) != target)
           .toList(growable: false);
       _selectedClientMsgNo = '';
-      _selectedMessageSeq = 0;
       _selectedPayload = const {};
+      _selectedMessage = const {};
+      _selectedMenuAnchor = null;
       _message = _friendlyResult(result, successText: '消息已撤回');
     });
   }
@@ -1392,33 +1570,10 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
           .where((item) => _value(item, ['client_msg_no']) != target)
           .toList(growable: false);
       _selectedClientMsgNo = '';
-      _selectedMessageSeq = 0;
       _selectedPayload = const {};
+      _selectedMessage = const {};
+      _selectedMenuAnchor = null;
       _message = _friendlyResult(result, successText: '消息已删除');
-    });
-  }
-
-  Future<void> _burnSelected() async {
-    if (_selectedClientMsgNo.isEmpty) {
-      return;
-    }
-    await _runAction(() async {
-      final result = await widget.controller.burnAfterRead(
-        _selectedClientMsgNo,
-      );
-      final target = _selectedClientMsgNo;
-      await widget.controller.deleteLocalMessageOnly(
-        targetClientMsgNo: target,
-        channelId: widget.channelId,
-        channelType: widget.channelType,
-      );
-      _messages = _messages
-          .where((item) => _value(item, ['client_msg_no']) != target)
-          .toList(growable: false);
-      _selectedClientMsgNo = '';
-      _selectedMessageSeq = 0;
-      _selectedPayload = const {};
-      _message = _friendlyResult(result, successText: '已触发阅后即焚');
     });
   }
 
@@ -1555,20 +1710,29 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     return id.isNotEmpty && _receivingRedPacketIds.contains(id);
   }
 
-  Future<void> _receiveSelectedTransfer() async {
+  Future<void> _receiveTransfer(Map<String, Object?> item) async {
     AppLogger.info(
       'ui',
       'transfer receive tapped',
       data: {
         'channel_id': widget.channelId,
         'channel_type': widget.channelType,
-        'client_msg_no': _selectedClientMsgNo,
-        'payload': _selectedPayload,
+        'client_msg_no': _value(item, ['client_msg_no']),
+        'is_me': item['is_me'] == true,
+        'payload': _asObjectMap(item['payload']),
       },
     );
-    final id = _transferReceiveId(_selectedPayload);
-    if (id.isEmpty) {
-      final rawId = _transferRawId(_selectedPayload);
+    if (item['is_me'] == true) {
+      setState(() {
+        _error = null;
+        _message = '不能收取自己发出的转账';
+      });
+      return;
+    }
+    final payload = _asObjectMap(item['payload']);
+    final transferId = _transferReceiveId(payload);
+    if (transferId.isEmpty) {
+      final rawId = _transferRawId(payload);
       AppLogger.warn(
         'ui',
         'transfer receive blocked',
@@ -1577,8 +1741,8 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
           'raw_id': rawId,
           'channel_id': widget.channelId,
           'channel_type': widget.channelType,
-          'client_msg_no': _selectedClientMsgNo,
-          'payload': _selectedPayload,
+          'client_msg_no': _value(item, ['client_msg_no']),
+          'payload': payload,
         },
       );
       setState(() {
@@ -1587,17 +1751,17 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       });
       return;
     }
-    final unavailableText = _transferUnavailableText(_selectedPayload);
+    final unavailableText = _transferUnavailableText(payload);
     if (unavailableText.isNotEmpty) {
       AppLogger.info(
         'ui',
         'transfer receive blocked',
         data: {
           'reason': unavailableText,
-          'transfer_id': id,
+          'transfer_id': transferId,
           'channel_id': widget.channelId,
           'channel_type': widget.channelType,
-          'client_msg_no': _selectedClientMsgNo,
+          'client_msg_no': _value(item, ['client_msg_no']),
         },
       );
       setState(() {
@@ -1606,44 +1770,45 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       });
       return;
     }
-    if (_receivingTransferIds.contains(id)) {
+    if (_receivingTransferIds.contains(transferId)) {
       AppLogger.info(
         'ui',
         'transfer receive duplicate ignored',
-        data: {'transfer_id': id},
+        data: {'transfer_id': transferId},
       );
       return;
     }
     setState(() {
-      _receivingTransferIds.add(id);
+      _receivingTransferIds.add(transferId);
       _error = null;
       _message = '';
     });
     try {
-      final result = await widget.controller.receiveTransfer(id);
+      final result = await widget.controller.receiveTransfer(transferId);
       AppLogger.info(
         'ui',
         'transfer receive api success',
         data: {
-          'transfer_id': id,
+          'transfer_id': transferId,
           'channel_id': widget.channelId,
           'channel_type': widget.channelType,
-          'client_msg_no': _selectedClientMsgNo,
+          'client_msg_no': _value(item, ['client_msg_no']),
           'result': result,
         },
       );
+      final clientMsgNo = _value(item, ['client_msg_no']);
       await widget.controller.markTransferReceivedLocal(
         channelId: widget.channelId,
         channelType: widget.channelType,
-        clientMsgNo: _selectedClientMsgNo,
-        transferId: id,
+        clientMsgNo: clientMsgNo,
+        transferId: transferId,
         result: result,
       );
       if (!mounted) {
         return;
       }
       setState(() {
-        _message = _friendlyResult(result, successText: '转账已收款');
+        _message = '';
         _conversationRevision = widget.controller.conversationVersion;
         _messageRevision = _currentMessageRevision();
       });
@@ -1654,10 +1819,10 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         'transfer receive failed',
         error: error,
         data: {
-          'transfer_id': id,
+          'transfer_id': transferId,
           'channel_id': widget.channelId,
           'channel_type': widget.channelType,
-          'client_msg_no': _selectedClientMsgNo,
+          'client_msg_no': _value(item, ['client_msg_no']),
         },
       );
       if (mounted) {
@@ -1665,7 +1830,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       }
     } finally {
       if (mounted) {
-        setState(() => _receivingTransferIds.remove(id));
+        setState(() => _receivingTransferIds.remove(transferId));
       }
     }
   }

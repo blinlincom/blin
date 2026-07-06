@@ -183,26 +183,3 @@ class _ComposerIconButton extends StatelessWidget {
     );
   }
 }
-
-class _MiniButton extends StatelessWidget {
-  const _MiniButton({required this.label, required this.onTap});
-
-  final String label;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return OutlinedButton(
-      onPressed: onTap,
-      style: OutlinedButton.styleFrom(
-        foregroundColor: _textColor,
-        side: const BorderSide(color: _borderColor),
-        minimumSize: const Size(52, 32),
-        padding: const EdgeInsets.symmetric(horizontal: 9),
-        textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
-      ),
-      child: Text(label),
-    );
-  }
-}
