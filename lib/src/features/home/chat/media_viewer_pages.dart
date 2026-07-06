@@ -172,7 +172,7 @@ class _ImageMediaViewerPageState extends State<_ImageMediaViewerPage> {
               ),
             ),
             _MediaViewerTopBar(
-              title: widget.media.title,
+              title: '',
               dark: true,
               trailing: _MediaDownloadButton(media: widget.media, dark: true),
             ),
@@ -314,7 +314,7 @@ class _VideoMediaViewerPageState extends State<_VideoMediaViewerPage> {
               ),
             ),
             _MediaViewerTopBar(
-              title: widget.media.title,
+              title: '',
               dark: true,
               trailing: _MediaDownloadButton(media: widget.media, dark: true),
             ),
@@ -432,17 +432,19 @@ class _MediaViewerTopBar extends StatelessWidget {
                   ),
                 ),
                 Expanded(
-                  child: Text(
-                    title.isEmpty ? '查看' : title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      color: color,
-                      fontSize: 15,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
+                  child: title.isEmpty
+                      ? const SizedBox.shrink()
+                      : Text(
+                          title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: color,
+                            fontSize: 15,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
                 ),
                 SizedBox(width: 50, height: 50, child: trailing),
               ],

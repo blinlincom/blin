@@ -42,6 +42,8 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   String _message = '';
   List<Map<String, Object?>> _messages = const [];
   bool _messagesLoading = true;
+  bool _historyLoadingSlow = false;
+  Timer? _historyLoadingTimer;
   int _messageLoadToken = 0;
   Future<List<Map<String, Object?>>>? _runningMessageLoad;
   String _runningMessageLoadKey = '';
@@ -176,6 +178,8 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       _messageRevision = _currentMessageRevision();
       _lastImStatusText = widget.controller.imStatusText;
       _messages = const [];
+      _historyLoadingSlow = false;
+      _historyLoadingTimer?.cancel();
       _runningMessageLoad = null;
       _runningMessageLoadKey = '';
       _clearSelectedMessageMenu();
@@ -228,6 +232,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         _channelInvalid = true;
         _messages = const [];
         _messagesLoading = false;
+        _historyLoadingSlow = false;
         _groupPresenceLoading = false;
         _groupMuteState = const {};
       });
@@ -620,8 +625,10 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     if (showLoading && mounted) {
       setState(() {
         _messagesLoading = true;
+        _historyLoadingSlow = false;
         _error = null;
       });
+      _startHistoryLoadingTimer();
     }
     try {
       final messages = await _loadMessages();
@@ -668,7 +675,9 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         _channelInvalid = invalid;
         _messages = nextMessages;
         _messagesLoading = false;
+        _historyLoadingSlow = false;
       });
+      _historyLoadingTimer?.cancel();
       _scheduleBurnAfterReadForMessages(nextMessages);
       if (showLoading && !_didInitialScroll) {
         _didInitialScroll = true;
@@ -699,9 +708,21 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       }
       setState(() {
         _messagesLoading = false;
+        _historyLoadingSlow = false;
         _error = error.toString();
       });
+      _historyLoadingTimer?.cancel();
     }
+  }
+
+  void _startHistoryLoadingTimer() {
+    _historyLoadingTimer?.cancel();
+    _historyLoadingTimer = Timer(const Duration(milliseconds: 2500), () {
+      if (!mounted || !_messagesLoading || _messages.isNotEmpty) {
+        return;
+      }
+      setState(() => _historyLoadingSlow = true);
+    });
   }
 
   List<Map<String, Object?>> _stableLoadedMessages(
@@ -758,14 +779,17 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   }
 
   void _markChannelInvalid() {
+    _historyLoadingTimer?.cancel();
     if (!mounted) {
       _channelInvalid = true;
+      _historyLoadingSlow = false;
       return;
     }
     setState(() {
       _channelInvalid = true;
       _messages = const [];
       _messagesLoading = false;
+      _historyLoadingSlow = false;
       _groupPresenceLoading = false;
       _groupMuteState = const {};
     });
@@ -788,6 +812,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     WidgetsBinding.instance.removeObserver(this);
     _messageSub?.cancel();
     _presenceSub?.cancel();
+    _historyLoadingTimer?.cancel();
     _scrollController.removeListener(_onMessageListScrolled);
     _scrollController.dispose();
     _inputFocusNode.removeListener(_onInputFocusChanged);
@@ -1112,7 +1137,10 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                           ),
                         Expanded(
                           child: _messagesLoading && _messages.isEmpty
-                              ? const Center(child: CircularProgressIndicator())
+                              ? _ChatHistoryLoadingState(
+                                  slow: _historyLoadingSlow,
+                                  isGroup: _isGroup,
+                                )
                               : _messages.isEmpty
                               ? const _EmptyState(text: '暂无消息')
                               : ListView.builder(
@@ -2321,6 +2349,177 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       parts.add(_burnSeconds > 0 ? '阅后即焚 ${_burnSeconds}s' : '阅后即焚');
     }
     return parts.join(' · ');
+  }
+}
+
+class _ChatHistoryLoadingState extends StatelessWidget {
+  const _ChatHistoryLoadingState({required this.slow, required this.isGroup});
+
+  final bool slow;
+  final bool isGroup;
+
+  @override
+  Widget build(BuildContext context) {
+    final title = slow ? '历史消息较多，正在继续同步' : '正在同步聊天记录';
+    final subtitle = isGroup ? '正在整理群聊消息' : '正在加载与好友的聊天记录';
+    return Semantics(
+      liveRegion: true,
+      label: title,
+      child: ColoredBox(
+        color: _chatPageColor,
+        child: Column(
+          children: [
+            const LinearProgressIndicator(
+              minHeight: 2,
+              backgroundColor: Color(0xffeef1f5),
+              color: _primaryColor,
+            ),
+            Expanded(
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final width = min(constraints.maxWidth, 620.0);
+                  return Align(
+                    alignment: Alignment.bottomCenter,
+                    child: SizedBox(
+                      width: width,
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(14, 12, 14, 18),
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.end,
+                          children: [
+                            _ChatHistoryLoadingHint(
+                              title: title,
+                              subtitle: subtitle,
+                            ),
+                            const SizedBox(height: 18),
+                            const _ChatHistorySkeletonRow(
+                              mine: false,
+                              widthFactor: 0.58,
+                            ),
+                            const _ChatHistorySkeletonRow(
+                              mine: true,
+                              widthFactor: 0.46,
+                            ),
+                            const _ChatHistorySkeletonRow(
+                              mine: false,
+                              widthFactor: 0.72,
+                            ),
+                            const _ChatHistorySkeletonRow(
+                              mine: true,
+                              widthFactor: 0.54,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ChatHistoryLoadingHint extends StatelessWidget {
+  const _ChatHistoryLoadingHint({required this.title, required this.subtitle});
+
+  final String title;
+  final String subtitle;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          title,
+          textAlign: TextAlign.center,
+          style: const TextStyle(
+            color: _textColor,
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          subtitle,
+          textAlign: TextAlign.center,
+          style: const TextStyle(
+            color: _secondaryTextColor,
+            fontSize: 12,
+            height: 1.25,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _ChatHistorySkeletonRow extends StatelessWidget {
+  const _ChatHistorySkeletonRow({
+    required this.mine,
+    required this.widthFactor,
+  });
+
+  final bool mine;
+  final double widthFactor;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final bubbleWidth = min(constraints.maxWidth * widthFactor, 280.0);
+        final row = Row(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (!mine) ...[
+              const _ChatHistorySkeletonAvatar(),
+              const SizedBox(width: 7),
+            ],
+            Container(
+              width: bubbleWidth,
+              height: 42,
+              decoration: BoxDecoration(
+                color: mine ? const Color(0xffe4f4dd) : _surfaceColor,
+                border: Border.all(color: const Color(0xffedf0f3)),
+                borderRadius: BorderRadius.circular(7),
+              ),
+            ),
+            if (mine) ...[
+              const SizedBox(width: 7),
+              const _ChatHistorySkeletonAvatar(),
+            ],
+          ],
+        );
+        return Padding(
+          padding: const EdgeInsets.symmetric(vertical: 5),
+          child: Align(
+            alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
+            child: row,
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _ChatHistorySkeletonAvatar extends StatelessWidget {
+  const _ChatHistorySkeletonAvatar();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 36,
+      height: 36,
+      decoration: const BoxDecoration(
+        color: Color(0xffeceff3),
+        shape: BoxShape.circle,
+      ),
+    );
   }
 }
 

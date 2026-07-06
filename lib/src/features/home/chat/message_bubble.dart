@@ -249,7 +249,6 @@ class _MessageBubbleContent extends StatelessWidget {
       ChatContentTypes.video => _VideoMessagePreview(
         key: ValueKey(_mediaPreviewKey(contentType, payload, content)),
         payload: payload,
-        content: content,
         status: status,
         onRetry: onRetry,
       ),

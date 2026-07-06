@@ -78,6 +78,8 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   var _index = 0;
   int _totalUnread = 0;
+  bool _initialSyncOverlayVisible = false;
+  Timer? _initialSyncOverlayHideTimer;
 
   @override
   void initState() {
@@ -85,6 +87,8 @@ class _HomePageState extends State<HomePage> {
     _totalUnread = _conversationUnreadTotal(
       widget.controller.cachedConversations(),
     );
+    _initialSyncOverlayVisible =
+        widget.controller.initialHistorySyncState.blocked;
     widget.controller.addListener(_onControllerChanged);
   }
 
@@ -97,11 +101,16 @@ class _HomePageState extends State<HomePage> {
       _totalUnread = _conversationUnreadTotal(
         widget.controller.cachedConversations(),
       );
+      _initialSyncOverlayHideTimer?.cancel();
+      _initialSyncOverlayHideTimer = null;
+      _initialSyncOverlayVisible =
+          widget.controller.initialHistorySyncState.blocked;
     }
   }
 
   @override
   void dispose() {
+    _initialSyncOverlayHideTimer?.cancel();
     widget.controller.removeListener(_onControllerChanged);
     super.dispose();
   }
@@ -113,9 +122,43 @@ class _HomePageState extends State<HomePage> {
     final nextUnread = _conversationUnreadTotal(
       widget.controller.cachedConversations(),
     );
+    var needsBuild = false;
     if (_index == 0 || nextUnread != _totalUnread) {
-      setState(() => _totalUnread = nextUnread);
+      _totalUnread = nextUnread;
+      needsBuild = true;
     }
+    if (_syncInitialHistoryOverlay()) {
+      needsBuild = true;
+    }
+    if (needsBuild) {
+      setState(() {});
+    }
+  }
+
+  bool _syncInitialHistoryOverlay() {
+    final state = widget.controller.initialHistorySyncState;
+    if (state.blocked) {
+      _initialSyncOverlayHideTimer?.cancel();
+      _initialSyncOverlayHideTimer = null;
+      if (_initialSyncOverlayVisible) {
+        return false;
+      }
+      _initialSyncOverlayVisible = true;
+      return true;
+    }
+    if (!_initialSyncOverlayVisible ||
+        _initialSyncOverlayHideTimer != null ||
+        state.progress < 1) {
+      return false;
+    }
+    _initialSyncOverlayHideTimer = Timer(const Duration(milliseconds: 650), () {
+      if (!mounted) {
+        return;
+      }
+      _initialSyncOverlayHideTimer = null;
+      setState(() => _initialSyncOverlayVisible = false);
+    });
+    return true;
   }
 
   @override
@@ -210,7 +253,8 @@ class _HomePageState extends State<HomePage> {
   }
 
   bool get _showInitialSyncOverlay {
-    return widget.controller.initialHistorySyncBlocked;
+    return _initialSyncOverlayVisible ||
+        widget.controller.initialHistorySyncBlocked;
   }
 
   List<Widget> _actions(bool showInitialSyncOverlay) {
@@ -310,13 +354,24 @@ class _InitialHistorySyncOverlay extends StatelessWidget {
   Widget build(BuildContext context) {
     final progress = state.progress.clamp(0, 1).toDouble();
     final failed = state.error != null;
+    final completed = !failed && !state.syncing && progress >= 1;
+    final title = failed
+        ? '聊天数据同步失败'
+        : completed
+        ? '聊天数据同步完成'
+        : '正在同步聊天数据';
+    final subtitle = failed
+        ? state.error!
+        : completed
+        ? '正在进入消息'
+        : state.text;
     final width = min(MediaQuery.sizeOf(context).width - 64, 280).toDouble();
     return ColoredBox(
       color: _surfaceColor,
       child: Center(
         child: Semantics(
           liveRegion: true,
-          label: failed ? '聊天数据同步失败' : '正在同步聊天数据',
+          label: title,
           value: '${(progress * 100).round()}%',
           child: SizedBox(
             width: width,
@@ -332,6 +387,12 @@ class _InitialHistorySyncOverlay extends StatelessWidget {
                           color: _dangerColor,
                           size: 38,
                         )
+                      : completed
+                      ? const Icon(
+                          Icons.check_circle_outline,
+                          color: _primaryColor,
+                          size: 38,
+                        )
                       : CircularProgressIndicator(
                           value: progress <= 0 ? null : progress,
                           strokeWidth: 3,
@@ -341,7 +402,7 @@ class _InitialHistorySyncOverlay extends StatelessWidget {
                 ),
                 const SizedBox(height: 18),
                 Text(
-                  failed ? '聊天数据同步失败' : '正在同步聊天数据',
+                  title,
                   textAlign: TextAlign.center,
                   style: const TextStyle(
                     color: _textColor,
@@ -352,7 +413,7 @@ class _InitialHistorySyncOverlay extends StatelessWidget {
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  state.error ?? state.text,
+                  subtitle,
                   textAlign: TextAlign.center,
                   style: const TextStyle(
                     color: _secondaryTextColor,

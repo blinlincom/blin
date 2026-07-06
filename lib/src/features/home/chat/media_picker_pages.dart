@@ -261,6 +261,12 @@ class _InAppMediaPickerPageState extends State<_InAppMediaPickerPage> {
       resizeToAvoidBottomInset: true,
       backgroundColor: _pageColor,
       appBar: _PickerAppBar(title: title),
+      bottomNavigationBar: _MediaPickerFooter(
+        selected: _selectedAsset,
+        sending: _selectingAssetId.isNotEmpty,
+        onPreview: _selectedAsset == null ? null : _openPreview,
+        onSend: _selectedAsset == null ? null : _sendSelectedAsset,
+      ),
       body: SafeArea(
         top: false,
         bottom: false,
@@ -274,12 +280,6 @@ class _InAppMediaPickerPageState extends State<_InAppMediaPickerPage> {
                 onChanged: (album) => _loadAssets(album),
               ),
             Expanded(child: _buildBody()),
-            _MediaPickerFooter(
-              selected: _selectedAsset,
-              sending: _selectingAssetId.isNotEmpty,
-              onPreview: _selectedAsset == null ? null : _openPreview,
-              onSend: _selectedAsset == null ? null : _sendSelectedAsset,
-            ),
           ],
         ),
       ),
@@ -318,7 +318,7 @@ class _InAppMediaPickerPageState extends State<_InAppMediaPickerPage> {
               children: [
                 GridView.builder(
                   controller: _gridController,
-                  padding: const EdgeInsets.fromLTRB(4, 4, 4, 86),
+                  padding: const EdgeInsets.fromLTRB(4, 4, 4, 12),
                   gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                     crossAxisCount: columns,
                     mainAxisSpacing: 3,
@@ -563,6 +563,11 @@ class _InAppFilePickerPageState extends State<_InAppFilePickerPage> {
           ),
         ],
       ),
+      bottomNavigationBar: _FilePickerFooter(
+        selected: _selectedFile,
+        sending: _selectingPath.isNotEmpty,
+        onSend: _selectedFile == null ? null : _sendSelectedFile,
+      ),
       body: SafeArea(
         top: false,
         bottom: false,
@@ -575,11 +580,6 @@ class _InAppFilePickerPageState extends State<_InAppFilePickerPage> {
               onFilterChanged: _changeFilter,
             ),
             Expanded(child: _buildBody()),
-            _FilePickerFooter(
-              selected: _selectedFile,
-              sending: _selectingPath.isNotEmpty,
-              onSend: _selectedFile == null ? null : _sendSelectedFile,
-            ),
           ],
         ),
       ),
@@ -609,7 +609,7 @@ class _InAppFilePickerPageState extends State<_InAppFilePickerPage> {
             width: width,
             child: ListView.separated(
               keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-              padding: const EdgeInsets.only(bottom: 86),
+              padding: const EdgeInsets.only(bottom: 12),
               itemCount: files.length,
               separatorBuilder: (_, __) =>
                   const Divider(height: 1, color: _lightBorderColor),
@@ -1249,20 +1249,11 @@ class _MediaPickerFooter extends StatelessWidget {
         ),
       ),
       actions: [
-        TextButton(
+        _PickerSecondaryButton(
+          label: '预览',
           onPressed: enabled ? onPreview : null,
-          child: const Text('预览'),
         ),
-        FilledButton(
-          onPressed: enabled ? onSend : null,
-          child: sending
-              ? const SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
-              : const Text('发送'),
-        ),
+        _PickerSendButton(onPressed: enabled ? onSend : null, sending: sending),
       ],
     );
   }
@@ -1296,16 +1287,7 @@ class _FilePickerFooter extends StatelessWidget {
         ),
       ),
       actions: [
-        FilledButton(
-          onPressed: enabled ? onSend : null,
-          child: sending
-              ? const SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
-              : const Text('发送'),
-        ),
+        _PickerSendButton(onPressed: enabled ? onSend : null, sending: sending),
       ],
     );
   }
@@ -1320,74 +1302,100 @@ class _PickerFooterShell extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final compact = MediaQuery.sizeOf(context).width < 380;
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final actionMaxWidth = min(
-          constraints.maxWidth * (compact ? 0.62 : 0.56),
-          compact ? 178.0 : 260.0,
-        );
-        return DecoratedBox(
-          decoration: const BoxDecoration(
-            color: _surfaceColor,
-            border: Border(top: BorderSide(color: _lightBorderColor)),
-          ),
-          child: SafeArea(
-            top: false,
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(minHeight: 58),
-              child: Padding(
-                padding: EdgeInsets.fromLTRB(
-                  compact ? 10 : 14,
-                  8,
-                  compact ? 10 : 14,
-                  8,
+    return DecoratedBox(
+      decoration: const BoxDecoration(
+        color: _surfaceColor,
+        border: Border(top: BorderSide(color: _lightBorderColor)),
+      ),
+      child: SafeArea(
+        top: false,
+        minimum: EdgeInsets.only(bottom: compact ? 2 : 4),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 62),
+          child: Padding(
+            padding: EdgeInsets.fromLTRB(
+              compact ? 10 : 14,
+              8,
+              compact ? 10 : 14,
+              8,
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Expanded(
+                  child: Align(alignment: Alignment.centerLeft, child: leading),
                 ),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.center,
+                SizedBox(width: compact ? 8 : 12),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    Flexible(
-                      child: Align(
-                        alignment: Alignment.centerLeft,
-                        child: leading,
-                      ),
-                    ),
-                    SizedBox(width: compact ? 8 : 12),
-                    ConstrainedBox(
-                      constraints: BoxConstraints(
-                        minWidth: compact ? 84 : 96,
-                        maxWidth: actionMaxWidth,
-                      ),
-                      child: SingleChildScrollView(
-                        scrollDirection: Axis.horizontal,
-                        reverse: true,
-                        physics: const ClampingScrollPhysics(),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            for (
-                              var index = 0;
-                              index < actions.length;
-                              index++
-                            ) ...[
-                              if (index > 0) SizedBox(width: compact ? 6 : 8),
-                              ConstrainedBox(
-                                constraints: const BoxConstraints(
-                                  minHeight: 44,
-                                ),
-                                child: actions[index],
-                              ),
-                            ],
-                          ],
-                        ),
-                      ),
-                    ),
+                    for (var index = 0; index < actions.length; index++) ...[
+                      if (index > 0) SizedBox(width: compact ? 6 : 8),
+                      actions[index],
+                    ],
                   ],
                 ),
-              ),
+              ],
             ),
           ),
-        );
-      },
+        ),
+      ),
+    );
+  }
+}
+
+class _PickerSecondaryButton extends StatelessWidget {
+  const _PickerSecondaryButton({required this.label, required this.onPressed});
+
+  final String label;
+  final VoidCallback? onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final compact = MediaQuery.sizeOf(context).width < 380;
+    return SizedBox(
+      width: compact ? 56 : 64,
+      height: 44,
+      child: TextButton(
+        onPressed: onPressed,
+        style: TextButton.styleFrom(
+          padding: EdgeInsets.zero,
+          minimumSize: Size.zero,
+          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        ),
+        child: FittedBox(fit: BoxFit.scaleDown, child: Text(label)),
+      ),
+    );
+  }
+}
+
+class _PickerSendButton extends StatelessWidget {
+  const _PickerSendButton({required this.onPressed, required this.sending});
+
+  final VoidCallback? onPressed;
+  final bool sending;
+
+  @override
+  Widget build(BuildContext context) {
+    final compact = MediaQuery.sizeOf(context).width < 380;
+    return SizedBox(
+      width: compact ? 72 : 84,
+      height: 44,
+      child: FilledButton(
+        onPressed: onPressed,
+        style: FilledButton.styleFrom(
+          padding: EdgeInsets.zero,
+          minimumSize: Size.zero,
+          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        ),
+        child: sending
+            ? const SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            : const FittedBox(fit: BoxFit.scaleDown, child: Text('发送')),
+      ),
     );
   }
 }

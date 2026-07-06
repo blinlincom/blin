@@ -128,14 +128,12 @@ class _ImageMessagePreview extends StatelessWidget {
 class _VideoMessagePreview extends StatelessWidget {
   const _VideoMessagePreview({
     required this.payload,
-    required this.content,
     required this.status,
     required this.onRetry,
     super.key,
   });
 
   final Map<String, Object?> payload;
-  final String content;
   final String status;
   final VoidCallback onRetry;
 
@@ -190,14 +188,12 @@ class _VideoMessagePreview extends StatelessWidget {
           key: ValueKey(source.key),
           source: source,
           payload: payload,
-          content: content,
           status: status,
           onRetry: onRetry,
         );
       }
       return _VideoPlaceholderPreview(
         payload: payload,
-        content: content,
         status: status,
         onRetry: onRetry,
       );
@@ -321,7 +317,6 @@ class _VideoFramePreview extends StatefulWidget {
   const _VideoFramePreview({
     required this.source,
     required this.payload,
-    required this.content,
     required this.status,
     required this.onRetry,
     super.key,
@@ -329,7 +324,6 @@ class _VideoFramePreview extends StatefulWidget {
 
   final _VideoPreviewSource source;
   final Map<String, Object?> payload;
-  final String content;
   final String status;
   final VoidCallback onRetry;
 
@@ -412,7 +406,6 @@ class _VideoFramePreviewState extends State<_VideoFramePreview> {
     if (!_ready || controller == null || !controller.value.isInitialized) {
       return _VideoPlaceholderPreview(
         payload: widget.payload,
-        content: widget.content,
         status: widget.status,
         onRetry: widget.onRetry,
       );
@@ -468,20 +461,16 @@ class _VideoFramePreviewState extends State<_VideoFramePreview> {
 class _VideoPlaceholderPreview extends StatelessWidget {
   const _VideoPlaceholderPreview({
     required this.payload,
-    required this.content,
     required this.status,
     required this.onRetry,
   });
 
   final Map<String, Object?> payload;
-  final String content;
   final String status;
   final VoidCallback onRetry;
 
   @override
   Widget build(BuildContext context) {
-    final title = _videoTitle(payload, content);
-    final subtitle = _videoSubtitle(payload);
     return ClipRRect(
       borderRadius: BorderRadius.circular(8),
       child: SizedBox(
@@ -499,39 +488,13 @@ class _VideoPlaceholderPreview extends StatelessWidget {
                 ),
               ),
             ),
-            Positioned(
-              left: 14,
-              right: 14,
-              bottom: 12,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 14,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                  if (subtitle.isNotEmpty)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 3),
-                      child: Text(
-                        subtitle,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: Color(0xccffffff),
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                ],
+            const Positioned(
+              left: 12,
+              bottom: 10,
+              child: Icon(
+                Icons.videocam_outlined,
+                color: Color(0x99ffffff),
+                size: 18,
               ),
             ),
             if (status != 'sending')

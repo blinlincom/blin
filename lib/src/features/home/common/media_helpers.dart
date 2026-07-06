@@ -47,36 +47,6 @@ String _mimeFromPath(String path, String contentType) {
   };
 }
 
-String _videoSubtitle(Map<String, Object?> payload) {
-  final name = _value(_asObjectMap(payload['media']), [
-    'name',
-  ], fallback: _value(payload, ['name', 'file_name']));
-  final duration = _durationLabel(payload);
-  if (name.isNotEmpty && duration.isNotEmpty) {
-    return '$name · $duration';
-  }
-  return name.isNotEmpty ? name : duration;
-}
-
-String _videoTitle(Map<String, Object?> payload, String content) {
-  if (content.isNotEmpty && content != '[视频]' && content != '[消息]') {
-    return content;
-  }
-  final media = _asObjectMap(payload['media']);
-  final name = _value(payload, [
-    'name',
-    'file_name',
-  ], fallback: _value(media, ['name', 'file_name']));
-  if (name.isNotEmpty) {
-    return name;
-  }
-  final path = _value(payload, [
-    'file_path',
-    'url',
-  ], fallback: _value(media, ['url', 'file_path']));
-  return path.isEmpty ? '视频' : _fileName(path);
-}
-
 _VideoPreviewSource? _videoPreviewSource(
   Map<String, Object?> payload,
   Map<String, Object?> media,
