@@ -43,6 +43,8 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   List<Map<String, Object?>> _messages = const [];
   bool _messagesLoading = true;
   int _messageLoadToken = 0;
+  Future<List<Map<String, Object?>>>? _runningMessageLoad;
+  String _runningMessageLoadKey = '';
   late int _conversationRevision;
   late int _messageRevision;
   StreamSubscription<BusinessImMessageEvent>? _messageSub;
@@ -157,6 +159,8 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       _messageRevision = _currentMessageRevision();
       _lastImStatusText = widget.controller.imStatusText;
       _messages = const [];
+      _runningMessageLoad = null;
+      _runningMessageLoadKey = '';
       _clearSelectedMessageMenu();
       _didInitialScroll = false;
       _burnTriggeredClientMsgNos.clear();
@@ -544,7 +548,22 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   }
 
   Future<List<Map<String, Object?>>> _loadMessages() {
-    return AppLogger.measure(
+    final key = '${widget.channelType}:${widget.channelId}:${widget.groupId}';
+    final running = _runningMessageLoad;
+    if (running != null && _runningMessageLoadKey == key) {
+      AppLogger.info(
+        'ui',
+        'reuse running chat messages load',
+        data: {
+          'channel_id': widget.channelId,
+          'channel_type': widget.channelType,
+          'group_id': widget.groupId,
+          'load_key': key,
+        },
+      );
+      return running;
+    }
+    final future = AppLogger.measure(
       'ui',
       'load chat messages',
       () => widget.controller.loadLocalMessages(
@@ -557,11 +576,34 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         'channel_type': widget.channelType,
       },
     );
+    _runningMessageLoad = future;
+    _runningMessageLoadKey = key;
+    return future.whenComplete(() {
+      if (identical(_runningMessageLoad, future)) {
+        _runningMessageLoad = null;
+        _runningMessageLoadKey = '';
+      }
+    });
   }
 
   Future<void> _loadMessagesIntoState({required bool showLoading}) async {
     final token = ++_messageLoadToken;
     final wasNearBottom = _isNearBottom();
+    final beforeCount = _messages.length;
+    AppLogger.info(
+      'ui',
+      'chat messages load state start',
+      data: {
+        'token': token,
+        'show_loading': showLoading,
+        'channel_id': widget.channelId,
+        'channel_type': widget.channelType,
+        'group_id': widget.groupId,
+        'before_count': beforeCount,
+        'was_near_bottom': wasNearBottom,
+        'did_initial_scroll': _didInitialScroll,
+      },
+    );
     if (showLoading && mounted) {
       setState(() {
         _messagesLoading = true;
@@ -583,6 +625,32 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         widget.controller.session?.avatar ?? '',
       );
       final nextMessages = _stableLoadedMessages(messages, showLoading);
+      AppLogger.info(
+        'ui',
+        'chat messages load state apply',
+        data: {
+          'token': token,
+          'channel_id': widget.channelId,
+          'channel_type': widget.channelType,
+          'group_id': widget.groupId,
+          'loaded_count': messages.length,
+          'before_count': beforeCount,
+          'after_count': nextMessages.length,
+          'invalid_channel': invalid,
+          'show_loading': showLoading,
+          'was_near_bottom': wasNearBottom,
+          'first_message': _chatUiMessageSummary(
+            nextMessages.isEmpty
+                ? const <String, Object?>{}
+                : nextMessages.first,
+          ),
+          'last_message': _chatUiMessageSummary(
+            nextMessages.isEmpty
+                ? const <String, Object?>{}
+                : nextMessages.last,
+          ),
+        },
+      );
       setState(() {
         _channelInvalid = invalid;
         _messages = nextMessages;
@@ -597,6 +665,16 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       }
     } catch (error) {
       if (!mounted || token != _messageLoadToken) {
+        AppLogger.info(
+          'ui',
+          'chat messages load error ignored',
+          data: {
+            'token': token,
+            'current_token': _messageLoadToken,
+            'mounted': mounted,
+            'error': error.toString(),
+          },
+        );
         return;
       }
       if (_isMissingGroupError(error)) {
@@ -634,6 +712,33 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       merged = _mergeMessageList(merged, item, limit: _messageUiLimit);
     }
     return merged;
+  }
+
+  Map<String, Object?> _chatUiMessageSummary(Map<String, Object?> message) {
+    if (message.isEmpty) {
+      return const {'empty': true};
+    }
+    final payload = _asObjectMap(message['payload']);
+    final content = _value(message, [
+      'content',
+      'text',
+    ], fallback: _value(payload, ['content', 'text']));
+    return {
+      'client_msg_no': _value(message, [
+        'client_msg_no',
+      ], fallback: _value(payload, ['client_msg_no'])),
+      'message_id': _value(message, ['message_id', 'message_idstr']),
+      'message_seq': _intValue(message, ['message_seq']),
+      'content_type': _value(message, [
+        'content_type',
+      ], fallback: _value(payload, ['content_type'])),
+      'status': _value(message, ['status']),
+      'is_me': message['is_me'] == true,
+      'content_len': content.length,
+      if (content.isNotEmpty)
+        'content_preview': content.substring(0, min(120, content.length)),
+      'payload_keys': payload.keys.take(80).toList(growable: false),
+    };
   }
 
   void _markChannelInvalid() {

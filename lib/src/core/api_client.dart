@@ -759,13 +759,19 @@ class ApiClient {
     _SecureResponseContext? secureResponse,
   }) async {
     final stopwatch = Stopwatch()..start();
+    final requestId = AppLogger.traceId('api');
     AppLogger.info(
       'api',
       'post start',
       data: {
+        'request_id': requestId,
         'action': action,
         'base_url': baseUrl,
         'has_file': filePath.isNotEmpty,
+        'file_path': filePath.isEmpty ? '' : filePath,
+        'secure_response_required': secureResponse != null,
+        'param_keys': params.keys.toList(growable: false),
+        'param_summary': _requestParamSummary(params, filePath: filePath),
         'params': _safeLogParams(params),
       },
     );
@@ -786,14 +792,29 @@ class ApiClient {
                 onUploadProgress((sent / total).clamp(0, 1).toDouble());
               },
       );
+      AppLogger.info(
+        'api',
+        'post raw response',
+        data: {
+          'request_id': requestId,
+          'action': action,
+          'status_code': response.statusCode,
+          'content_type': response.headers.value(Headers.contentTypeHeader),
+          'body_summary': _responseBodySummary(response.data),
+          'ms': stopwatch.elapsedMilliseconds,
+        },
+      );
       final result = _parse<T>(response.data, secureResponse: secureResponse);
       AppLogger.info(
         'api',
         'post success',
         data: {
+          'request_id': requestId,
           'action': action,
           'code': result.code,
           'msg': result.message,
+          'secure_response_required': secureResponse != null,
+          'payload_summary': _payloadSummary(result.data),
           'ms': stopwatch.elapsedMilliseconds,
         },
       );
@@ -805,9 +826,11 @@ class ApiClient {
         'post dio error',
         error: error.message,
         data: {
+          'request_id': requestId,
           'action': action,
           'type': error.type.name,
           'status_code': error.response?.statusCode,
+          'response_summary': _responseBodySummary(response),
           'ms': stopwatch.elapsedMilliseconds,
         },
       );
@@ -817,9 +840,11 @@ class ApiClient {
           'api',
           'post error response',
           data: {
+            'request_id': requestId,
             'action': action,
             'code': result.code,
             'msg': result.message,
+            'payload_summary': _payloadSummary(result.data),
             'ms': stopwatch.elapsedMilliseconds,
           },
         );
@@ -832,7 +857,11 @@ class ApiClient {
         'post failed',
         error: error,
         stackTrace: stackTrace,
-        data: {'action': action, 'ms': stopwatch.elapsedMilliseconds},
+        data: {
+          'request_id': requestId,
+          'action': action,
+          'ms': stopwatch.elapsedMilliseconds,
+        },
       );
       rethrow;
     }
@@ -912,6 +941,78 @@ class ApiClient {
             : entry.value is Map || entry.value is Iterable
             ? '[complex]'
             : entry.value,
+    };
+  }
+
+  Map<String, Object?> _requestParamSummary(
+    Map<String, Object?> params, {
+    required String filePath,
+  }) {
+    final securePayload = params['secure_payload']?.toString() ?? '';
+    final content = params['content']?.toString() ?? '';
+    return {
+      'param_count': params.length,
+      'has_usertoken': (params['usertoken']?.toString() ?? '').isNotEmpty,
+      'has_device': (params['device']?.toString() ?? '').isNotEmpty,
+      'has_timestamp': (params['timestamp']?.toString() ?? '').isNotEmpty,
+      'has_sign': (params['sign']?.toString() ?? '').isNotEmpty,
+      'has_secure_payload': securePayload.isNotEmpty,
+      'secure_payload_len': securePayload.length,
+      'content_len': content.length,
+      'has_file': filePath.isNotEmpty,
+    };
+  }
+
+  Map<String, Object?> _responseBodySummary(Object? body) {
+    if (body is Map) {
+      final map = body.map((key, value) => MapEntry(key.toString(), value));
+      final data = map['data'];
+      return {
+        'type': 'map',
+        'keys': map.keys.toList(growable: false),
+        'code': map['code'],
+        'msg': map['msg'],
+        'timestamp': map['timestamp'],
+        'sign_present': (map['sign']?.toString() ?? '').isNotEmpty,
+        'data_summary': _payloadSummary(data),
+      };
+    }
+    if (body is List) {
+      return {'type': 'list', 'count': body.length};
+    }
+    final text = body?.toString() ?? '';
+    return {
+      'type': body == null ? 'null' : body.runtimeType.toString(),
+      'text_len': text.length,
+      if (text.isNotEmpty)
+        'text_preview': text.substring(0, min(160, text.length)),
+    };
+  }
+
+  Map<String, Object?> _payloadSummary(Object? payload) {
+    if (payload is Map) {
+      final map = payload.map((key, value) => MapEntry(key.toString(), value));
+      final securePayload = map['secure_payload']?.toString() ?? '';
+      return {
+        'type': 'map',
+        'key_count': map.length,
+        'keys': map.keys.take(80).toList(growable: false),
+        'has_secure_payload': securePayload.isNotEmpty,
+        'secure_payload_len': securePayload.length,
+        if (map['list'] is List) 'list_count': (map['list'] as List).length,
+        if (map['items'] is List) 'items_count': (map['items'] as List).length,
+        if (map['rows'] is List) 'rows_count': (map['rows'] as List).length,
+        if (map['records'] is List)
+          'records_count': (map['records'] as List).length,
+      };
+    }
+    if (payload is List) {
+      return {'type': 'list', 'count': payload.length};
+    }
+    final text = payload?.toString() ?? '';
+    return {
+      'type': payload == null ? 'null' : payload.runtimeType.toString(),
+      'text_len': text.length,
     };
   }
 }

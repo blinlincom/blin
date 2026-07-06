@@ -111,6 +111,9 @@ class GatewayStreamClient {
   DateTime _lastFrameAt = DateTime.now();
   bool _closed = false;
   bool _closedNotified = false;
+  String _streamId = '';
+  int _chunkSeq = 0;
+  int _frameSeq = 0;
   void Function(String reason, Object? error)? _onClosed;
 
   Future<void> connect({
@@ -130,7 +133,26 @@ class GatewayStreamClient {
     _onClosed = onClosed;
     _closed = false;
     _closedNotified = false;
+    _streamId = AppLogger.traceId('gateway');
+    _chunkSeq = 0;
+    _frameSeq = 0;
+    _buffer = Uint8List(0);
     _lastFrameAt = DateTime.now();
+    AppLogger.info(
+      'im',
+      'gateway stream connect start',
+      data: {
+        'stream_id': _streamId,
+        'scheme': uri.scheme,
+        'host': uri.host,
+        'port': uri.hasPort ? uri.port : 0,
+        'path': uri.path,
+        'ticket_len': ticket.length,
+        'frame_key_len': frameKey.length,
+        'last_cursor': lastCursor,
+        'last_cursor_len': lastCursor.length,
+      },
+    );
     final request = await _httpClient
         .postUrl(uri)
         .timeout(const Duration(seconds: 8));
@@ -141,10 +163,29 @@ class GatewayStreamClient {
     final response = await request.close().timeout(const Duration(seconds: 12));
     if (response.statusCode != HttpStatus.ok) {
       final text = await utf8.decoder.bind(response).join();
+      AppLogger.warn(
+        'im',
+        'gateway stream connect rejected',
+        data: {
+          'stream_id': _streamId,
+          'status_code': response.statusCode,
+          'body_len': text.length,
+          'body': text,
+        },
+      );
       throw GatewayStreamException(
         'Gateway 打开失败(${response.statusCode}) $text',
       );
     }
+    AppLogger.info(
+      'im',
+      'gateway stream connected',
+      data: {
+        'stream_id': _streamId,
+        'status_code': response.statusCode,
+        'content_type': response.headers.contentType?.toString() ?? '',
+      },
+    );
     _watchdog = Timer.periodic(const Duration(seconds: 15), (_) {
       final silentSeconds = DateTime.now().difference(_lastFrameAt).inSeconds;
       if (silentSeconds > 75) {
@@ -161,6 +202,17 @@ class GatewayStreamClient {
       (chunk) {
         _lastFrameAt = DateTime.now();
         try {
+          _chunkSeq++;
+          AppLogger.info(
+            'im',
+            'gateway chunk received',
+            data: {
+              'stream_id': _streamId,
+              'chunk_no': _chunkSeq,
+              'chunk_bytes': chunk.length,
+              'buffer_before': _buffer.length,
+            },
+          );
           _appendAndDecode(Uint8List.fromList(chunk), frameKey, onFrame);
         } catch (error) {
           if (_closed) {
@@ -187,6 +239,16 @@ class GatewayStreamClient {
   }
 
   Future<void> close() async {
+    AppLogger.info(
+      'im',
+      'gateway stream close requested',
+      data: {
+        'stream_id': _streamId,
+        'chunk_count': _chunkSeq,
+        'frame_count': _frameSeq,
+        'buffer_bytes': _buffer.length,
+      },
+    );
     _closed = true;
     _watchdog?.cancel();
     _watchdog = null;
@@ -212,8 +274,19 @@ class GatewayStreamClient {
       }
       final payload = _buffer.sublist(4, frameLength);
       _buffer = _buffer.sublist(frameLength);
+      final frameNo = ++_frameSeq;
       final decoded = jsonDecode(utf8.decode(payload));
       if (decoded is! Map) {
+        AppLogger.warn(
+          'im',
+          'gateway frame skipped for non-map payload',
+          data: {
+            'stream_id': _streamId,
+            'frame_no': frameNo,
+            'frame_bytes': length,
+            'buffer_remaining': _buffer.length,
+          },
+        );
         continue;
       }
       final map = decoded.map((key, value) => MapEntry(key.toString(), value));
@@ -225,15 +298,22 @@ class GatewayStreamClient {
         'im',
         'gateway frame received',
         data: {
+          'stream_id': _streamId,
+          'frame_no': frameNo,
+          'frame_bytes': length,
+          'buffer_remaining': _buffer.length,
+          'encrypted_keys': map.keys.toList(growable: false),
           'type': frame.type,
           'has_cursor': frame.cursor.isNotEmpty,
           'cursor_len': frame.cursor.length,
+          'cursor': frame.cursor,
           'channel_id': frame.channelId,
           'channel_type': frame.channelType,
           'client_msg_no': frame.clientMsgNo,
           'message_id': frame.messageId,
           'message_seq': frame.messageSeq,
           'timestamp': frame.timestamp,
+          'payload_summary': _payloadSummary(frame.payload),
           'payload': frame.payload,
         },
       );
@@ -282,6 +362,35 @@ class GatewayStreamClient {
     _closedNotified = true;
     _watchdog?.cancel();
     _watchdog = null;
+    AppLogger.warn(
+      'im',
+      'gateway stream closed',
+      data: {
+        'stream_id': _streamId,
+        'reason': reason,
+        'error': error?.toString() ?? '',
+        'chunk_count': _chunkSeq,
+        'frame_count': _frameSeq,
+        'buffer_bytes': _buffer.length,
+      },
+    );
     _onClosed?.call(reason, error);
   }
+}
+
+Map<String, Object?> _payloadSummary(Map<String, Object?> payload) {
+  final content = payload['content']?.toString() ?? '';
+  return {
+    'key_count': payload.length,
+    'keys': payload.keys.take(80).toList(growable: false),
+    'content_type': payload['content_type']?.toString() ?? '',
+    'type': payload['type']?.toString() ?? '',
+    'cmd': payload['cmd']?.toString() ?? '',
+    'content_len': content.length,
+    'has_red_packet': payload['red_packet'] is Map,
+    'has_transfer': payload['transfer'] is Map,
+    'has_file_path': (payload['file_path']?.toString() ?? '').isNotEmpty,
+    'has_image_path': (payload['image_path']?.toString() ?? '').isNotEmpty,
+    'has_video_path': (payload['video_path']?.toString() ?? '').isNotEmpty,
+  };
 }

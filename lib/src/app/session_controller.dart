@@ -1297,13 +1297,47 @@ class SessionController extends ChangeNotifier {
   void _onPresenceEvent(BusinessImPresenceEvent event) {
     final uid = _chatUid();
     if (uid.isEmpty) {
+      AppLogger.warn(
+        'session',
+        'presence event ignored without chat uid',
+        data: {
+          'event_uid': event.uid,
+          'event_user_id': event.userId,
+          'online': event.online,
+        },
+      );
       return;
     }
+    AppLogger.info(
+      'session',
+      'presence event received',
+      data: {
+        'uid': uid,
+        'event_uid': event.uid,
+        'event_user_id': event.userId,
+        'online': event.online,
+        'device_flag': event.deviceFlag,
+        'device_online_count': event.deviceOnlineCount,
+        'total_online_count': event.totalOnlineCount,
+        'event_time': event.eventTime,
+        'memory_friend_count': _friendCache.length,
+      },
+    );
     _rememberFriendPresenceStatus(event);
     final current = _friendCache.isNotEmpty
         ? _friendCache
         : _hydrateFriendList(_cache.readFriendList(uid), uid: uid);
     if (current.isEmpty) {
+      AppLogger.warn(
+        'session',
+        'presence event has no local friends to update',
+        data: {
+          'uid': uid,
+          'event_uid': event.uid,
+          'event_user_id': event.userId,
+          'online': event.online,
+        },
+      );
       return;
     }
     var changed = false;
@@ -1317,6 +1351,17 @@ class SessionController extends ChangeNotifier {
         })
         .toList(growable: false);
     if (!changed) {
+      AppLogger.info(
+        'session',
+        'presence event did not match friend cache',
+        data: {
+          'uid': uid,
+          'event_uid': event.uid,
+          'event_user_id': event.userId,
+          'online': event.online,
+          'friend_count': current.length,
+        },
+      );
       return;
     }
     _friendCache = next;

@@ -31,6 +31,16 @@ class BusinessImInitialSyncState {
   bool get blocked => syncing || error != null;
 }
 
+class _ServerHistoryLoadResult {
+  const _ServerHistoryLoadResult({
+    required this.messages,
+    required this.complete,
+  });
+
+  final List<Map<String, Object?>> messages;
+  final bool complete;
+}
+
 class BusinessImService extends ChangeNotifier {
   BusinessImService({required ApiClient api, required ImCacheStore cache})
     : _api = api,
@@ -773,31 +783,11 @@ class BusinessImService extends ChangeNotifier {
       'content': _payloadContent(updatedPayload),
     };
     _upsertMessage(channelID, channelType, updated);
-    final receiptMessage = _paymentActionReceiptMessage(
-      channelId: channelID,
-      channelType: channelType,
-      targetMessage: updated,
-      action: nestedKey == 'red_packet'
-          ? ChatContentTypes.redPacketReceived
-          : ChatContentTypes.transferReceived,
-      nestedKey: nestedKey,
-      idKey: idKey,
-      idValue: idValue,
-      receipt: updatedNested,
-      actorIsCurrentUser: true,
-    );
-    _upsertMessage(channelID, channelType, receiptMessage);
     _publishMessageEvent(
       source: source,
       channelId: channelID,
       channelType: channelType,
       message: updated,
-    );
-    _publishMessageEvent(
-      source: '${source}_receipt',
-      channelId: channelID,
-      channelType: channelType,
-      message: receiptMessage,
     );
     _markMessageChannel(
       source: source,
@@ -1075,6 +1065,28 @@ class BusinessImService extends ChangeNotifier {
       );
     }
     final sorted = _sortAndLimit(cached, limit);
+    AppLogger.info(
+      'im',
+      'local messages result',
+      data: {
+        'raw_channel_id': rawChannelId,
+        'channel_id': channelID,
+        'channel_type': channelType,
+        'group_id': groupId,
+        'history_synced': historySynced,
+        'needs_history_sync': needsHistorySync,
+        'retry_blocked': retryBlocked,
+        'open_channel': _openMessageChannels.contains(key),
+        'cached_count': cached.length,
+        'result_count': sorted.length,
+        'first_message': _messageLogSummary(
+          sorted.isEmpty ? const <String, Object?>{} : sorted.first,
+        ),
+        'last_message': _messageLogSummary(
+          sorted.isEmpty ? const <String, Object?>{} : sorted.last,
+        ),
+      },
+    );
     if (_openMessageChannels.contains(key)) {
       final previousMarker = _cache.readReadMarker(
         uid: _requireChat().uid,
@@ -1159,7 +1171,7 @@ class BusinessImService extends ChangeNotifier {
       );
     }
     try {
-      final list = await _loadServerHistoryMessages(
+      final history = await _loadServerHistoryMessages(
         session: session,
         chat: chat,
         channelID: channelID,
@@ -1167,6 +1179,7 @@ class BusinessImService extends ChangeNotifier {
         groupId: groupId,
         limit: max(limit, _historySyncLimit),
       );
+      final list = history.messages;
       final messages = _normalizeServerHistoryMessages(
         rawMessages: list,
         channelId: channelID,
@@ -1184,6 +1197,7 @@ class BusinessImService extends ChangeNotifier {
         current: current,
         serverMessages: messages,
         serverRawCount: list.length,
+        serverWindowComplete: history.complete,
         channelId: channelID,
         channelType: channelType,
       );
@@ -1213,8 +1227,25 @@ class BusinessImService extends ChangeNotifier {
           'channel_type': channelType,
           'server_raw_count': list.length,
           'server_accepted_count': messages.length,
+          'server_history_complete': history.complete,
           'merged_count': merged.length,
           'stored_count': storedMessages.length,
+          'server_first_message': _messageLogSummary(
+            messages.isEmpty ? const <String, Object?>{} : messages.first,
+          ),
+          'server_last_message': _messageLogSummary(
+            messages.isEmpty ? const <String, Object?>{} : messages.last,
+          ),
+          'stored_first_message': _messageLogSummary(
+            storedMessages.isEmpty
+                ? const <String, Object?>{}
+                : storedMessages.first,
+          ),
+          'stored_last_message': _messageLogSummary(
+            storedMessages.isEmpty
+                ? const <String, Object?>{}
+                : storedMessages.last,
+          ),
           if (channelType == chat.channelTypePerson)
             'receiver_id': _receiverIdFromChannel(channelID),
           if (channelType == chat.channelTypeGroup)
@@ -1258,7 +1289,7 @@ class BusinessImService extends ChangeNotifier {
     }
   }
 
-  Future<List<Map<String, Object?>>> _loadServerHistoryMessages({
+  Future<_ServerHistoryLoadResult> _loadServerHistoryMessages({
     required UserSession session,
     required ChatSession chat,
     required String channelID,
@@ -1273,6 +1304,7 @@ class BusinessImService extends ChangeNotifier {
     var startMessageSeq = 0;
     var pullMode = 0;
     var page = 0;
+    var complete = false;
     while (all.length < maxMessages) {
       page++;
       final pageData = channelType == chat.channelTypeGroup
@@ -1308,7 +1340,15 @@ class BusinessImService extends ChangeNotifier {
         }
       }
       final more = _boolValue(pageData['more']);
-      final nextStartSeq = _minRawHistoryMessageSeq(pageMessages);
+      final minMessageSeq = _minRawHistoryMessageSeq(pageMessages);
+      final serverNextStartSeq = _intValue(pageData, [
+        'next_start_message_seq',
+        'next_message_seq',
+        'next_seq',
+      ]);
+      final nextStartSeq = serverNextStartSeq > 0
+          ? serverNextStartSeq
+          : (minMessageSeq > 0 ? max(0, minMessageSeq - 1) : 0);
       AppLogger.info(
         'im',
         'server history page loaded',
@@ -1321,14 +1361,31 @@ class BusinessImService extends ChangeNotifier {
           'total_count': all.length,
           'more': more ? 1 : 0,
           'start_message_seq': startMessageSeq,
+          'min_message_seq': minMessageSeq,
           'next_start_message_seq': nextStartSeq,
+          'server_next_start_message_seq': serverNextStartSeq,
           'pull_mode': pullMode,
+          'first_raw_message': _rawHistoryMessageLogSummary(
+            pageMessages.isEmpty
+                ? const <String, Object?>{}
+                : pageMessages.first,
+          ),
+          'last_raw_message': _rawHistoryMessageLogSummary(
+            pageMessages.isEmpty
+                ? const <String, Object?>{}
+                : pageMessages.last,
+          ),
         },
       );
-      if (!more || all.length >= maxMessages) {
+      if (!more) {
+        complete = true;
         break;
       }
-      if (nextStartSeq <= 0 || nextStartSeq == startMessageSeq) {
+      if (all.length >= maxMessages) {
+        break;
+      }
+      if (nextStartSeq <= 0 ||
+          (pullMode == 1 && nextStartSeq >= startMessageSeq)) {
         AppLogger.warn(
           'im',
           'server history pagination stopped',
@@ -1339,6 +1396,8 @@ class BusinessImService extends ChangeNotifier {
             'page': page,
             'start_message_seq': startMessageSeq,
             'next_start_message_seq': nextStartSeq,
+            'min_message_seq': minMessageSeq,
+            'server_next_start_message_seq': serverNextStartSeq,
           },
         );
         break;
@@ -1346,7 +1405,7 @@ class BusinessImService extends ChangeNotifier {
       startMessageSeq = nextStartSeq;
       pullMode = 1;
     }
-    return all;
+    return _ServerHistoryLoadResult(messages: all, complete: complete);
   }
 
   List<Map<String, Object?>> _historyPageMessages(
@@ -3232,10 +3291,25 @@ class BusinessImService extends ChangeNotifier {
     required List<Map<String, Object?>> current,
     required List<Map<String, Object?>> serverMessages,
     required int serverRawCount,
+    required bool serverWindowComplete,
     required String channelId,
     required int channelType,
   }) {
     final chat = _requireChat();
+    if (!serverWindowComplete) {
+      AppLogger.info(
+        'im',
+        'local history prune skipped for incomplete server window',
+        data: {
+          'channel_id': channelId,
+          'channel_type': channelType,
+          'server_raw_count': serverRawCount,
+          'server_accepted_count': serverMessages.length,
+          'local_count': current.length,
+        },
+      );
+      return current;
+    }
     if (serverRawCount == 0) {
       if (current.isNotEmpty) {
         AppLogger.info(
@@ -4849,10 +4923,26 @@ class BusinessImService extends ChangeNotifier {
     final index = messages.indexWhere(
       (item) => _sameMessageIdentity(item, clientMsgNo, messageSeq),
     );
+    final beforeCount = messages.length;
+    var inserted = false;
+    var updated = false;
     if (index >= 0) {
       messages[index] = _mergeMessageFields(messages[index], normalizedMessage);
+      updated = true;
     } else {
-      messages.add(normalizedMessage);
+      final actionIndex = messages.indexWhere(
+        (item) => _samePaymentActionMessage(item, normalizedMessage),
+      );
+      if (actionIndex >= 0) {
+        messages[actionIndex] = _mergeMessageFields(
+          messages[actionIndex],
+          normalizedMessage,
+        );
+        updated = true;
+      } else {
+        messages.add(normalizedMessage);
+        inserted = true;
+      }
     }
     AppLogger.info(
       'im',
@@ -4862,10 +4952,14 @@ class BusinessImService extends ChangeNotifier {
         'channel_type': channelType,
         'client_msg_no': clientMsgNo,
         'message_seq': messageSeq,
-        'is_update': index >= 0,
+        'is_update': updated,
+        'inserted': inserted,
         'is_me': normalizedMessage['is_me'] == true,
         'content_type': _value(normalizedMessage, ['content_type']),
-        'message_count': messages.length,
+        'before_count': beforeCount,
+        'after_count': messages.length,
+        'action_dedupe_key': _paymentActionMessageKey(normalizedMessage),
+        'message': _messageLogSummary(normalizedMessage),
       },
     );
     _writeMessages(
@@ -4880,7 +4974,7 @@ class BusinessImService extends ChangeNotifier {
         clientMsgNo: clientMsgNo,
       );
     }
-    return _MessageUpsertResult(stored: true, inserted: index < 0);
+    return _MessageUpsertResult(stored: true, inserted: inserted);
   }
 
   List<Map<String, Object?>> _readMessagesForChannel(
@@ -4927,6 +5021,17 @@ class BusinessImService extends ChangeNotifier {
       return;
     }
     final conversation = _conversationForChannel(channelId, channelType);
+    AppLogger.info(
+      'im',
+      'message event published',
+      data: {
+        'source': source,
+        'channel_id': channelId,
+        'channel_type': channelType,
+        'has_conversation': conversation.isNotEmpty,
+        'message': _messageLogSummary(message),
+      },
+    );
     _messageEvents.add(
       BusinessImMessageEvent(
         source: source,
@@ -5065,7 +5170,17 @@ class BusinessImService extends ChangeNotifier {
       if (index >= 0) {
         merged[index] = _mergeMessageFields(merged[index], message);
       } else {
-        merged.add(message);
+        final actionIndex = merged.indexWhere(
+          (item) => _samePaymentActionMessage(item, message),
+        );
+        if (actionIndex >= 0) {
+          merged[actionIndex] = _mergeMessageFields(
+            merged[actionIndex],
+            message,
+          );
+        } else {
+          merged.add(message);
+        }
       }
     }
     return merged;
@@ -5081,6 +5196,103 @@ class BusinessImService extends ChangeNotifier {
       return true;
     }
     return messageSeq > 0 && _intValue(item, ['message_seq']) == messageSeq;
+  }
+
+  bool _samePaymentActionMessage(
+    Map<String, Object?> left,
+    Map<String, Object?> right,
+  ) {
+    final leftKey = _paymentActionMessageKey(left);
+    return leftKey.isNotEmpty && leftKey == _paymentActionMessageKey(right);
+  }
+
+  String _paymentActionMessageKey(Map<String, Object?> message) {
+    final payload = _asMap(message['payload']);
+    final action = _value(message, [
+      'content_type',
+    ], fallback: _value(payload, ['content_type', 'action']));
+    if (action != ChatContentTypes.redPacketReceived &&
+        action != ChatContentTypes.transferReceived) {
+      return '';
+    }
+    final nestedKey = action == ChatContentTypes.redPacketReceived
+        ? 'red_packet'
+        : 'transfer';
+    final idKey = action == ChatContentTypes.redPacketReceived
+        ? 'red_packet_id'
+        : 'transfer_id';
+    final nested = _asMap(payload[nestedKey]);
+    final targetClientMsgNo = _value(
+      payload,
+      [
+        'target_client_msg_no',
+        'source_client_msg_no',
+        'original_client_msg_no',
+      ],
+      fallback: _value(nested, [
+        'target_client_msg_no',
+        'source_client_msg_no',
+        'original_client_msg_no',
+      ]),
+    );
+    final idValue = _paymentActionId(payload, nestedKey, idKey);
+    final actionTarget = targetClientMsgNo.isNotEmpty
+        ? targetClientMsgNo
+        : idValue;
+    if (actionTarget.isEmpty) {
+      return '';
+    }
+    final actorKey = _value(
+      payload,
+      [
+        'actor_id',
+        'operator_id',
+        'reader_id',
+        'receiver_id',
+        'receive_user_id',
+        'receiver_user_id',
+        'user_id',
+        'userid',
+      ],
+      fallback: _value(nested, [
+        'actor_id',
+        'operator_id',
+        'reader_id',
+        'receiver_id',
+        'receive_user_id',
+        'receiver_user_id',
+        'user_id',
+        'userid',
+      ]),
+    );
+    final actorUid = _value(
+      payload,
+      [
+        'actor_uid',
+        'operator_uid',
+        'reader_uid',
+        'receiver_uid',
+        'receive_uid',
+        'uid',
+      ],
+      fallback: _value(
+        message,
+        ['from_uid'],
+        fallback: _value(nested, [
+          'actor_uid',
+          'operator_uid',
+          'reader_uid',
+          'receiver_uid',
+          'receive_uid',
+          'uid',
+        ]),
+      ),
+    );
+    final actor = actorKey.isNotEmpty ? actorKey : actorUid;
+    if (actor.isEmpty) {
+      return '';
+    }
+    return '$action:$actionTarget:$idValue:$actor';
   }
 
   String _readReceiptKey(
@@ -5262,6 +5474,13 @@ class BusinessImService extends ChangeNotifier {
       return;
     }
     final visible = _filterVisibleMessages(messages);
+    final beforeCount = _cache
+        .readMessages(
+          uid: _requireChat().uid,
+          channelId: channelId,
+          channelType: channelType,
+        )
+        .length;
     AppLogger.info(
       'im',
       'messages cached',
@@ -5270,6 +5489,14 @@ class BusinessImService extends ChangeNotifier {
         'channel_type': channelType,
         'input_count': messages.length,
         'visible_count': visible.length,
+        'before_count': beforeCount,
+        'after_count': visible.length,
+        'first_message': _messageLogSummary(
+          visible.isEmpty ? const <String, Object?>{} : visible.first,
+        ),
+        'last_message': _messageLogSummary(
+          visible.isEmpty ? const <String, Object?>{} : visible.last,
+        ),
       },
     );
     _cache.writeMessages(
@@ -5302,6 +5529,17 @@ class BusinessImService extends ChangeNotifier {
         'message_seq': lastSeq,
         'client_msg_no': lastMsgNo,
         'read_at': DateTime.now().millisecondsSinceEpoch ~/ 1000,
+      },
+    );
+    AppLogger.info(
+      'im',
+      'read marker cached',
+      data: {
+        'channel_id': channelId,
+        'channel_type': channelType,
+        'message_count': messages.length,
+        'message_seq': lastSeq,
+        'client_msg_no': lastMsgNo,
       },
     );
   }
@@ -5422,8 +5660,12 @@ class BusinessImService extends ChangeNotifier {
         'receiver_id': receiverId,
         'client_msg_no': normalizedMessage['client_msg_no']?.toString() ?? '',
         'is_update': index >= 0,
+        'is_outgoing': isOutgoing,
+        'is_current_open': isCurrentOpen,
+        'previous_unread': previousUnread,
         'unread_quantity': _intValue(next, ['unread_quantity']),
         'conversation_count': conversations.length,
+        'message': _messageLogSummary(normalizedMessage),
       },
     );
     _bumpConversations('message_upsert');
@@ -5515,7 +5757,11 @@ class BusinessImService extends ChangeNotifier {
         'channel_type': channelType,
         'receiver_id': receiverId,
         'client_msg_no': message['client_msg_no']?.toString() ?? '',
+        'is_update': index >= 0,
+        'previous_unread': previousUnread,
+        'unread_quantity': _intValue(next, ['unread_quantity']),
         'conversation_count': conversations.length,
+        'message': _messageLogSummary(message),
       },
     );
     _bumpConversations('replace_conversation_last_message');
@@ -5600,10 +5846,93 @@ class BusinessImService extends ChangeNotifier {
           b['timestamp']?.toString() ?? '',
         );
       });
-    if (sorted.length <= limit) {
-      return sorted;
+    final deduped = <Map<String, Object?>>[];
+    final actionIndexes = <String, int>{};
+    for (final message in sorted) {
+      final actionKey = _paymentActionMessageKey(message);
+      if (actionKey.isEmpty) {
+        deduped.add(message);
+        continue;
+      }
+      final existingIndex = actionIndexes[actionKey];
+      if (existingIndex == null) {
+        actionIndexes[actionKey] = deduped.length;
+        deduped.add(message);
+      } else {
+        deduped[existingIndex] = _mergeMessageFields(
+          deduped[existingIndex],
+          message,
+        );
+      }
     }
-    return sorted.sublist(sorted.length - limit);
+    if (deduped.length <= limit) {
+      return deduped;
+    }
+    return deduped.sublist(deduped.length - limit);
+  }
+
+  Map<String, Object?> _rawHistoryMessageLogSummary(Map<String, Object?> raw) {
+    if (raw.isEmpty) {
+      return const {'empty': true};
+    }
+    final message = _asMap(raw['message']).isEmpty
+        ? raw
+        : _asMap(raw['message']);
+    final rawMeta = _asMap(raw['raw']);
+    return {
+      ..._messageLogSummary(message),
+      if (rawMeta.isNotEmpty) ...{
+        'raw_client_msg_no': _value(rawMeta, ['client_msg_no']),
+        'raw_message_id': _value(rawMeta, ['message_id', 'message_idstr']),
+        'raw_message_seq': _intValue(rawMeta, ['message_seq']),
+        'raw_channel_id': _value(rawMeta, ['channel_id']),
+        'raw_channel_type': _intValue(rawMeta, ['channel_type']),
+      },
+    };
+  }
+
+  Map<String, Object?> _messageLogSummary(Map<String, Object?> message) {
+    if (message.isEmpty) {
+      return const {'empty': true};
+    }
+    final payload = _asMap(message['payload']);
+    final content = _value(message, [
+      'content',
+      'text',
+    ], fallback: _value(payload, ['content', 'text']));
+    final contentType = _value(message, [
+      'content_type',
+    ], fallback: _value(payload, ['content_type']));
+    return {
+      'client_msg_no': _value(message, [
+        'client_msg_no',
+      ], fallback: _value(payload, ['client_msg_no'])),
+      'message_id': _value(message, ['message_id', 'message_idstr']),
+      'message_seq': _intValue(message, ['message_seq']),
+      'channel_id': _value(message, ['channel_id']),
+      'channel_type': _intValue(message, ['channel_type']),
+      'from_uid': _value(message, [
+        'from_uid',
+      ], fallback: _value(payload, ['from_uid'])),
+      'is_me': _boolValue(message['is_me']),
+      'status': _value(message, ['status']),
+      'content_type': contentType,
+      'type': _intValue(message, [
+        'type',
+      ], fallback: _intValue(payload, ['type'])),
+      'timestamp': _value(message, ['timestamp', 'create_time', 'msg_time']),
+      'content_len': content.length,
+      if (content.isNotEmpty)
+        'content_preview': content.substring(0, min(120, content.length)),
+      'payload_keys': payload.keys.take(80).toList(growable: false),
+      'has_red_packet': payload['red_packet'] is Map,
+      'has_transfer': payload['transfer'] is Map,
+      'has_reply': _value(payload, ['reply_client_msg_no']).isNotEmpty,
+      'has_file_path': _value(payload, ['file_path']).isNotEmpty,
+      'has_image_path': _value(payload, ['image_path']).isNotEmpty,
+      'has_video_path': _value(payload, ['video_path']).isNotEmpty,
+      'action_dedupe_key': _paymentActionMessageKey(message),
+    };
   }
 
   void _markMessageChannel({

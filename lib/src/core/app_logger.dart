@@ -51,9 +51,17 @@ class AppLogger {
   static File? _file;
   static String _filePath = '';
   static Future<void> _writeQueue = Future<void>.value();
+  static int _traceSequence = 0;
 
   static List<AppLogEntry> get entries => List.unmodifiable(_entries);
   static String get filePath => _filePath;
+
+  static String traceId(String prefix) {
+    final safePrefix = prefix.trim().isEmpty ? 'trace' : prefix.trim();
+    final micros = DateTime.now().microsecondsSinceEpoch.toRadixString(36);
+    final sequence = (_traceSequence++ & 0x7fffffff).toRadixString(36);
+    return '${safePrefix}_${micros}_$sequence';
+  }
 
   static Future<void> initialize() async {
     try {
@@ -135,11 +143,7 @@ class AppLogger {
   static Map<String, Object?> sanitize(Map<String, Object?> input) {
     return input.map((key, value) {
       final lower = key.toLowerCase();
-      if (lower.contains('password') ||
-          lower.contains('token') ||
-          lower == 'sign' ||
-          lower.contains('secret') ||
-          lower.contains('key')) {
+      if (_isSensitiveKey(lower)) {
         return MapEntry(key, _mask(value));
       }
       if (value is Map) {
@@ -161,6 +165,23 @@ class AppLogger {
       }
       return MapEntry(key, _jsonReady(value));
     });
+  }
+
+  static bool _isSensitiveKey(String lower) {
+    if (lower.contains('password') ||
+        lower.contains('token') ||
+        lower == 'sign' ||
+        lower.contains('secret')) {
+      return true;
+    }
+    return lower == 'key' ||
+        lower == 'appkey' ||
+        lower == 'app_key' ||
+        lower == 'frame_key' ||
+        lower == 'private_key' ||
+        lower == 'public_key' ||
+        lower.endsWith('_secret_key') ||
+        lower.endsWith('_private_key');
   }
 
   static String dump() => _entries.map((entry) => entry.line).join('\n');
