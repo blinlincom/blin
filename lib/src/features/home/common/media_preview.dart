@@ -63,6 +63,7 @@ class _ImageMessagePreview extends StatelessWidget {
     required this.payload,
     required this.status,
     required this.onRetry,
+    super.key,
   });
 
   final Map<String, Object?> payload;
@@ -82,6 +83,7 @@ class _ImageMessagePreview extends StatelessWidget {
         ? Image.file(
             File(localPath),
             fit: BoxFit.cover,
+            gaplessPlayback: true,
             errorBuilder: (_, __, ___) => const _MediaLoadPlaceholder(
               icon: Icons.broken_image_outlined,
               title: '图片无法显示',
@@ -129,6 +131,7 @@ class _VideoMessagePreview extends StatelessWidget {
     required this.content,
     required this.status,
     required this.onRetry,
+    super.key,
   });
 
   final Map<String, Object?> payload;
@@ -163,6 +166,7 @@ class _VideoMessagePreview extends StatelessWidget {
         ? Image.file(
             File(localPath),
             fit: BoxFit.cover,
+            gaplessPlayback: true,
             errorBuilder: (_, __, ___) => const _MediaLoadPlaceholder(
               icon: Icons.videocam_off_outlined,
               title: '封面无法显示',
@@ -183,6 +187,7 @@ class _VideoMessagePreview extends StatelessWidget {
     if (image == null) {
       if (source != null) {
         return _VideoFramePreview(
+          key: ValueKey(source.key),
           source: source,
           payload: payload,
           content: content,
@@ -319,6 +324,7 @@ class _VideoFramePreview extends StatefulWidget {
     required this.content,
     required this.status,
     required this.onRetry,
+    super.key,
   });
 
   final _VideoPreviewSource source;

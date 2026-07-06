@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/widgets.dart';
 
@@ -53,6 +54,11 @@ class SessionController extends ChangeNotifier {
   DateTime? _groupCacheAt;
   Future<List<Map<String, Object?>>>? _friendRequest;
   Future<List<Map<String, Object?>>>? _groupRequest;
+  final Map<String, Map<String, Object?>> _friendStatusCache =
+      <String, Map<String, Object?>>{};
+  final Map<String, DateTime> _friendStatusCacheAt = <String, DateTime>{};
+  final Map<String, Future<Map<String, Object?>>> _friendStatusRequests =
+      <String, Future<Map<String, Object?>>>{};
   StreamSubscription<BusinessImPresenceEvent>? _presenceSub;
 
   UserSession? get session => _session;
@@ -386,6 +392,10 @@ class SessionController extends ChangeNotifier {
     );
   }
 
+  bool isChannelInvalid({required String channelId, required int channelType}) {
+    return _im.isInvalidChannel(channelID: channelId, channelType: channelType);
+  }
+
   Future<void> openConversation({
     required String channelId,
     required int channelType,
@@ -537,11 +547,15 @@ class SessionController extends ChangeNotifier {
     int messageSeq = 0,
   }) {
     return sendImAction(
-      'im_message_read_receipt',
+      'im_message_read_receipts',
       params: {
-        'target_client_msg_no': targetClientMsgNo,
         'client_msg_no': _im.newClientMsgNo(),
-        if (messageSeq > 0) 'message_seq': messageSeq.toString(),
+        'receipts': jsonEncode([
+          {
+            'target_client_msg_no': targetClientMsgNo,
+            if (messageSeq > 0) 'message_seq': messageSeq,
+          },
+        ]),
       },
     );
   }
@@ -993,11 +1007,45 @@ class SessionController extends ChangeNotifier {
 
   Future<Map<String, Object?>> friendStatus(String friendId) {
     final current = _requireSession();
-    return _chat.friendStatus(
-      session: current,
-      device: _device,
-      friendId: friendId,
-    );
+    final normalizedFriendId = friendId.trim();
+    final cached = _friendStatusCache[normalizedFriendId];
+    final cachedAt = _friendStatusCacheAt[normalizedFriendId];
+    if (cached != null &&
+        cachedAt != null &&
+        DateTime.now().difference(cachedAt) < const Duration(seconds: 8)) {
+      AppLogger.info(
+        'session',
+        'friend status memory cache',
+        data: {'friend_id': normalizedFriendId},
+      );
+      return Future.value(Map<String, Object?>.from(cached));
+    }
+    final running = _friendStatusRequests[normalizedFriendId];
+    if (running != null) {
+      AppLogger.info(
+        'session',
+        'reuse friend status request',
+        data: {'friend_id': normalizedFriendId},
+      );
+      return running;
+    }
+    final request = _chat
+        .friendStatus(
+          session: current,
+          device: _device,
+          friendId: normalizedFriendId,
+        )
+        .then((result) {
+          final stored = Map<String, Object?>.from(result);
+          _friendStatusCache[normalizedFriendId] = stored;
+          _friendStatusCacheAt[normalizedFriendId] = DateTime.now();
+          return Map<String, Object?>.from(stored);
+        })
+        .whenComplete(() {
+          _friendStatusRequests.remove(normalizedFriendId);
+        });
+    _friendStatusRequests[normalizedFriendId] = request;
+    return request;
   }
 
   Future<Map<String, Object?>> searchFriends({
@@ -1248,6 +1296,7 @@ class SessionController extends ChangeNotifier {
     if (uid.isEmpty) {
       return;
     }
+    _rememberFriendPresenceStatus(event);
     final current = _friendCache.isNotEmpty
         ? _friendCache
         : _hydrateFriendList(_cache.readFriendList(uid), uid: uid);
@@ -1281,6 +1330,30 @@ class SessionController extends ChangeNotifier {
       },
     );
     notifyListeners();
+  }
+
+  void _rememberFriendPresenceStatus(BusinessImPresenceEvent event) {
+    final userId = event.userId.isNotEmpty
+        ? event.userId
+        : _userIdFromUid(event.uid);
+    if (userId.isEmpty) {
+      return;
+    }
+    final status = <String, Object?>{
+      'friend_id': userId,
+      'userid': userId,
+      'user_id': userId,
+      'uid': event.uid,
+      'online': event.online ? 1 : 0,
+      'is_online': event.online ? 1 : 0,
+      'online_status': event.online ? 'online' : 'offline',
+      'device_flag': event.deviceFlag,
+      'device_online_count': event.deviceOnlineCount,
+      'total_online_count': event.totalOnlineCount,
+      'presence_event_time': event.eventTime,
+    };
+    _friendStatusCache[userId] = status;
+    _friendStatusCacheAt[userId] = DateTime.now();
   }
 
   void _onImServiceChanged() {
@@ -1381,6 +1454,9 @@ class SessionController extends ChangeNotifier {
     _groupCacheAt = null;
     _friendRequest = null;
     _groupRequest = null;
+    _friendStatusCache.clear();
+    _friendStatusCacheAt.clear();
+    _friendStatusRequests.clear();
     _refreshRequest = null;
     _lastHotRefreshAt = null;
   }

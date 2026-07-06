@@ -222,6 +222,7 @@ class _MessageBubbleContent extends StatelessWidget {
   Widget build(BuildContext context) {
     return switch (contentType) {
       ChatContentTypes.image => _ImageMessagePreview(
+        key: ValueKey(_mediaPreviewKey(contentType, payload, content)),
         payload: payload,
         status: status,
         onRetry: onRetry,
@@ -246,6 +247,7 @@ class _MessageBubbleContent extends StatelessWidget {
         isMe: isMe,
       ),
       ChatContentTypes.video => _VideoMessagePreview(
+        key: ValueKey(_mediaPreviewKey(contentType, payload, content)),
         payload: payload,
         content: content,
         status: status,
@@ -331,6 +333,52 @@ class _VoicePreview extends StatelessWidget {
       ),
     );
   }
+}
+
+String _mediaPreviewKey(
+  String contentType,
+  Map<String, Object?> payload,
+  String content,
+) {
+  final media = _asObjectMap(payload['media']);
+  final identity = _value(
+    payload,
+    [
+      'file_id',
+      'media_id',
+      'attachment_id',
+      'url',
+      'file_path',
+      'cover_url',
+      'thumb_url',
+      'thumbnail_url',
+      'image_path',
+      'video_path',
+    ],
+    fallback: _value(media, [
+      'file_id',
+      'media_id',
+      'attachment_id',
+      'url',
+      'path',
+      'file_path',
+      'cover_url',
+      'thumb_url',
+      'thumbnail_url',
+      'image_path',
+      'video_path',
+    ]),
+  );
+  if (identity.isNotEmpty) {
+    return '$contentType:$identity';
+  }
+  final descriptor = _value(payload, [
+    'file_name',
+    'name',
+    'duration',
+    'size',
+  ], fallback: content);
+  return '$contentType:$descriptor';
 }
 
 class _FilePreview extends StatelessWidget {

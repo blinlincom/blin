@@ -9,6 +9,7 @@ class _MessageRow extends StatelessWidget {
     required this.onTap,
     required this.redPacketReceiving,
     required this.onRetry,
+    super.key,
   });
 
   final Map<String, Object?> item;

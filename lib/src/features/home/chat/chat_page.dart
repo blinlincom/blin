@@ -21,6 +21,8 @@ class ChatPage extends StatefulWidget {
 }
 
 class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
+  static const int _messageUiLimit = 1000;
+
   final _textController = TextEditingController();
   final _scrollController = ScrollController();
   final _inputFocusNode = FocusNode();
@@ -46,6 +48,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   bool _didInitialScroll = false;
   bool _peerOnline = false;
   bool _onlineStatusLoading = false;
+  bool _channelInvalid = false;
   int _onlineStatusToken = 0;
   String _lastImStatusText = '';
   int? _groupMemberCount;
@@ -61,7 +64,8 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       widget.groupId.isEmpty ? widget.channelId : widget.groupId;
   String get _receiverId => _privateReceiverIdFromChannel(widget.channelId);
   bool get _composerEnabled =>
-      !_isGroup || _groupMuteText(_groupMuteState).isEmpty;
+      !_channelInvalid &&
+      (!_isGroup || _groupMuteText(_groupMuteState).isEmpty);
 
   @override
   void initState() {
@@ -70,6 +74,10 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     _conversationRevision = widget.controller.conversationVersion;
     _messageRevision = _currentMessageRevision();
     _lastImStatusText = widget.controller.imStatusText;
+    _channelInvalid = widget.controller.isChannelInvalid(
+      channelId: widget.channelId,
+      channelType: widget.channelType,
+    );
     widget.controller.addListener(_onControllerChanged);
     _messageSub = widget.controller.messageEvents.listen(_onMessageEvent);
     _presenceSub = widget.controller.presenceEvents.listen(_onPresenceEvent);
@@ -83,7 +91,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     _loadMessagesIntoState(showLoading: true);
     _refreshGroupMuteState();
     _refreshPeerOnlineStatus();
-    if (_isGroup) {
+    if (_isGroup && !_channelInvalid) {
       unawaited(_loadGroupMuteStatus());
       unawaited(_refreshGroupPresence());
     }
@@ -146,6 +154,10 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       _groupMuteState = const {};
       _peerOnline = false;
       _onlineStatusLoading = false;
+      _channelInvalid = widget.controller.isChannelInvalid(
+        channelId: widget.channelId,
+        channelType: widget.channelType,
+      );
       _groupMemberCount = null;
       _groupOnlineCount = null;
       _groupPresenceLoading = false;
@@ -158,7 +170,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       _loadMessagesIntoState(showLoading: true);
       _refreshGroupMuteState();
       _refreshPeerOnlineStatus();
-      if (_isGroup) {
+      if (_isGroup && !_channelInvalid) {
         unawaited(_loadGroupMuteStatus());
         unawaited(_refreshGroupPresence());
       }
@@ -174,7 +186,20 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     final status = widget.controller.imStatusText;
     final becameConnected = status == '已连接' && _lastImStatusText != status;
     _lastImStatusText = status;
-    if (becameConnected) {
+    final invalid = widget.controller.isChannelInvalid(
+      channelId: widget.channelId,
+      channelType: widget.channelType,
+    );
+    if (invalid && !_channelInvalid) {
+      setState(() {
+        _channelInvalid = true;
+        _messages = const [];
+        _messagesLoading = false;
+        _groupPresenceLoading = false;
+        _groupMuteState = const {};
+      });
+    }
+    if (becameConnected && !_channelInvalid) {
       if (_isGroup) {
         unawaited(_refreshGroupPresence());
       } else {
@@ -219,6 +244,9 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   }
 
   Future<void> _loadGroupMuteStatus() async {
+    if (_channelInvalid) {
+      return;
+    }
     try {
       await widget.controller.loadGroupMuteStatus(
         groupId: _groupId,
@@ -228,6 +256,10 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         _refreshGroupMuteState();
       }
     } catch (error) {
+      if (_isMissingGroupError(error)) {
+        _markChannelInvalid();
+        return;
+      }
       AppLogger.warn(
         'ui',
         'load group mute status failed',
@@ -238,6 +270,9 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
 
   String _chatHeaderStatusText() {
     if (_isGroup) {
+      if (_channelInvalid) {
+        return '群聊已失效';
+      }
       if (_groupOnlineCount == null) {
         if (!_groupPresenceLoading) {
           return '在线人数获取失败';
@@ -262,7 +297,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   }
 
   Future<void> _refreshGroupPresence() async {
-    if (!_isGroup) {
+    if (!_isGroup || _channelInvalid) {
       return;
     }
     final token = ++_groupPresenceToken;
@@ -285,6 +320,10 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         _groupPresenceLoading = false;
       });
     } catch (error, stackTrace) {
+      if (_isMissingGroupError(error)) {
+        _markChannelInvalid();
+        return;
+      }
       AppLogger.warn(
         'ui',
         'load group presence failed',
@@ -414,13 +453,23 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     }
     final shouldStickToBottom = _shouldAutoScrollForMessage(event);
     setState(() {
-      if (_isMessageDeleteEvent(event.source)) {
+      if (_isChannelInvalidEvent(event.source)) {
+        _channelInvalid = true;
+        _messages = const [];
+        _messagesLoading = false;
+        _groupPresenceLoading = false;
+        _groupMuteState = const {};
+      } else if (_isMessageDeleteEvent(event.source)) {
         final target = _value(event.message, ['client_msg_no']);
         _messages = _messages
             .where((item) => _value(item, ['client_msg_no']) != target)
             .toList(growable: false);
       } else {
-        _messages = _mergeMessageList(_messages, event.message, limit: 200);
+        _messages = _mergeMessageList(
+          _messages,
+          event.message,
+          limit: _messageUiLimit,
+        );
       }
       _messagesLoading = false;
       _messageRevision = _currentMessageRevision();
@@ -430,12 +479,14 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       _scrollToBottom(animated: event.source != 'send_local');
     }
     _scheduleBurnAfterReadForMessages(_messages);
-    unawaited(
-      widget.controller.openConversation(
-        channelId: widget.channelId,
-        channelType: widget.channelType,
-      ),
-    );
+    if (!_channelInvalid) {
+      unawaited(
+        widget.controller.openConversation(
+          channelId: widget.channelId,
+          channelType: widget.channelType,
+        ),
+      );
+    }
   }
 
   void _onPresenceEvent(BusinessImPresenceEvent event) {
@@ -511,6 +562,10 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       if (!mounted || token != _messageLoadToken) {
         return;
       }
+      final invalid = widget.controller.isChannelInvalid(
+        channelId: widget.channelId,
+        channelType: widget.channelType,
+      );
       _precacheMessageAvatars(
         context,
         messages,
@@ -518,6 +573,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       );
       final nextMessages = _stableLoadedMessages(messages, showLoading);
       setState(() {
+        _channelInvalid = invalid;
         _messages = nextMessages;
         _messagesLoading = false;
       });
@@ -530,6 +586,10 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       }
     } catch (error) {
       if (!mounted || token != _messageLoadToken) {
+        return;
+      }
+      if (_isMissingGroupError(error)) {
+        _markChannelInvalid();
         return;
       }
       setState(() {
@@ -560,9 +620,35 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     }
     var merged = _messages;
     for (final item in loaded) {
-      merged = _mergeMessageList(merged, item, limit: 200);
+      merged = _mergeMessageList(merged, item, limit: _messageUiLimit);
     }
     return merged;
+  }
+
+  void _markChannelInvalid() {
+    if (!mounted) {
+      _channelInvalid = true;
+      return;
+    }
+    setState(() {
+      _channelInvalid = true;
+      _messages = const [];
+      _messagesLoading = false;
+      _groupPresenceLoading = false;
+      _groupMuteState = const {};
+    });
+  }
+
+  bool _isChannelInvalidEvent(String source) {
+    return source == 'group_history_not_found' || source == 'channel_invalid';
+  }
+
+  bool _isMissingGroupError(Object error) {
+    final text = error.toString();
+    return text.contains('群聊不存在') ||
+        text.contains('群不存在') ||
+        text.toLowerCase().contains('group not found') ||
+        text.toLowerCase().contains('group does not exist');
   }
 
   @override
@@ -618,6 +704,24 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       return next;
     }
     return next.sublist(next.length - limit);
+  }
+
+  String _messageStableKey(Map<String, Object?> item, int index) {
+    final clientMsgNo = _value(item, ['client_msg_no']);
+    if (clientMsgNo.isNotEmpty) {
+      return 'client:$clientMsgNo';
+    }
+    final messageSeq = _intValue(item, ['message_seq']);
+    if (messageSeq > 0) {
+      return 'seq:$messageSeq';
+    }
+    final messageId = _value(item, ['message_id', 'msg_id', 'id']);
+    if (messageId.isNotEmpty) {
+      return 'id:$messageId';
+    }
+    final timestamp = _value(item, ['timestamp', 'create_time']);
+    final sender = _value(item, ['from_uid', 'sender_uid', 'uid']);
+    return 'local:$index:$timestamp:$sender:${_messageContentType(item)}';
   }
 
   Map<String, Object?> _mergeUiMessage(
@@ -783,13 +887,19 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                                       _messages,
                                       messageIndex,
                                     );
+                                    final stableKey = _messageStableKey(
+                                      item,
+                                      messageIndex,
+                                    );
                                     return Column(
+                                      key: ValueKey(stableKey),
                                       children: [
                                         if (showTime)
                                           _TimeDivider(
                                             text: _messageTimeLabel(item),
                                           ),
                                         _MessageRow(
+                                          key: ValueKey('row:$stableKey'),
                                           item: item,
                                           showSenderName: _isGroup,
                                           currentUserAvatarUrl:

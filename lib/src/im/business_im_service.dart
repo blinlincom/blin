@@ -20,6 +20,10 @@ class BusinessImService extends ChangeNotifier {
     : _api = api,
       _cache = cache;
 
+  static const int _messageCacheLimit = 1000;
+  static const int _historySyncLimit = 500;
+  static const int _readReceiptBatchSize = 100;
+
   final ApiClient _api;
   final ImCacheStore _cache;
   final MessageNotificationSound _messageSound = MessageNotificationSound();
@@ -42,7 +46,6 @@ class BusinessImService extends ChangeNotifier {
   bool _manualStop = false;
   bool _connecting = false;
   bool _foreground = true;
-  bool _closingForBackground = false;
   bool _gatewayAckDraining = false;
   int _reconnectAttempt = 0;
   int _conversationVersion = 0;
@@ -55,6 +58,7 @@ class BusinessImService extends ChangeNotifier {
   Future<List<Map<String, Object?>>>? _syncingConversations;
   final Set<String> _historySyncedChannels = <String>{};
   final Map<String, DateTime> _historyRetryAfter = <String, DateTime>{};
+  final Set<String> _invalidMessageChannels = <String>{};
   bool _serverConversationsSynced = false;
   bool _initialHistorySyncing = false;
   bool _hasRealtimeConnectedOnce = false;
@@ -77,6 +81,13 @@ class BusinessImService extends ChangeNotifier {
   String? get lastError => _lastError;
   int get conversationVersion => _conversationVersion;
   bool get initialHistorySyncing => _initialHistorySyncing;
+
+  bool isInvalidChannel({required String channelID, required int channelType}) {
+    channelID = _canonicalChannelId(channelID, channelType);
+    return _invalidMessageChannels.contains(
+      _messageKey(channelID, channelType),
+    );
+  }
 
   List<Map<String, Object?>> cachedConversations() {
     final chat = _session?.chat;
@@ -169,6 +180,7 @@ class BusinessImService extends ChangeNotifier {
     _groupMuteStates.clear();
     _historySyncedChannels.clear();
     _historyRetryAfter.clear();
+    _invalidMessageChannels.clear();
     _serverConversationsSynced = false;
     _hasRealtimeConnectedOnce = false;
     _suppressCatchupSoundOnNextConnect = true;
@@ -241,6 +253,7 @@ class BusinessImService extends ChangeNotifier {
       _reportedReadReceiptKeys.clear();
       _presenceLatestEventSeconds.clear();
       _pendingActionReceipts.clear();
+      _invalidMessageChannels.clear();
     }
     _setStatus('未连接');
   }
@@ -254,8 +267,6 @@ class BusinessImService extends ChangeNotifier {
     _suppressCatchupSoundOnNextConnect = true;
     _reconnectTimer?.cancel();
     _reconnectTimer = null;
-    _closingForBackground = true;
-    unawaited(_closeRealtimeOnly());
   }
 
   void resumeConnection() {
@@ -354,6 +365,11 @@ class BusinessImService extends ChangeNotifier {
   }) async {
     channelID = _canonicalChannelId(channelID, channelType);
     final chat = _requireChat();
+    final previousMarker = _cache.readReadMarker(
+      uid: chat.uid,
+      channelId: channelID,
+      channelType: channelType,
+    );
     final messages = _cache.readMessages(
       uid: chat.uid,
       channelId: channelID,
@@ -365,6 +381,7 @@ class BusinessImService extends ChangeNotifier {
         channelId: channelID,
         channelType: channelType,
         messages: messages,
+        previousMarker: previousMarker,
       ),
     );
     if (_clearConversationUnread(channelID, channelType, source: 'mark_read')) {
@@ -380,6 +397,7 @@ class BusinessImService extends ChangeNotifier {
     required String channelId,
     required int channelType,
     required List<Map<String, Object?>> messages,
+    required Map<String, Object?> previousMarker,
   }) async {
     final session = _session;
     final chat = session?.chat;
@@ -390,37 +408,72 @@ class BusinessImService extends ChangeNotifier {
         .where((item) => item['is_me'] != true)
         .where((item) => !_isSystemActionMessage(item))
         .where((item) => _value(item, ['client_msg_no']).isNotEmpty)
+        .where((item) => !_readMarkerCoversMessage(previousMarker, item))
         .toList(growable: false);
     if (targets.isEmpty) {
       return;
     }
-    for (final item in targets.reversed.take(50)) {
+    final pending = <Map<String, Object?>>[];
+    for (final item in targets) {
       final targetClientMsgNo = _value(item, ['client_msg_no']);
-      final key = '${_messageKey(channelId, channelType)}|$targetClientMsgNo';
+      final key = _readReceiptKey(channelId, channelType, targetClientMsgNo);
       if (!_reportedReadReceiptKeys.add(key)) {
         continue;
       }
+      pending.add({
+        'target_client_msg_no': targetClientMsgNo,
+        if (_intValue(item, ['message_seq']) > 0)
+          'message_seq': _intValue(item, ['message_seq']),
+      });
+    }
+    if (pending.isEmpty) {
+      return;
+    }
+    for (
+      var offset = 0;
+      offset < pending.length;
+      offset += _readReceiptBatchSize
+    ) {
+      final chunk = pending
+          .skip(offset)
+          .take(_readReceiptBatchSize)
+          .toList(growable: false);
       try {
         await _api.imBusinessAction(
-          action: 'im_message_read_receipt',
+          action: 'im_message_read_receipts',
           session: session,
           device: _device,
           params: {
-            'target_client_msg_no': targetClientMsgNo,
             'client_msg_no': newClientMsgNo(),
-            if (_intValue(item, ['message_seq']) > 0)
-              'message_seq': _intValue(item, ['message_seq']).toString(),
+            'channel_id': channelId,
+            'channel_type': channelType.toString(),
+            'receipts': jsonEncode(chunk),
           },
           secureResponse: true,
         );
-      } catch (error, stackTrace) {
-        AppLogger.warn(
+        AppLogger.info(
           'im',
-          'read receipt report failed',
+          'read receipt batch reported',
           data: {
-            'target_client_msg_no': targetClientMsgNo,
             'channel_id': channelId,
             'channel_type': channelType,
+            'count': chunk.length,
+          },
+        );
+      } catch (error, stackTrace) {
+        for (final item in chunk) {
+          final targetClientMsgNo = _value(item, ['target_client_msg_no']);
+          _reportedReadReceiptKeys.remove(
+            _readReceiptKey(channelId, channelType, targetClientMsgNo),
+          );
+        }
+        AppLogger.warn(
+          'im',
+          'read receipt batch report failed',
+          data: {
+            'channel_id': channelId,
+            'channel_type': channelType,
+            'count': chunk.length,
             'error': error.toString(),
             'stack': stackTrace.toString(),
           },
@@ -844,10 +897,19 @@ class BusinessImService extends ChangeNotifier {
     required String channelID,
     required int channelType,
     String groupId = '',
-    int limit = 50,
+    int limit = _messageCacheLimit,
   }) async {
     final rawChannelId = channelID;
     channelID = _canonicalChannelId(channelID, channelType);
+    final key = _messageKey(channelID, channelType);
+    if (_invalidMessageChannels.contains(key)) {
+      AppLogger.info(
+        'im',
+        'local messages skipped for invalid channel',
+        data: {'channel_id': channelID, 'channel_type': channelType},
+      );
+      return const <Map<String, Object?>>[];
+    }
     var cached = _readMessagesForChannel(channelID, channelType);
     AppLogger.info(
       'im',
@@ -859,7 +921,6 @@ class BusinessImService extends ChangeNotifier {
         'count': cached.length,
       },
     );
-    final key = _messageKey(channelID, channelType);
     final historySynced = _historySyncedChannels.contains(key);
     final retryAfter = _historyRetryAfter[key];
     final retryBlocked =
@@ -890,7 +951,20 @@ class BusinessImService extends ChangeNotifier {
     }
     final sorted = _sortAndLimit(cached, limit);
     if (_openMessageChannels.contains(key)) {
+      final previousMarker = _cache.readReadMarker(
+        uid: _requireChat().uid,
+        channelId: channelID,
+        channelType: channelType,
+      );
       _writeReadMarkerForMessages(channelID, channelType, sorted);
+      unawaited(
+        _reportReadReceiptsForMessages(
+          channelId: channelID,
+          channelType: channelType,
+          messages: sorted,
+          previousMarker: previousMarker,
+        ),
+      );
       _clearConversationUnread(channelID, channelType, source: 'local_read');
     }
     return sorted;
@@ -904,6 +978,9 @@ class BusinessImService extends ChangeNotifier {
   }) async {
     channelID = _canonicalChannelId(channelID, channelType);
     final key = _messageKey(channelID, channelType);
+    if (_invalidMessageChannels.contains(key)) {
+      return const <Map<String, Object?>>[];
+    }
     final running = _syncingChannels[key];
     if (running != null) {
       AppLogger.info(
@@ -953,26 +1030,18 @@ class BusinessImService extends ChangeNotifier {
       );
       return _sortAndLimit(
         _readMessagesForChannel(channelID, channelType),
-        limit,
+        min(limit, _messageCacheLimit),
       );
     }
     try {
-      final historyLimit = max(limit, 200);
-      final list = channelType == chat.channelTypeGroup
-          ? await _api.groupMessages(
-              session: session,
-              device: _device,
-              groupId: groupId.isNotEmpty
-                  ? groupId
-                  : _groupIdForChannel(channelID),
-              limit: historyLimit,
-            )
-          : await _api.personMessages(
-              session: session,
-              device: _device,
-              receiverId: _receiverIdFromChannel(channelID),
-              limit: historyLimit,
-            );
+      final list = await _loadServerHistoryMessages(
+        session: session,
+        chat: chat,
+        channelID: channelID,
+        channelType: channelType,
+        groupId: groupId,
+        limit: max(limit, _historySyncLimit),
+      );
       final messages = _normalizeServerHistoryMessages(
         rawMessages: list,
         channelId: channelID,
@@ -985,11 +1054,16 @@ class BusinessImService extends ChangeNotifier {
           acceptedCount: messages.length,
         );
       }
-      final merged = _mergeMessages(
-        _readMessagesForChannel(channelID, channelType),
-        messages,
+      final current = _readMessagesForChannel(channelID, channelType);
+      final authoritativeCurrent = _applyAuthoritativeServerWindow(
+        current: current,
+        serverMessages: messages,
+        serverRawCount: list.length,
+        channelId: channelID,
+        channelType: channelType,
       );
-      final storedMessages = _sortAndLimit(merged, 200);
+      final merged = _mergeMessages(authoritativeCurrent, messages);
+      final storedMessages = _sortAndLimit(merged, _messageCacheLimit);
       _writeMessages(channelID, channelType, storedMessages);
       final conversationMessage = _lastConversationMessage(storedMessages);
       if (conversationMessage.isNotEmpty) {
@@ -1024,7 +1098,7 @@ class BusinessImService extends ChangeNotifier {
                 : _groupIdForChannel(channelID),
         },
       );
-      return _sortAndLimit(merged, limit);
+      return _sortAndLimit(merged, min(limit, _messageCacheLimit));
     } catch (error, stackTrace) {
       if (channelType == chat.channelTypeGroup && _isMissingGroupError(error)) {
         AppLogger.warn(
@@ -1057,6 +1131,163 @@ class BusinessImService extends ChangeNotifier {
           .add(const Duration(seconds: 20));
       return _readMessagesForChannel(channelID, channelType);
     }
+  }
+
+  Future<List<Map<String, Object?>>> _loadServerHistoryMessages({
+    required UserSession session,
+    required ChatSession chat,
+    required String channelID,
+    required int channelType,
+    required String groupId,
+    required int limit,
+  }) async {
+    final pageLimit = min(200, max(1, limit));
+    final maxMessages = min(_messageCacheLimit, max(limit, pageLimit));
+    final all = <Map<String, Object?>>[];
+    final seen = <String>{};
+    var startMessageSeq = 0;
+    var pullMode = 0;
+    var page = 0;
+    while (all.length < maxMessages) {
+      page++;
+      final pageData = channelType == chat.channelTypeGroup
+          ? await _api.groupMessagePage(
+              session: session,
+              device: _device,
+              groupId: groupId.isNotEmpty
+                  ? groupId
+                  : _groupIdForChannel(channelID),
+              startMessageSeq: startMessageSeq,
+              limit: pageLimit,
+              pullMode: pullMode,
+            )
+          : await _api.personMessagePage(
+              session: session,
+              device: _device,
+              receiverId: _receiverIdFromChannel(channelID),
+              startMessageSeq: startMessageSeq,
+              limit: pageLimit,
+              pullMode: pullMode,
+            );
+      final pageMessages = _historyPageMessages(pageData);
+      var added = 0;
+      for (final message in pageMessages) {
+        final key = _historyRawIdentity(message);
+        if (key.isNotEmpty && !seen.add(key)) {
+          continue;
+        }
+        all.add(message);
+        added++;
+        if (all.length >= maxMessages) {
+          break;
+        }
+      }
+      final more = _boolValue(pageData['more']);
+      final nextStartSeq = _minRawHistoryMessageSeq(pageMessages);
+      AppLogger.info(
+        'im',
+        'server history page loaded',
+        data: {
+          'channel_id': channelID,
+          'channel_type': channelType,
+          'page': page,
+          'raw_count': pageMessages.length,
+          'added_count': added,
+          'total_count': all.length,
+          'more': more ? 1 : 0,
+          'start_message_seq': startMessageSeq,
+          'next_start_message_seq': nextStartSeq,
+          'pull_mode': pullMode,
+        },
+      );
+      if (!more || all.length >= maxMessages) {
+        break;
+      }
+      if (nextStartSeq <= 0 || nextStartSeq == startMessageSeq) {
+        AppLogger.warn(
+          'im',
+          'server history pagination stopped',
+          data: {
+            'channel_id': channelID,
+            'channel_type': channelType,
+            'reason': 'missing_next_start_message_seq',
+            'page': page,
+            'start_message_seq': startMessageSeq,
+            'next_start_message_seq': nextStartSeq,
+          },
+        );
+        break;
+      }
+      startMessageSeq = nextStartSeq;
+      pullMode = 1;
+    }
+    return all;
+  }
+
+  List<Map<String, Object?>> _historyPageMessages(
+    Map<String, Object?> pageData,
+  ) {
+    for (final key in ['list', 'items', 'rows', 'records']) {
+      final value = pageData[key];
+      if (value is List) {
+        return value
+            .whereType<Map>()
+            .map((item) => item.cast<String, Object?>())
+            .toList(growable: false);
+      }
+    }
+    final nested = pageData['data'];
+    if (nested is Map) {
+      return _historyPageMessages(nested.cast<String, Object?>());
+    }
+    if (nested is List) {
+      return nested
+          .whereType<Map>()
+          .map((item) => item.cast<String, Object?>())
+          .toList(growable: false);
+    }
+    return const <Map<String, Object?>>[];
+  }
+
+  String _historyRawIdentity(Map<String, Object?> raw) {
+    final message = _asMap(raw['message']).isEmpty
+        ? raw
+        : _asMap(raw['message']);
+    final clientMsgNo = _value(message, [
+      'client_msg_no',
+    ], fallback: _value(raw, ['client_msg_no']));
+    if (clientMsgNo.isNotEmpty) {
+      return 'client:$clientMsgNo';
+    }
+    final seq = _intValue(message, [
+      'message_seq',
+    ], fallback: _intValue(raw, ['message_seq']));
+    if (seq > 0) {
+      return 'seq:$seq';
+    }
+    final messageId = _value(message, [
+      'message_id',
+      'message_idstr',
+      'id',
+    ], fallback: _value(raw, ['message_id', 'message_idstr', 'id']));
+    return messageId.isEmpty ? '' : 'id:$messageId';
+  }
+
+  int _minRawHistoryMessageSeq(List<Map<String, Object?>> rawMessages) {
+    var minSeq = 0;
+    for (final raw in rawMessages) {
+      final message = _asMap(raw['message']).isEmpty
+          ? raw
+          : _asMap(raw['message']);
+      final seq = _intValue(message, [
+        'message_seq',
+      ], fallback: _intValue(raw, ['message_seq']));
+      if (seq <= 0) {
+        continue;
+      }
+      minSeq = minSeq == 0 ? seq : min(minSeq, seq);
+    }
+    return minSeq;
   }
 
   bool _historySyncEnabledForType(int channelType, ChatSession chat) {
@@ -1101,7 +1332,7 @@ class BusinessImService extends ChangeNotifier {
         channelID: channelId,
         channelType: channelType,
         groupId: _value(item, ['group_id', 'id'], fallback: channelId),
-        limit: 200,
+        limit: _historySyncLimit,
       );
       final lastMessage = _lastConversationMessage(messages);
       if (lastMessage.isEmpty) {
@@ -1809,7 +2040,6 @@ class BusinessImService extends ChangeNotifier {
     _setStatus(_reconnectAttempt > 0 ? '重连中' : '连接中');
     _reconnectTimer?.cancel();
     _reconnectTimer = null;
-    _closingForBackground = false;
     await _closeRealtimeOnly();
     try {
       final chat = await _refreshGatewayChat();
@@ -2558,9 +2788,14 @@ class BusinessImService extends ChangeNotifier {
     if (_manualStop) {
       return;
     }
-    if (_closingForBackground) {
-      _closingForBackground = false;
+    if (!_foreground) {
+      unawaited(_closeRealtimeOnly());
       _setStatus('未连接');
+      AppLogger.info(
+        'im',
+        'gateway stream closed while backgrounded',
+        data: {'source': source, 'reason': reason ?? ''},
+      );
       return;
     }
     unawaited(_closeRealtimeOnly());
@@ -2854,6 +3089,133 @@ class BusinessImService extends ChangeNotifier {
       },
     );
     return boundMessages;
+  }
+
+  List<Map<String, Object?>> _applyAuthoritativeServerWindow({
+    required List<Map<String, Object?>> current,
+    required List<Map<String, Object?>> serverMessages,
+    required int serverRawCount,
+    required String channelId,
+    required int channelType,
+  }) {
+    final chat = _requireChat();
+    if (serverRawCount == 0) {
+      if (current.isNotEmpty) {
+        AppLogger.info(
+          'im',
+          'local history cleared by empty server window',
+          data: {
+            'channel_id': channelId,
+            'channel_type': channelType,
+            'removed_count': current.length,
+          },
+        );
+      }
+      return const <Map<String, Object?>>[];
+    }
+    if (serverMessages.isEmpty) {
+      return current;
+    }
+    final serverClientMsgNos = <String>{};
+    final serverSeqs = <int>{};
+    var minSeq = 0;
+    var minTimestamp = 0;
+    for (final message in serverMessages) {
+      final clientMsgNo = _value(message, ['client_msg_no']);
+      if (clientMsgNo.isNotEmpty) {
+        serverClientMsgNos.add(clientMsgNo);
+      }
+      final seq = _intValue(message, ['message_seq']);
+      if (seq > 0) {
+        serverSeqs.add(seq);
+        minSeq = minSeq == 0 ? seq : min(minSeq, seq);
+      }
+      final timestamp = _objectTimestampMs(message, [
+        'timestamp',
+        'create_time',
+        'msg_time',
+      ]);
+      if (timestamp > 0) {
+        minTimestamp = minTimestamp == 0
+            ? timestamp
+            : min(minTimestamp, timestamp);
+      }
+    }
+    var removed = 0;
+    final filtered = <Map<String, Object?>>[];
+    for (final message in current) {
+      if (_isLocalOnlyPendingMessage(message)) {
+        filtered.add(message);
+        continue;
+      }
+      final clientMsgNo = _value(message, ['client_msg_no']);
+      final seq = _intValue(message, ['message_seq']);
+      final knownByServer =
+          (clientMsgNo.isNotEmpty &&
+              serverClientMsgNos.contains(clientMsgNo)) ||
+          (seq > 0 && serverSeqs.contains(seq));
+      if (knownByServer) {
+        filtered.add(message);
+        continue;
+      }
+      final insideServerWindow = _insideServerHistoryWindow(
+        message,
+        minSeq: minSeq,
+        minTimestamp: minTimestamp,
+      );
+      if (insideServerWindow) {
+        removed++;
+        if (clientMsgNo.isNotEmpty) {
+          _cache.rememberDeletedMessage(
+            uid: chat.uid,
+            channelId: channelId,
+            channelType: channelType,
+            clientMsgNo: clientMsgNo,
+          );
+        }
+        continue;
+      }
+      filtered.add(message);
+    }
+    if (removed > 0) {
+      AppLogger.info(
+        'im',
+        'local history pruned by server window',
+        data: {
+          'channel_id': channelId,
+          'channel_type': channelType,
+          'server_count': serverMessages.length,
+          'removed_count': removed,
+        },
+      );
+    }
+    return filtered;
+  }
+
+  bool _isLocalOnlyPendingMessage(Map<String, Object?> message) {
+    if (_intValue(message, ['message_seq']) > 0 ||
+        _value(message, ['message_id']).isNotEmpty) {
+      return false;
+    }
+    final status = _value(message, ['status']).toLowerCase();
+    return status == 'sending' || status == 'queued' || status == 'failed';
+  }
+
+  bool _insideServerHistoryWindow(
+    Map<String, Object?> message, {
+    required int minSeq,
+    required int minTimestamp,
+  }) {
+    final seq = _intValue(message, ['message_seq']);
+    if (seq > 0 && minSeq > 0) {
+      return seq >= minSeq;
+    }
+    final timestamp = _objectTimestampMs(message, [
+      'timestamp',
+      'create_time',
+      'msg_time',
+    ]);
+    return timestamp > 0 && minTimestamp > 0 && timestamp >= minTimestamp;
   }
 
   String _historyRawDropReason(Map<String, Object?> item) {
@@ -4372,7 +4734,7 @@ class BusinessImService extends ChangeNotifier {
     _writeMessages(
       normalizedChannelId,
       channelType,
-      _sortAndLimit(messages, 200),
+      _sortAndLimit(messages, _messageCacheLimit),
     );
     if (clientMsgNo.isNotEmpty) {
       _replayPendingActionReceipts(
@@ -4449,7 +4811,7 @@ class BusinessImService extends ChangeNotifier {
     if (!inserted) {
       return;
     }
-    if (!_foreground || _manualStop || !_started) {
+    if (_manualStop || !_started) {
       return;
     }
     if (_boolValue(message['is_me'])) {
@@ -4584,6 +4946,31 @@ class BusinessImService extends ChangeNotifier {
     return messageSeq > 0 && _intValue(item, ['message_seq']) == messageSeq;
   }
 
+  String _readReceiptKey(
+    String channelId,
+    int channelType,
+    String clientMsgNo,
+  ) {
+    return '${_messageKey(channelId, channelType)}|$clientMsgNo';
+  }
+
+  bool _readMarkerCoversMessage(
+    Map<String, Object?> marker,
+    Map<String, Object?> message,
+  ) {
+    if (marker.isEmpty) {
+      return false;
+    }
+    final markerSeq = _intValue(marker, ['message_seq']);
+    final messageSeq = _intValue(message, ['message_seq']);
+    if (markerSeq > 0 && messageSeq > 0) {
+      return messageSeq <= markerSeq;
+    }
+    final markerMsgNo = _value(marker, ['client_msg_no']);
+    final clientMsgNo = _value(message, ['client_msg_no']);
+    return markerMsgNo.isNotEmpty && markerMsgNo == clientMsgNo;
+  }
+
   Map<String, Object?> _mergeMessageFields(
     Map<String, Object?> existing,
     Map<String, Object?> incoming,
@@ -4677,6 +5064,7 @@ class BusinessImService extends ChangeNotifier {
       channelType: channelType,
     );
     final key = _messageKey(channelId, channelType);
+    _invalidMessageChannels.add(key);
     _historySyncedChannels.remove(key);
     _historyRetryAfter.remove(key);
     _channelMessageVersions.remove(key);
