@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:flutter/widgets.dart';
 
+import '../calls/livekit_call_models.dart';
 import '../core/api_client.dart';
 import '../core/app_config.dart';
 import '../core/app_logger.dart';
@@ -90,6 +91,7 @@ class SessionController extends ChangeNotifier {
   bool get hasLoadedFriends => _friendCacheAt != null;
   Stream<BusinessImMessageEvent> get messageEvents => _im.messageEvents;
   Stream<BusinessImPresenceEvent> get presenceEvents => _im.presenceEvents;
+  Stream<BusinessImCallEvent> get callEvents => _im.callEvents;
 
   List<Map<String, Object?>> cachedConversations() => _im.cachedConversations();
 
@@ -969,6 +971,82 @@ class SessionController extends ChangeNotifier {
       device: _device,
       params: params,
     );
+  }
+
+  Future<LiveKitCallInfo> createLiveKitCall({
+    required String callType,
+    required String mediaType,
+    String receiverId = '',
+    String groupId = '',
+    String title = '',
+    List<String> inviteUserIds = const [],
+  }) async {
+    final current = _requireSession();
+    final result = await _api.liveKitCallCreate(
+      session: current,
+      device: _device,
+      callType: callType,
+      mediaType: mediaType,
+      receiverId: receiverId,
+      groupId: groupId,
+      title: title,
+      inviteUserIds: inviteUserIds,
+    );
+    return LiveKitCallInfo.fromJson(result);
+  }
+
+  Future<LiveKitCallInfo> acceptLiveKitCall(int callId) async {
+    final current = _requireSession();
+    final result = await _api.liveKitCallAccept(
+      session: current,
+      device: _device,
+      callId: callId,
+    );
+    return LiveKitCallInfo.fromJson(result);
+  }
+
+  Future<LiveKitCallInfo> rejectLiveKitCall(int callId) async {
+    final current = _requireSession();
+    final result = await _api.liveKitCallReject(
+      session: current,
+      device: _device,
+      callId: callId,
+    );
+    return LiveKitCallInfo.fromJson(result);
+  }
+
+  Future<LiveKitCallInfo> cancelLiveKitCall(int callId) async {
+    final current = _requireSession();
+    final result = await _api.liveKitCallCancel(
+      session: current,
+      device: _device,
+      callId: callId,
+    );
+    return LiveKitCallInfo.fromJson(result);
+  }
+
+  Future<LiveKitCallInfo> hangupLiveKitCall(
+    int callId, {
+    bool endCall = false,
+  }) async {
+    final current = _requireSession();
+    final result = await _api.liveKitCallHangup(
+      session: current,
+      device: _device,
+      callId: callId,
+      endCall: endCall,
+    );
+    return LiveKitCallInfo.fromJson(result);
+  }
+
+  Future<LiveKitCallInfo> liveKitCallToken(int callId) async {
+    final current = _requireSession();
+    final result = await _api.liveKitCallToken(
+      session: current,
+      device: _device,
+      callId: callId,
+    );
+    return LiveKitCallInfo.fromJson(result);
   }
 
   Future<Map<String, Object?>> recallMessage({

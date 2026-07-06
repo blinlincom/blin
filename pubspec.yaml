@@ -35,11 +35,12 @@ dependencies:
   dio: ^5.10.0
   mmkv: ^2.4.0
   crypto: ^3.0.7
-  encrypt: ^5.0.3
+  pointycastle: ^4.0.0
   path_provider: ^2.1.5
   photo_manager: ^3.9.0
   video_player: ^2.11.1
   audioplayers: ^6.8.1
+  livekit_client: ^2.8.1
 
 dev_dependencies:
   flutter_test:

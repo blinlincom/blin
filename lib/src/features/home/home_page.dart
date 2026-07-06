@@ -6,11 +6,13 @@ import 'dart:math';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:livekit_client/livekit_client.dart' as lk;
 import 'package:path_provider/path_provider.dart';
 import 'package:photo_manager/photo_manager.dart';
 import 'package:video_player/video_player.dart';
 
 import '../../app/session_controller.dart';
+import '../../calls/livekit_call_models.dart';
 import '../../core/app_config.dart';
 import '../../core/app_logger.dart';
 import '../../core/models.dart';
@@ -41,6 +43,7 @@ part 'common/media_preview.dart';
 part 'chat/media_viewer_pages.dart';
 part 'chat/tool_panel.dart';
 part 'chat/composer_bar.dart';
+part 'calls/livekit_call_page.dart';
 part 'common/section_header.dart';
 part 'common/navigation_helpers.dart';
 part 'chat/message_helpers.dart';
@@ -81,6 +84,8 @@ class _HomePageState extends State<HomePage> {
   int _totalUnread = 0;
   bool _initialSyncOverlayVisible = false;
   Timer? _initialSyncOverlayHideTimer;
+  final Set<int> _activeIncomingCallIds = <int>{};
+  StreamSubscription<BusinessImCallEvent>? _callSub;
 
   @override
   void initState() {
@@ -91,6 +96,7 @@ class _HomePageState extends State<HomePage> {
     _initialSyncOverlayVisible =
         widget.controller.initialHistorySyncState.blocked;
     widget.controller.addListener(_onControllerChanged);
+    _callSub = widget.controller.callEvents.listen(_onCallEvent);
   }
 
   @override
@@ -98,7 +104,9 @@ class _HomePageState extends State<HomePage> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.controller != widget.controller) {
       oldWidget.controller.removeListener(_onControllerChanged);
+      _callSub?.cancel();
       widget.controller.addListener(_onControllerChanged);
+      _callSub = widget.controller.callEvents.listen(_onCallEvent);
       _totalUnread = _conversationUnreadTotal(
         widget.controller.cachedConversations(),
       );
@@ -112,8 +120,36 @@ class _HomePageState extends State<HomePage> {
   @override
   void dispose() {
     _initialSyncOverlayHideTimer?.cancel();
+    _callSub?.cancel();
     widget.controller.removeListener(_onControllerChanged);
     super.dispose();
+  }
+
+  void _onCallEvent(BusinessImCallEvent event) {
+    final callEvent = event.event;
+    final call = callEvent.call;
+    if (!callEvent.isInvite ||
+        call.callId <= 0 ||
+        callEvent.operatorId == widget.controller.session?.userId ||
+        _activeIncomingCallIds.contains(call.callId)) {
+      return;
+    }
+    _activeIncomingCallIds.add(call.callId);
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) {
+        _activeIncomingCallIds.remove(call.callId);
+        return;
+      }
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => LiveKitCallPage.incoming(
+            controller: widget.controller,
+            initialCall: call,
+          ),
+        ),
+      );
+      _activeIncomingCallIds.remove(call.callId);
+    });
   }
 
   void _onControllerChanged() {

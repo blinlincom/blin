@@ -712,6 +712,97 @@ class ApiClient {
     );
   }
 
+  Future<Map<String, Object?>> liveKitCallCreate({
+    required UserSession session,
+    required String device,
+    required String callType,
+    required String mediaType,
+    String receiverId = '',
+    String groupId = '',
+    String title = '',
+    List<String> inviteUserIds = const [],
+  }) {
+    return imBusinessAction(
+      action: 'im_call_create',
+      session: session,
+      device: device,
+      params: {
+        'call_type': callType,
+        'media_type': mediaType,
+        if (receiverId.isNotEmpty) 'receiver_id': receiverId,
+        if (groupId.isNotEmpty) 'group_id': groupId,
+        if (title.isNotEmpty) 'title': title,
+        if (inviteUserIds.isNotEmpty) 'invite_user_ids': inviteUserIds,
+      },
+    );
+  }
+
+  Future<Map<String, Object?>> liveKitCallAccept({
+    required UserSession session,
+    required String device,
+    required int callId,
+  }) {
+    return imBusinessAction(
+      action: 'im_call_accept',
+      session: session,
+      device: device,
+      params: {'call_id': callId.toString()},
+    );
+  }
+
+  Future<Map<String, Object?>> liveKitCallReject({
+    required UserSession session,
+    required String device,
+    required int callId,
+  }) {
+    return imBusinessAction(
+      action: 'im_call_reject',
+      session: session,
+      device: device,
+      params: {'call_id': callId.toString()},
+    );
+  }
+
+  Future<Map<String, Object?>> liveKitCallCancel({
+    required UserSession session,
+    required String device,
+    required int callId,
+  }) {
+    return imBusinessAction(
+      action: 'im_call_cancel',
+      session: session,
+      device: device,
+      params: {'call_id': callId.toString()},
+    );
+  }
+
+  Future<Map<String, Object?>> liveKitCallHangup({
+    required UserSession session,
+    required String device,
+    required int callId,
+    bool endCall = false,
+  }) {
+    return imBusinessAction(
+      action: 'im_call_hangup',
+      session: session,
+      device: device,
+      params: {'call_id': callId.toString(), if (endCall) 'end_call': '1'},
+    );
+  }
+
+  Future<Map<String, Object?>> liveKitCallToken({
+    required UserSession session,
+    required String device,
+    required int callId,
+  }) {
+    return imBusinessAction(
+      action: 'im_call_token',
+      session: session,
+      device: device,
+      params: {'call_id': callId.toString()},
+    );
+  }
+
   Future<Map<String, Object?>> imBusinessAction({
     required String action,
     required UserSession session,

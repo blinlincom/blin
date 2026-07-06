@@ -6,6 +6,7 @@ import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 
+import '../calls/livekit_call_models.dart';
 import '../core/api_client.dart';
 import '../core/app_config.dart';
 import '../core/app_logger.dart';
@@ -58,6 +59,8 @@ class BusinessImService extends ChangeNotifier {
       StreamController<BusinessImMessageEvent>.broadcast();
   final StreamController<BusinessImPresenceEvent> _presenceEvents =
       StreamController<BusinessImPresenceEvent>.broadcast();
+  final StreamController<BusinessImCallEvent> _callEvents =
+      StreamController<BusinessImCallEvent>.broadcast();
 
   UserSession? _session;
   String _device = '';
@@ -110,6 +113,7 @@ class BusinessImService extends ChangeNotifier {
 
   Stream<BusinessImMessageEvent> get messageEvents => _messageEvents.stream;
   Stream<BusinessImPresenceEvent> get presenceEvents => _presenceEvents.stream;
+  Stream<BusinessImCallEvent> get callEvents => _callEvents.stream;
   bool get isStarted => _started;
   String get statusText => _statusText;
   String? get lastError => _lastError;
@@ -2594,11 +2598,53 @@ class BusinessImService extends ChangeNotifier {
       _handleGatewayReadReceipt(frame);
       return;
     }
+    if (_isGatewayCallFrame(frame)) {
+      _handleGatewayCall(frame);
+      return;
+    }
     if (!frame.isMessage) {
       AppLogger.info('im', 'gateway frame ignored', data: {'type': frame.type});
       return;
     }
     _handleGatewayMessage(frame);
+  }
+
+  bool _isGatewayCallFrame(GatewayFrame frame) {
+    final payload = frame.payload;
+    final event = payload['event']?.toString().toLowerCase() ?? '';
+    return frame.type.toLowerCase() == 'call' ||
+        payload['type']?.toString().toLowerCase() == 'call' ||
+        event.startsWith('call.');
+  }
+
+  void _handleGatewayCall(GatewayFrame frame) {
+    try {
+      final event = LiveKitCallEvent.fromGatewayPayload(frame.payload);
+      AppLogger.info(
+        'im',
+        'gateway call event received',
+        data: {
+          'event': event.event,
+          'call_id': event.call.callId,
+          'call_type': event.call.callType,
+          'media_type': event.call.mediaType,
+          'operator_id': event.operatorId,
+        },
+      );
+      if (!_callEvents.isClosed) {
+        _callEvents.add(BusinessImCallEvent(source: 'gateway', event: event));
+      }
+    } catch (error, stackTrace) {
+      AppLogger.error(
+        'im',
+        'gateway call event parse failed',
+        error: error,
+        stackTrace: stackTrace,
+        data: {'payload': frame.payload},
+      );
+    } finally {
+      unawaited(_ackGatewayFrame(frame));
+    }
   }
 
   bool _isGatewayPresenceFrame(GatewayFrame frame) {
@@ -7194,8 +7240,16 @@ class BusinessImService extends ChangeNotifier {
     unawaited(_messageSound.dispose());
     unawaited(_messageEvents.close());
     unawaited(_presenceEvents.close());
+    unawaited(_callEvents.close());
     super.dispose();
   }
+}
+
+class BusinessImCallEvent {
+  const BusinessImCallEvent({required this.source, required this.event});
+
+  final String source;
+  final LiveKitCallEvent event;
 }
 
 class BusinessImMessageEvent {

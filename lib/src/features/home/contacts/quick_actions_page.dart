@@ -21,8 +21,32 @@ class QuickActionsPage extends StatelessWidget {
       _ActionEntry(Icons.qr_code_scanner, '扫一扫', () => _showSoon(context)),
       _ActionEntry(Icons.payments_outlined, '收付款', () => _showSoon(context)),
       _ActionEntry(Icons.note_add_outlined, '新建笔记', () => _showSoon(context)),
-      _ActionEntry(Icons.phone_outlined, '语音通话', () => _showSoon(context)),
-      _ActionEntry(Icons.videocam_outlined, '视频通话', () => _showSoon(context)),
+      _ActionEntry(
+        Icons.phone_outlined,
+        '语音会议',
+        () => _push(
+          context,
+          LiveKitCallPage.create(
+            controller: controller,
+            callType: 'meeting',
+            mediaType: 'audio',
+            title: '语音会议',
+          ),
+        ),
+      ),
+      _ActionEntry(
+        Icons.videocam_outlined,
+        '视频会议',
+        () => _push(
+          context,
+          LiveKitCallPage.create(
+            controller: controller,
+            callType: 'meeting',
+            mediaType: 'video',
+            title: '视频会议',
+          ),
+        ),
+      ),
       _ActionEntry(
         Icons.group_work_outlined,
         '创建群聊',

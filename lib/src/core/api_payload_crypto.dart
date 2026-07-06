@@ -1,11 +1,11 @@
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
-import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
-import 'package:encrypt/encrypt.dart';
 import 'package:path_provider/path_provider.dart';
+
+import 'crypto_helpers.dart';
 
 class ApiPayloadCrypto {
   const ApiPayloadCrypto._();
@@ -28,11 +28,13 @@ class ApiPayloadCrypto {
       nonce: nonce,
     );
     final plain = jsonEncode(_normalized(payload));
-    final encrypted = Encrypter(
-      AES(Key(Uint8List.fromList(key.codeUnits)), mode: AESMode.cbc),
-    ).encrypt(plain, iv: IV(Uint8List.fromList(iv.codeUnits)));
+    final encrypted = CryptoHelpers.aesCbcPkcs7Encrypt(
+      key: key.codeUnits,
+      iv: iv.codeUnits,
+      plain: utf8.encode(plain),
+    );
     return {
-      'secure_payload': encrypted.base64,
+      'secure_payload': base64Encode(encrypted),
       'secure_payload_alg': 'AES-128-CBC',
       'secure_payload_version': '1',
     };
@@ -56,9 +58,13 @@ class ApiPayloadCrypto {
     }
     final key = _key(appId: appId, appKey: appKey, userToken: userToken);
     final iv = _responseIv(device: device, timestamp: timestamp, nonce: nonce);
-    final plain = Encrypter(
-      AES(Key(Uint8List.fromList(key.codeUnits)), mode: AESMode.cbc),
-    ).decrypt64(cipherText, iv: IV(Uint8List.fromList(iv.codeUnits)));
+    final plain = utf8.decode(
+      CryptoHelpers.aesCbcPkcs7Decrypt(
+        key: key.codeUnits,
+        iv: iv.codeUnits,
+        cipherText: base64Decode(cipherText),
+      ),
+    );
     final decoded = jsonDecode(plain);
     if (decoded is Map) {
       return decoded.cast<String, Object?>();
@@ -87,10 +93,11 @@ class ApiPayloadCrypto {
       timestamp: timestamp,
       nonce: nonce,
     );
-    final encrypted = Encrypter(
-      AES(Key(Uint8List.fromList(key.codeUnits)), mode: AESMode.cbc),
-    ).encryptBytes(bytes, iv: IV(Uint8List.fromList(iv.codeUnits)));
-    final encryptedBytes = encrypted.bytes;
+    final encryptedBytes = CryptoHelpers.aesCbcPkcs7Encrypt(
+      key: key.codeUnits,
+      iv: iv.codeUnits,
+      plain: bytes,
+    );
     final dir = await getTemporaryDirectory();
     final safeName = _basename(
       filePath,

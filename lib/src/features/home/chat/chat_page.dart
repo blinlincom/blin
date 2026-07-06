@@ -1427,8 +1427,8 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                           groupPresenceLoading: _groupPresenceLoading,
                           onBack: () => Navigator.of(context).maybePop(),
                           onDetail: _openChatDetail,
-                          onVoiceCall: () => _showCallPending('语音通话'),
-                          onVideoCall: () => _showCallPending('视频通话'),
+                          onVoiceCall: () => _startLiveKitCall('audio'),
+                          onVideoCall: () => _startLiveKitCall('video'),
                         ),
                         if (_replyQuote.isNotEmpty ||
                             _burnAfterRead ||
@@ -1539,8 +1539,8 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                             onContactCard: _sendContactCard,
                             onTransfer: _sendTransfer,
                             onRedPacket: _sendRedPacket,
-                            onGroupVoiceCall: () => _showCallPending('群语音通话'),
-                            onGroupVideoCall: () => _showCallPending('群视频通话'),
+                            onGroupVoiceCall: () => _startLiveKitCall('audio'),
+                            onGroupVideoCall: () => _startLiveKitCall('video'),
                             onGroupMembers: _isGroup ? _openGroupMembers : null,
                           ),
                       ],
@@ -1757,11 +1757,25 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     });
   }
 
-  void _showCallPending(String name) {
-    setState(() {
-      _error = null;
-      _message = '$name功能开发中';
-    });
+  Future<void> _startLiveKitCall(String mediaType) async {
+    if (_channelInvalid) {
+      setState(() => _message = '当前会话不可用');
+      return;
+    }
+    final callType = _isGroup ? 'group' : 'private';
+    await _push(
+      context,
+      LiveKitCallPage.create(
+        controller: widget.controller,
+        callType: callType,
+        mediaType: mediaType,
+        receiverId: _isGroup ? '' : _receiverId,
+        groupId: _isGroup ? _groupId : '',
+        title: _isGroup
+            ? _chatHeaderTitle()
+            : (mediaType == 'video' ? '视频通话' : '语音通话'),
+      ),
+    );
   }
 
   Future<void> _sendText() async {

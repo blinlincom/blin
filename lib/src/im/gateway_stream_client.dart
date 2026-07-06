@@ -3,9 +3,8 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
-import 'package:encrypt/encrypt.dart' as encrypt;
-
 import '../core/app_logger.dart';
+import '../core/crypto_helpers.dart';
 
 class GatewayFrame {
   const GatewayFrame({
@@ -337,16 +336,11 @@ class GatewayStreamClient {
     }
     final nonce = base64Decode(map['nonce']?.toString() ?? '');
     final ciphertext = base64Decode(map['ciphertext']?.toString() ?? '');
-    final encrypter = encrypt.Encrypter(
-      encrypt.AES(
-        encrypt.Key(Uint8List.fromList(keyBytes)),
-        mode: encrypt.AESMode.gcm,
-      ),
-    );
-    final plain = encrypter.decryptBytes(
-      encrypt.Encrypted(Uint8List.fromList(ciphertext)),
-      iv: encrypt.IV(Uint8List.fromList(nonce)),
-      associatedData: Uint8List.fromList(utf8.encode('bim-gateway-frame-v1')),
+    final plain = CryptoHelpers.aesGcmDecrypt(
+      key: keyBytes,
+      nonce: nonce,
+      cipherText: ciphertext,
+      associatedData: utf8.encode('bim-gateway-frame-v1'),
     );
     final decoded = jsonDecode(utf8.decode(plain));
     if (decoded is! Map) {
