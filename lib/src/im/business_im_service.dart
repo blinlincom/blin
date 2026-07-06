@@ -1045,14 +1045,29 @@ class BusinessImService extends ChangeNotifier {
       AppLogger.info(
         'im',
         'channel history sync requested',
-        data: {'channel_id': channelID, 'channel_type': channelType},
+        data: {
+          'channel_id': channelID,
+          'channel_type': channelType,
+          'cached_count': cached.length,
+        },
       );
-      cached = await syncChannelMessages(
-        channelID: channelID,
-        channelType: channelType,
-        groupId: groupId,
-        limit: limit,
-      );
+      if (cached.isEmpty) {
+        cached = await syncChannelMessages(
+          channelID: channelID,
+          channelType: channelType,
+          groupId: groupId,
+          limit: limit,
+        );
+      } else {
+        unawaited(
+          syncChannelMessages(
+            channelID: channelID,
+            channelType: channelType,
+            groupId: groupId,
+            limit: limit,
+          ),
+        );
+      }
     } else if (retryBlocked) {
       AppLogger.info(
         'im',
@@ -1382,6 +1397,23 @@ class BusinessImService extends ChangeNotifier {
         break;
       }
       if (all.length >= maxMessages) {
+        break;
+      }
+      if (page > 1 && added == 0 && pageMessages.isNotEmpty) {
+        AppLogger.warn(
+          'im',
+          'server history pagination stopped',
+          data: {
+            'channel_id': channelID,
+            'channel_type': channelType,
+            'reason': 'no_new_messages',
+            'page': page,
+            'raw_count': pageMessages.length,
+            'start_message_seq': startMessageSeq,
+            'next_start_message_seq': nextStartSeq,
+            'server_next_start_message_seq': serverNextStartSeq,
+          },
+        );
         break;
       }
       if (nextStartSeq <= 0 ||
@@ -2345,7 +2377,7 @@ class BusinessImService extends ChangeNotifier {
     if (_isValidGatewayCursor(stream.lastCursor)) {
       return stream.lastCursor;
     }
-    return '0-0';
+    return '';
   }
 
   bool _isValidGatewayCursor(String value) {

@@ -1313,27 +1313,72 @@ class _PickerFooterShell extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return DecoratedBox(
-      decoration: const BoxDecoration(
-        color: _surfaceColor,
-        border: Border(top: BorderSide(color: _lightBorderColor)),
-      ),
-      child: SafeArea(
-        top: false,
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(minHeight: 58),
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(14, 8, 14, 8),
-            child: Row(
-              children: [
-                Expanded(child: leading),
-                const SizedBox(width: 12),
-                ...actions,
-              ],
+    final compact = MediaQuery.sizeOf(context).width < 380;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final actionMaxWidth = min(
+          constraints.maxWidth * (compact ? 0.58 : 0.62),
+          compact ? 190.0 : 260.0,
+        );
+        return DecoratedBox(
+          decoration: const BoxDecoration(
+            color: _surfaceColor,
+            border: Border(top: BorderSide(color: _lightBorderColor)),
+          ),
+          child: SafeArea(
+            top: false,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(minHeight: 58),
+              child: Padding(
+                padding: EdgeInsets.fromLTRB(
+                  compact ? 10 : 14,
+                  8,
+                  compact ? 10 : 14,
+                  8,
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    Expanded(
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        child: leading,
+                      ),
+                    ),
+                    SizedBox(width: compact ? 8 : 12),
+                    ConstrainedBox(
+                      constraints: BoxConstraints(maxWidth: actionMaxWidth),
+                      child: SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        reverse: true,
+                        physics: const ClampingScrollPhysics(),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            for (
+                              var index = 0;
+                              index < actions.length;
+                              index++
+                            ) ...[
+                              if (index > 0) SizedBox(width: compact ? 6 : 8),
+                              ConstrainedBox(
+                                constraints: const BoxConstraints(
+                                  minHeight: 44,
+                                ),
+                                child: actions[index],
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 }

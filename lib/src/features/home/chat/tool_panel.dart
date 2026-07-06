@@ -166,18 +166,9 @@ class _ChatToolsPanelState extends State<_ChatToolsPanel> {
               onPageChanged: (value) => setState(() => _pageIndex = value),
               itemBuilder: (context, pageIndex) {
                 final pageItems = pages[pageIndex];
-                return GridView.builder(
+                return Padding(
                   padding: const EdgeInsets.fromLTRB(18, 13, 18, 8),
-                  physics: const NeverScrollableScrollPhysics(),
-                  itemCount: pageItems.length,
-                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: 4,
-                    mainAxisExtent: 62,
-                    crossAxisSpacing: 10,
-                    mainAxisSpacing: 6,
-                  ),
-                  itemBuilder: (context, index) =>
-                      _ToolButton(item: pageItems[index]),
+                  child: _ToolPageGrid(items: pageItems),
                 );
               },
             ),
@@ -209,6 +200,47 @@ class _ChatToolsPanelState extends State<_ChatToolsPanel> {
             const SizedBox(height: 10),
         ],
       ),
+    );
+  }
+}
+
+class _ToolPageGrid extends StatelessWidget {
+  const _ToolPageGrid({required this.items});
+
+  final List<_ToolItem> items;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        for (var row = 0; row < 2; row++) ...[
+          Expanded(
+            child: Row(
+              children: [
+                for (var column = 0; column < 4; column++)
+                  Expanded(
+                    child: Padding(
+                      padding: EdgeInsets.only(
+                        left: column == 0 ? 0 : 5,
+                        right: column == 3 ? 0 : 5,
+                      ),
+                      child: Builder(
+                        builder: (context) {
+                          final index = row * 4 + column;
+                          if (index >= items.length) {
+                            return const SizedBox.shrink();
+                          }
+                          return _ToolButton(item: items[index]);
+                        },
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          if (row == 0) const SizedBox(height: 6),
+        ],
+      ],
     );
   }
 }
