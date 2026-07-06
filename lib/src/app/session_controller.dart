@@ -8,6 +8,7 @@ import '../core/app_config.dart';
 import '../core/app_logger.dart';
 import '../core/models.dart';
 import '../core/session_store.dart';
+import '../features/moments/moments_cache_store.dart';
 import '../im/business_im_service.dart';
 import '../im/chat_feature_service.dart';
 import '../im/im_cache_store.dart';
@@ -20,11 +21,13 @@ class SessionController extends ChangeNotifier {
     required BusinessImService im,
     required ChatFeatureService chat,
     required ImCacheStore cache,
+    required MomentsCacheStore momentsCache,
   }) : _api = api,
        _store = store,
        _im = im,
        _chat = chat,
-       _cache = cache {
+       _cache = cache,
+       _momentsCache = momentsCache {
     _hydrateCachedLaunchState();
     _lastImStatusText = _im.statusText;
     _im.addListener(_onImServiceChanged);
@@ -36,6 +39,7 @@ class SessionController extends ChangeNotifier {
   final BusinessImService _im;
   final ChatFeatureService _chat;
   final ImCacheStore _cache;
+  final MomentsCacheStore _momentsCache;
 
   UserSession? _session;
   AppInfo? _appInfo;
@@ -668,6 +672,174 @@ class SessionController extends ChangeNotifier {
       data: {'count': list.length},
     );
     return list;
+  }
+
+  List<Map<String, Object?>> cachedMomentsFeed() {
+    final uid = _chatUid();
+    if (uid.isEmpty) {
+      return const [];
+    }
+    return _copyList(_momentsCache.readFeed(uid));
+  }
+
+  String readMomentsDraft() {
+    final uid = _chatUid();
+    if (uid.isEmpty) {
+      return '';
+    }
+    return _momentsCache.readDraft(uid);
+  }
+
+  void writeMomentsDraft(String text) {
+    final uid = _chatUid();
+    if (uid.isEmpty) {
+      return;
+    }
+    _momentsCache.writeDraft(uid: uid, text: text);
+  }
+
+  void clearMomentsDraft() {
+    final uid = _chatUid();
+    if (uid.isEmpty) {
+      return;
+    }
+    _momentsCache.clearDraft(uid);
+  }
+
+  Future<Map<String, Object?>> loadMomentsFeed({
+    int page = 1,
+    int limit = 20,
+  }) async {
+    final current = _requireSession();
+    AppLogger.info(
+      'moments',
+      'load feed start',
+      data: {'page': page, 'limit': limit},
+    );
+    final data = await _api.momentsFeed(
+      session: current,
+      device: _device,
+      page: page,
+      limit: limit,
+    );
+    final list = _mapListFromPayload(data);
+    if (page <= 1) {
+      _momentsCache.writeFeed(uid: _chatUid(), posts: list);
+    }
+    AppLogger.info(
+      'moments',
+      'load feed success',
+      data: {'page': page, 'count': list.length},
+    );
+    return data;
+  }
+
+  Future<Map<String, Object?>> publishMoment({
+    required String content,
+    required String mediaJson,
+    int visibility = 0,
+    List<int> visibleUserIds = const [],
+    List<int> remindUserIds = const [],
+    String location = '',
+  }) async {
+    final current = _requireSession();
+    final data = await _api.momentsPublish(
+      session: current,
+      device: _device,
+      content: content,
+      mediaJson: mediaJson,
+      visibility: visibility,
+      visibleUserIds: visibleUserIds,
+      remindUserIds: remindUserIds,
+      location: location,
+    );
+    final post = data['post'];
+    if (post is Map) {
+      final uid = _chatUid();
+      final cached = _momentsCache.readFeed(uid);
+      _momentsCache.writeFeed(
+        uid: uid,
+        posts: [
+          post.cast<String, Object?>(),
+          ...cached.where(
+            (item) =>
+                item['post_id']?.toString() != post['post_id']?.toString(),
+          ),
+        ],
+      );
+      notifyListeners();
+    }
+    clearMomentsDraft();
+    return data;
+  }
+
+  Future<Map<String, Object?>> uploadMomentMedia({
+    required String filePath,
+    required String mediaType,
+    String name = '',
+    String mime = '',
+    int size = 0,
+    int width = 0,
+    int height = 0,
+    int duration = 0,
+    void Function(double progress)? onUploadProgress,
+  }) {
+    final current = _requireSession();
+    return _api.momentsMediaUpload(
+      session: current,
+      device: _device,
+      filePath: filePath,
+      mediaType: mediaType,
+      name: name,
+      mime: mime,
+      size: size,
+      width: width,
+      height: height,
+      duration: duration,
+      onUploadProgress: onUploadProgress,
+    );
+  }
+
+  Future<Map<String, Object?>> likeMoment(int postId, {required bool liked}) {
+    final current = _requireSession();
+    return liked
+        ? _api.momentsUnlike(session: current, device: _device, postId: postId)
+        : _api.momentsLike(session: current, device: _device, postId: postId);
+  }
+
+  Future<Map<String, Object?>> commentMoment({
+    required int postId,
+    required String content,
+    int replyCommentId = 0,
+    int replyUserId = 0,
+  }) {
+    final current = _requireSession();
+    return _api.momentsCommentAdd(
+      session: current,
+      device: _device,
+      postId: postId,
+      content: content,
+      replyCommentId: replyCommentId,
+      replyUserId: replyUserId,
+    );
+  }
+
+  Future<Map<String, Object?>> deleteMoment(int postId) {
+    final current = _requireSession();
+    return _api.momentsDelete(
+      session: current,
+      device: _device,
+      postId: postId,
+    );
+  }
+
+  Future<Map<String, Object?>> deleteMomentComment(int commentId) {
+    final current = _requireSession();
+    return _api.momentsCommentDelete(
+      session: current,
+      device: _device,
+      commentId: commentId,
+    );
   }
 
   Future<List<Map<String, Object?>>> loadLocalMessages({
@@ -1571,6 +1743,31 @@ class SessionController extends ChangeNotifier {
   List<Map<String, Object?>> _copyList(List<Map<String, Object?>> list) {
     return list
         .map((item) => Map<String, Object?>.from(item))
+        .toList(growable: false);
+  }
+
+  List<Map<String, Object?>> _mapListFromPayload(Map<String, Object?> data) {
+    Object? list;
+    for (final key in ['list', 'items', 'rows', 'records']) {
+      final value = data[key];
+      if (value is List) {
+        list = value;
+        break;
+      }
+    }
+    final nested = data['data'];
+    if (list == null && nested is List) {
+      list = nested;
+    }
+    if (list == null && nested is Map) {
+      return _mapListFromPayload(nested.cast<String, Object?>());
+    }
+    if (list is! List) {
+      return const [];
+    }
+    return list
+        .whereType<Map>()
+        .map((item) => item.cast<String, Object?>())
         .toList(growable: false);
   }
 

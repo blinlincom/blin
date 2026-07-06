@@ -531,6 +531,187 @@ class ApiClient {
     return [];
   }
 
+  Future<Map<String, Object?>> momentsFeed({
+    required UserSession session,
+    required String device,
+    int page = 1,
+    int limit = 20,
+  }) async {
+    final result = await secureSignedImPost<Map<String, Object?>>(
+      'moments_feed',
+      session: session,
+      device: device,
+      params: {'page': page.toString(), 'limit': limit.toString()},
+      secureResponse: true,
+    );
+    if (!result.isSuccess) {
+      throw ApiException(result.message, code: result.code);
+    }
+    return result.data;
+  }
+
+  Future<Map<String, Object?>> momentsUser({
+    required UserSession session,
+    required String device,
+    required int userId,
+    int page = 1,
+    int limit = 20,
+  }) async {
+    final result = await secureSignedImPost<Map<String, Object?>>(
+      'moments_user',
+      session: session,
+      device: device,
+      params: {
+        'user_id': userId.toString(),
+        'page': page.toString(),
+        'limit': limit.toString(),
+      },
+      secureResponse: true,
+    );
+    if (!result.isSuccess) {
+      throw ApiException(result.message, code: result.code);
+    }
+    return result.data;
+  }
+
+  Future<Map<String, Object?>> momentsPublish({
+    required UserSession session,
+    required String device,
+    required String content,
+    required String mediaJson,
+    int visibility = 0,
+    List<int> visibleUserIds = const [],
+    List<int> remindUserIds = const [],
+    String location = '',
+  }) async {
+    final result = await secureSignedImPost<Map<String, Object?>>(
+      'moments_publish',
+      session: session,
+      device: device,
+      params: {
+        'content': content,
+        'media': mediaJson,
+        'visibility': visibility.toString(),
+        if (visibleUserIds.isNotEmpty) 'visible_user_ids': visibleUserIds,
+        if (remindUserIds.isNotEmpty) 'remind_user_ids': remindUserIds,
+        if (location.isNotEmpty) 'location': location,
+      },
+      secureResponse: true,
+    );
+    if (!result.isSuccess) {
+      throw ApiException(result.message, code: result.code);
+    }
+    return result.data;
+  }
+
+  Future<Map<String, Object?>> momentsMediaUpload({
+    required UserSession session,
+    required String device,
+    required String filePath,
+    required String mediaType,
+    String name = '',
+    String mime = '',
+    int size = 0,
+    int width = 0,
+    int height = 0,
+    int duration = 0,
+    void Function(double progress)? onUploadProgress,
+  }) {
+    final clientMsgNo = _nonce();
+    return secureImBusinessAction(
+      action: 'moments_media_upload',
+      session: session,
+      device: device,
+      clientMsgNo: clientMsgNo,
+      params: {'client_msg_no': clientMsgNo},
+      secureParams: {
+        'media_type': mediaType,
+        if (name.isNotEmpty) 'name': name,
+        if (mime.isNotEmpty) 'mime': mime,
+        if (size > 0) 'size': size.toString(),
+        if (width > 0) 'width': width.toString(),
+        if (height > 0) 'height': height.toString(),
+        if (duration > 0) 'duration': duration.toString(),
+      },
+      filePath: filePath,
+      onUploadProgress: onUploadProgress,
+      secureResponse: true,
+    );
+  }
+
+  Future<Map<String, Object?>> momentsDelete({
+    required UserSession session,
+    required String device,
+    required int postId,
+  }) {
+    return imBusinessAction(
+      action: 'moments_delete',
+      session: session,
+      device: device,
+      params: {'post_id': postId.toString()},
+    );
+  }
+
+  Future<Map<String, Object?>> momentsLike({
+    required UserSession session,
+    required String device,
+    required int postId,
+  }) {
+    return imBusinessAction(
+      action: 'moments_like',
+      session: session,
+      device: device,
+      params: {'post_id': postId.toString()},
+    );
+  }
+
+  Future<Map<String, Object?>> momentsUnlike({
+    required UserSession session,
+    required String device,
+    required int postId,
+  }) {
+    return imBusinessAction(
+      action: 'moments_unlike',
+      session: session,
+      device: device,
+      params: {'post_id': postId.toString()},
+    );
+  }
+
+  Future<Map<String, Object?>> momentsCommentAdd({
+    required UserSession session,
+    required String device,
+    required int postId,
+    required String content,
+    int replyCommentId = 0,
+    int replyUserId = 0,
+  }) {
+    return imBusinessAction(
+      action: 'moments_comment_add',
+      session: session,
+      device: device,
+      params: {
+        'post_id': postId.toString(),
+        'content': content,
+        if (replyCommentId > 0) 'reply_comment_id': replyCommentId.toString(),
+        if (replyUserId > 0) 'reply_user_id': replyUserId.toString(),
+      },
+    );
+  }
+
+  Future<Map<String, Object?>> momentsCommentDelete({
+    required UserSession session,
+    required String device,
+    required int commentId,
+  }) {
+    return imBusinessAction(
+      action: 'moments_comment_delete',
+      session: session,
+      device: device,
+      params: {'comment_id': commentId.toString()},
+    );
+  }
+
   Future<Map<String, Object?>> imBusinessAction({
     required String action,
     required UserSession session,

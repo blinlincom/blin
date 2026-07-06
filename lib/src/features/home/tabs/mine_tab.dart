@@ -93,7 +93,8 @@ class MineTab extends StatelessWidget {
                 iconColor: const Color(0xff34c759),
                 title: '朋友圈',
                 subtitle: '',
-                onTap: () => _showSoon(context),
+                onTap: () =>
+                    _push(context, MomentsPage(controller: controller)),
               ),
               _MenuTile(
                 icon: Icons.wallet_outlined,

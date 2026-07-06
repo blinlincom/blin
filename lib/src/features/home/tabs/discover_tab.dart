@@ -25,7 +25,7 @@ class DiscoverTab extends StatelessWidget {
               color: const Color(0xff8e99a8),
               circle: true,
             ),
-            onTap: () => _showSoon(context),
+            onTap: () => _push(context, MomentsPage(controller: controller)),
           ),
           const _GroupGap(),
           _MenuTile(
