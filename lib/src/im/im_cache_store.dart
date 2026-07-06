@@ -18,6 +18,7 @@ class ImCacheStore {
   static const _gatewayCursorPrefix = 'im_gateway_cursor';
   static const _clearPrefix = 'im_chat_clear_marker';
   static const _deletedPrefix = 'im_deleted_messages';
+  static const _historySyncedPrefix = 'im_history_synced';
 
   String readDraft({required String channelId, required int channelType}) {
     return _kv.decodeString(_draftKey(channelId, channelType)) ?? '';
@@ -126,6 +127,7 @@ class ImCacheStore {
       '$_messagePrefix:$uid:',
       '$_readPrefix:$uid:',
       '$_deletedPrefix:$uid:',
+      '$_historySyncedPrefix:$uid:',
     ];
     final keys = _kv.allKeys
         .where((key) => prefixes.any(key.startsWith))
@@ -161,6 +163,7 @@ class ImCacheStore {
       _messageKey(uid, channelId, channelType),
       _readMarkerKey(uid, channelId, channelType),
       _deletedKey(uid, channelId, channelType),
+      _historySyncedKey(uid, channelId, channelType),
       _draftKey(channelId, channelType),
     ]);
     final conversations = readConversations(uid)
@@ -187,6 +190,7 @@ class ImCacheStore {
       _messageKey(uid, channelId, channelType),
       _readMarkerKey(uid, channelId, channelType),
       _deletedKey(uid, channelId, channelType),
+      _historySyncedKey(uid, channelId, channelType),
       _draftKey(channelId, channelType),
     ]);
     final conversations = readConversations(uid)
@@ -415,6 +419,33 @@ class ImCacheStore {
     _kv.encodeString(_gatewayCursorKey(uid, device), cursor);
   }
 
+  bool isChannelHistorySynced({
+    required String uid,
+    required String channelId,
+    required int channelType,
+  }) {
+    return _kv.decodeInt(_historySyncedKey(uid, channelId, channelType)) == 1;
+  }
+
+  void writeChannelHistorySynced({
+    required String uid,
+    required String channelId,
+    required int channelType,
+  }) {
+    if (uid.isEmpty || channelId.isEmpty || channelType <= 0) {
+      return;
+    }
+    _kv.encodeInt(_historySyncedKey(uid, channelId, channelType), 1);
+  }
+
+  void removeChannelHistorySynced({
+    required String uid,
+    required String channelId,
+    required int channelType,
+  }) {
+    _kv.removeValue(_historySyncedKey(uid, channelId, channelType));
+  }
+
   String _draftKey(String channelId, int channelType) {
     return '$_draftPrefix:$channelType:$channelId';
   }
@@ -429,6 +460,10 @@ class ImCacheStore {
 
   String _gatewayCursorKey(String uid, String device) {
     return '$_gatewayCursorPrefix:$uid:$device';
+  }
+
+  String _historySyncedKey(String uid, String channelId, int channelType) {
+    return '$_historySyncedPrefix:$uid:$channelType:$channelId';
   }
 
   String _globalClearKey(String uid) {

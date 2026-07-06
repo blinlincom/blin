@@ -67,6 +67,7 @@ class BusinessImService extends ChangeNotifier {
   String _gatewayAckUrl = '';
   DateTime? _gatewayTicketExpiresAt;
   DateTime? _gatewayChatIssuedAt;
+  bool _gatewayOpenTicketAvailable = false;
   final Queue<GatewayFrame> _gatewayAckQueue = Queue<GatewayFrame>();
   Timer? _reconnectTimer;
   bool _started = false;
@@ -224,6 +225,7 @@ class BusinessImService extends ChangeNotifier {
     _session = session;
     _device = device;
     _gatewayChatIssuedAt = chatIsFresh ? DateTime.now() : null;
+    _gatewayOpenTicketAvailable = chatIsFresh;
     _groupMuteStates.clear();
     _historySyncedChannels.clear();
     _historyRetryAfter.clear();
@@ -286,6 +288,7 @@ class BusinessImService extends ChangeNotifier {
     _gatewayAckUrl = '';
     _gatewayTicketExpiresAt = null;
     _gatewayChatIssuedAt = null;
+    _gatewayOpenTicketAvailable = false;
     _gatewayAckQueue.clear();
     _gatewayAckDraining = false;
     _syncingConversations = null;
@@ -629,9 +632,7 @@ class BusinessImService extends ChangeNotifier {
         .map(_normalizeConversation)
         .where(_conversationVisibleAfterClear)
         .toList(growable: false);
-    _historySyncedChannels.remove(_messageKey(channelID, channelType));
-    _historyRetryAfter.remove(_messageKey(channelID, channelType));
-    _syncingChannels.remove(_messageKey(channelID, channelType));
+    _forgetChannelHistorySynced(channelID, channelType);
     _markMessageChannel(
       source: 'clear_channel_chat',
       channelId: channelID,
@@ -1083,7 +1084,7 @@ class BusinessImService extends ChangeNotifier {
         'count': cached.length,
       },
     );
-    final historySynced = _historySyncedChannels.contains(key);
+    final historySynced = _isChannelHistorySynced(channelID, channelType);
     final retryAfter = _historyRetryAfter[key];
     final retryBlocked =
         retryAfter != null && DateTime.now().isBefore(retryAfter);
@@ -1126,6 +1127,7 @@ class BusinessImService extends ChangeNotifier {
         },
       );
     }
+    final syncedAfterLoad = _isChannelHistorySynced(channelID, channelType);
     final sorted = _sortAndLimit(cached, limit);
     AppLogger.info(
       'im',
@@ -1135,7 +1137,7 @@ class BusinessImService extends ChangeNotifier {
         'channel_id': channelID,
         'channel_type': channelType,
         'group_id': groupId,
-        'history_synced': historySynced,
+        'history_synced': syncedAfterLoad,
         'needs_history_sync': needsHistorySync,
         'retry_blocked': retryBlocked,
         'open_channel': _openMessageChannels.contains(key),
@@ -1215,7 +1217,7 @@ class BusinessImService extends ChangeNotifier {
     final session = _requireSession();
     final chat = _requireChat();
     if (!_historySyncEnabledForType(channelType, chat)) {
-      _historySyncedChannels.add(_messageKey(channelID, channelType));
+      _markChannelHistorySynced(channelID, channelType, persist: false);
       AppLogger.info(
         'im',
         'channel history sync skipped',
@@ -1275,7 +1277,7 @@ class BusinessImService extends ChangeNotifier {
           conversationMessage,
         );
       }
-      _historySyncedChannels.add(_messageKey(channelID, channelType));
+      _markChannelHistorySynced(channelID, channelType);
       _historyRetryAfter.remove(_messageKey(channelID, channelType));
       _markMessageChannel(
         source: 'history_sync',
@@ -1568,6 +1570,68 @@ class BusinessImService extends ChangeNotifier {
     return chat.privateHistorySyncEnabled || chat.groupHistorySyncEnabled;
   }
 
+  bool _isChannelHistorySynced(String channelId, int channelType) {
+    final chat = _session?.chat;
+    if (chat == null) {
+      return false;
+    }
+    channelId = _canonicalChannelId(channelId, channelType);
+    final key = _messageKey(channelId, channelType);
+    if (_historySyncedChannels.contains(key)) {
+      return true;
+    }
+    if (!_historySyncEnabledForType(channelType, chat)) {
+      return false;
+    }
+    final persisted = _cache.isChannelHistorySynced(
+      uid: chat.uid,
+      channelId: channelId,
+      channelType: channelType,
+    );
+    if (persisted) {
+      _historySyncedChannels.add(key);
+    }
+    return persisted;
+  }
+
+  void _markChannelHistorySynced(
+    String channelId,
+    int channelType, {
+    bool persist = true,
+  }) {
+    final chat = _session?.chat;
+    if (chat == null) {
+      return;
+    }
+    channelId = _canonicalChannelId(channelId, channelType);
+    final key = _messageKey(channelId, channelType);
+    _historySyncedChannels.add(key);
+    if (persist && _historySyncEnabledForType(channelType, chat)) {
+      _cache.writeChannelHistorySynced(
+        uid: chat.uid,
+        channelId: channelId,
+        channelType: channelType,
+      );
+    }
+  }
+
+  void _forgetChannelHistorySynced(String channelId, int channelType) {
+    final chat = _session?.chat;
+    if (chat == null) {
+      return;
+    }
+    channelId = _canonicalChannelId(channelId, channelType);
+    final key = _messageKey(channelId, channelType);
+    _historySyncedChannels.remove(key);
+    _historyRetryAfter.remove(key);
+    _syncingChannels.remove(key);
+    _cache.removeChannelHistorySynced(
+      uid: chat.uid,
+      channelId: channelId,
+      channelType: channelType,
+    );
+  }
+
   List<Map<String, Object?>> _currentLocalConversations(ChatSession chat) {
     return _cache
         .readConversations(chat.uid)
@@ -1591,11 +1655,12 @@ class BusinessImService extends ChangeNotifier {
       try {
         final channelId = _value(item, ['channel_id']);
         final channelType = _intValue(item, ['channel_type']);
+        final shouldHydrateHistory = onProgress != null;
         final hasSummary =
             _value(item, ['content']).isNotEmpty &&
             _value(item, ['content_type']).isNotEmpty &&
             _value(item, ['msg_time', 'timestamp', 'create_time']).isNotEmpty;
-        if (hasSummary ||
+        if ((!shouldHydrateHistory && hasSummary) ||
             !_historySyncEnabledForType(channelType, _requireChat())) {
           hydrated.add(item);
           continue;
@@ -1608,6 +1673,19 @@ class BusinessImService extends ChangeNotifier {
         );
         final lastMessage = _lastConversationMessage(messages);
         if (lastMessage.isEmpty) {
+          if (hasSummary) {
+            AppLogger.warn(
+              'im',
+              'conversation history hydration kept server summary',
+              data: {
+                'channel_id': channelId,
+                'channel_type': channelType,
+                'reason': 'empty_history_with_summary',
+              },
+            );
+            hydrated.add(item);
+            continue;
+          }
           AppLogger.info(
             'im',
             'empty conversation dropped after history hydration',
@@ -2093,7 +2171,7 @@ class BusinessImService extends ChangeNotifier {
     var lastProgress = -1.0;
     return (progress) {
       final normalized = progress.clamp(0, 1).toDouble();
-      if (normalized < 1 && (normalized - lastProgress).abs() < 0.02) {
+      if (normalized < 1 && (normalized - lastProgress).abs() < 0.1) {
         return;
       }
       lastProgress = normalized;
@@ -2113,11 +2191,6 @@ class BusinessImService extends ChangeNotifier {
         channelId: channelId,
         channelType: channelType,
         message: message,
-      );
-      _markMessageChannel(
-        source: 'send_upload_progress',
-        channelId: channelId,
-        channelType: channelType,
       );
     };
   }
@@ -2329,6 +2402,7 @@ class BusinessImService extends ChangeNotifier {
       if (stream == null || stream.ticket.isEmpty || openUrl.isEmpty) {
         throw ApiException('Gateway 实时连接材料缺失');
       }
+      _consumeGatewayOpenTicket();
       final uri = Uri.parse(openUrl);
       final client = GatewayStreamClient();
       final epoch = ++_gatewayEpoch;
@@ -2411,11 +2485,12 @@ class BusinessImService extends ChangeNotifier {
     }
   }
 
-  Future<ChatSession> _refreshGatewayChat() async {
+  Future<ChatSession> _refreshGatewayChat({required bool forOpen}) async {
     final session = _requireSession();
     final chat = await _api.connectIm(session: session, device: _device);
     _session = session.copyWith(chat: chat);
-    _gatewayChatIssuedAt = DateTime.now();
+    _gatewayChatIssuedAt = forOpen ? DateTime.now() : null;
+    _gatewayOpenTicketAvailable = forOpen;
     return chat;
   }
 
@@ -2433,7 +2508,12 @@ class BusinessImService extends ChangeNotifier {
       );
       return cached;
     }
-    return _refreshGatewayChat();
+    return _refreshGatewayChat(forOpen: true);
+  }
+
+  void _consumeGatewayOpenTicket() {
+    _gatewayOpenTicketAvailable = false;
+    _gatewayChatIssuedAt = null;
   }
 
   ChatSession? _validCachedGatewayChat() {
@@ -2444,7 +2524,8 @@ class BusinessImService extends ChangeNotifier {
         stream == null ||
         !stream.isAvailable ||
         _gatewayOpenUrl(chat).isEmpty ||
-        issuedAt == null) {
+        issuedAt == null ||
+        !_gatewayOpenTicketAvailable) {
       return null;
     }
     final expiresAt = issuedAt.add(Duration(seconds: max(30, stream.expireIn)));
@@ -3090,7 +3171,7 @@ class BusinessImService extends ChangeNotifier {
         expiresAt.isAfter(DateTime.now().add(const Duration(seconds: 15)))) {
       return _gatewayTicket;
     }
-    final chat = await _refreshGatewayChat();
+    final chat = await _refreshGatewayChat(forOpen: false);
     final stream = chat.stream;
     final openUrl = _gatewayOpenUrl(chat);
     if (stream == null || stream.ticket.isEmpty || openUrl.isEmpty) {
@@ -3345,6 +3426,8 @@ class BusinessImService extends ChangeNotifier {
       'is_me': _isCurrentUserMessage(senderId: senderId, senderUid: fromUid),
       'content': normalizedContent,
       'content_type': contentType,
+      if (_contentTypeCode(contentType) > 0)
+        'type': _contentTypeCode(contentType),
       'payload': normalizedPayload,
       'timestamp': _value(message, ['create_time', 'timestamp']),
       'status': _deliveryStatusFromSources([
@@ -3628,6 +3711,25 @@ class BusinessImService extends ChangeNotifier {
       ImMessageTypes.sticker => ChatContentTypes.sticker,
       ImMessageTypes.contactCard => ChatContentTypes.contactCard,
       _ => '',
+    };
+  }
+
+  int _contentTypeCode(String contentType) {
+    return switch (contentType) {
+      ChatContentTypes.text => ImMessageTypes.text,
+      ChatContentTypes.image => ImMessageTypes.image,
+      ChatContentTypes.voice => ImMessageTypes.voice,
+      ChatContentTypes.video => ImMessageTypes.video,
+      ChatContentTypes.file => ImMessageTypes.file,
+      ChatContentTypes.transfer => ImMessageTypes.transfer,
+      ChatContentTypes.redPacket => ImMessageTypes.redPacket,
+      ChatContentTypes.redPacketReceived => ImMessageTypes.redPacketReceived,
+      ChatContentTypes.transferReceived => ImMessageTypes.transferReceived,
+      ChatContentTypes.emoji => ImMessageTypes.emoji,
+      ChatContentTypes.gif => ImMessageTypes.gif,
+      ChatContentTypes.sticker => ImMessageTypes.sticker,
+      ChatContentTypes.contactCard => ImMessageTypes.contactCard,
+      _ => 0,
     };
   }
 
@@ -3977,6 +4079,24 @@ class BusinessImService extends ChangeNotifier {
         rawMergedPayload['content_type']?.toString() ??
         fallback['content_type']?.toString() ??
         '';
+    final messageSeq = _intValue(
+      result,
+      ['message_seq'],
+      fallback: _intValue(sendAck, [
+        'message_seq',
+      ], fallback: _intValue(fallback, ['message_seq'])),
+    );
+    final messageType = _intValue(
+      result,
+      ['type'],
+      fallback: _intValue(
+        sendAck,
+        ['type'],
+        fallback: _intValue(rawMergedPayload, [
+          'type',
+        ], fallback: _contentTypeCode(contentType)),
+      ),
+    );
     final mergedPayload = _ensureBusinessPayload(
       rawMergedPayload,
       contentType: contentType,
@@ -3988,6 +4108,8 @@ class BusinessImService extends ChangeNotifier {
       'message_id': _value(result, [
         'message_id',
       ], fallback: _value(sendAck, ['message_id'])),
+      'message_seq': messageSeq,
+      if (messageType > 0) 'type': messageType,
       'client_msg_no': clientMsgNo,
       'channel_id': channelId,
       'channel_type': channelType,
@@ -4136,6 +4258,8 @@ class BusinessImService extends ChangeNotifier {
       ),
       'content': _payloadContent(normalizedPayload),
       'content_type': contentType,
+      if (_contentTypeCode(contentType) > 0)
+        'type': _contentTypeCode(contentType),
       'payload': normalizedPayload,
       'timestamp': _formatTimestamp(messageTime),
       'status': _deliveryStatusFromSources([payload]),
@@ -4203,6 +4327,8 @@ class BusinessImService extends ChangeNotifier {
       'is_me': true,
       'content': _payloadContent(payload),
       'content_type': contentType,
+      if (_contentTypeCode(contentType) > 0)
+        'type': _contentTypeCode(contentType),
       'payload': payload,
       'timestamp': _formatTimestamp(
         DateTime.now().millisecondsSinceEpoch ~/ 1000,
@@ -5794,8 +5920,7 @@ class BusinessImService extends ChangeNotifier {
     );
     final key = _messageKey(channelId, channelType);
     _invalidMessageChannels.add(key);
-    _historySyncedChannels.remove(key);
-    _historyRetryAfter.remove(key);
+    _forgetChannelHistorySynced(channelId, channelType);
     _channelMessageVersions.remove(key);
     _latestConversations = _currentLocalConversations(
       chat,
@@ -5823,19 +5948,14 @@ class BusinessImService extends ChangeNotifier {
     if (boundary <= 0) {
       return;
     }
-    _cache.removeChannelClearMarker(
-      uid: chat.uid,
-      channelId: channelId,
-      channelType: channelType,
-    );
     AppLogger.info(
       'im',
-      'local history boundary cleared after server sync',
+      'local history boundary kept after server sync',
       data: {
         'channel_id': channelId,
         'channel_type': channelType,
         'accepted_count': acceptedCount,
-        'previous_boundary': boundary,
+        'boundary': boundary,
       },
     );
   }
