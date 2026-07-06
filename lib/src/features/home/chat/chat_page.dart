@@ -59,7 +59,9 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   int? _groupOnlineCount;
   bool _groupPresenceLoading = false;
   int _groupPresenceToken = 0;
+  AppLifecycleState _lifecycleState = AppLifecycleState.resumed;
   final Set<String> _burnTriggeredClientMsgNos = <String>{};
+  final Map<String, int> _burnRetryAttempts = <String, int>{};
   final Set<String> _receivingRedPacketIds = <String>{};
   final Set<String> _receivingTransferIds = <String>{};
 
@@ -114,6 +116,21 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    _lifecycleState = state;
+    if (state == AppLifecycleState.resumed && !_channelInvalid) {
+      unawaited(
+        widget.controller.openConversation(
+          channelId: widget.channelId,
+          channelType: widget.channelType,
+        ),
+      );
+      _scheduleVisibleRead(source: 'lifecycle_resumed');
+    }
+  }
+
+  @override
   void didChangeMetrics() {
     super.didChangeMetrics();
     if (_inputFocusNode.hasFocus && _isNearBottom()) {
@@ -164,6 +181,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       _clearSelectedMessageMenu();
       _didInitialScroll = false;
       _burnTriggeredClientMsgNos.clear();
+      _burnRetryAttempts.clear();
       _receivingRedPacketIds.clear();
       _receivingTransferIds.clear();
       _groupMuteState = const {};
@@ -495,12 +513,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     }
     _scheduleBurnAfterReadForMessages(_messages);
     if (!_channelInvalid) {
-      unawaited(
-        widget.controller.openConversation(
-          channelId: widget.channelId,
-          channelType: widget.channelType,
-        ),
-      );
+      _scheduleVisibleRead(source: 'message_event');
     }
   }
 
@@ -662,6 +675,9 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         _scrollToBottom(animated: false);
       } else if (wasNearBottom) {
         _scrollToBottom(animated: false);
+      }
+      if (!invalid) {
+        _scheduleVisibleRead(source: 'messages_loaded');
       }
     } catch (error) {
       if (!mounted || token != _messageLoadToken) {
@@ -845,21 +861,101 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     Map<String, Object?> existing,
     Map<String, Object?> incoming,
   ) {
-    final merged = <String, Object?>{...existing, ...incoming};
+    final merged = _mergeUiNonEmpty(existing, incoming);
     final existingPayload = _asObjectMap(existing['payload']);
     final incomingPayload = _asObjectMap(incoming['payload']);
     if (existingPayload.isNotEmpty || incomingPayload.isNotEmpty) {
-      final payload = <String, Object?>{...existingPayload, ...incomingPayload};
+      final payload = _mergeUiNonEmpty(existingPayload, incomingPayload);
       for (final key in ['red_packet', 'transfer', 'media', 'receipt']) {
         final existingNested = _asObjectMap(existingPayload[key]);
         final incomingNested = _asObjectMap(incomingPayload[key]);
         if (existingNested.isNotEmpty || incomingNested.isNotEmpty) {
-          payload[key] = {...existingNested, ...incomingNested};
+          payload[key] = _mergeUiNonEmpty(existingNested, incomingNested);
         }
       }
+      _preserveUiString(payload, existingPayload, incomingPayload, [
+        'client_msg_no',
+        'content_type',
+        'content',
+        'text',
+        'file_path',
+        'image_path',
+        'video_path',
+        'url',
+        'cover',
+        'thumbnail',
+      ]);
       merged['payload'] = payload;
     }
+    _preserveUiPositiveInt(merged, existing, incoming, ['message_seq']);
+    _preserveUiString(merged, existing, incoming, [
+      'message_id',
+      'message_idstr',
+      'client_msg_no',
+      'content',
+      'content_type',
+      'timestamp',
+      'from_uid',
+    ]);
     return merged;
+  }
+
+  Map<String, Object?> _mergeUiNonEmpty(
+    Map<String, Object?> base,
+    Map<String, Object?> overlay,
+  ) {
+    final merged = Map<String, Object?>.from(base);
+    for (final entry in overlay.entries) {
+      if (_hasUiValue(entry.value)) {
+        merged[entry.key] = entry.value;
+      } else {
+        merged.putIfAbsent(entry.key, () => entry.value);
+      }
+    }
+    return merged;
+  }
+
+  bool _hasUiValue(Object? value) {
+    if (value == null) {
+      return false;
+    }
+    if (value is String) {
+      return value.trim().isNotEmpty;
+    }
+    if (value is Map || value is Iterable) {
+      return true;
+    }
+    return value.toString().trim().isNotEmpty;
+  }
+
+  void _preserveUiPositiveInt(
+    Map<String, Object?> target,
+    Map<String, Object?> existing,
+    Map<String, Object?> incoming,
+    List<String> keys,
+  ) {
+    for (final key in keys) {
+      final existingValue = _intValue(existing, [key]);
+      final incomingValue = _intValue(incoming, [key]);
+      if (existingValue > 0 && incomingValue <= 0) {
+        target[key] = existingValue;
+      }
+    }
+  }
+
+  void _preserveUiString(
+    Map<String, Object?> target,
+    Map<String, Object?> existing,
+    Map<String, Object?> incoming,
+    List<String> keys,
+  ) {
+    for (final key in keys) {
+      final existingValue = _value(existing, [key]);
+      final incomingValue = _value(incoming, [key]);
+      if (existingValue.isNotEmpty && incomingValue.isEmpty) {
+        target[key] = existingValue;
+      }
+    }
   }
 
   bool _shouldAutoScrollForMessage(BusinessImMessageEvent event) {
@@ -867,6 +963,54 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       return true;
     }
     return _isNearBottom();
+  }
+
+  void _scheduleVisibleRead({required String source}) {
+    if (_lifecycleState != AppLifecycleState.resumed ||
+        _channelInvalid ||
+        _messagesLoading) {
+      AppLogger.info(
+        'ui',
+        'chat visible read deferred',
+        data: {
+          'source': source,
+          'channel_id': widget.channelId,
+          'channel_type': widget.channelType,
+          'lifecycle': _lifecycleState.name,
+          'invalid_channel': _channelInvalid,
+          'messages_loading': _messagesLoading,
+        },
+      );
+      return;
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted ||
+          _lifecycleState != AppLifecycleState.resumed ||
+          _channelInvalid ||
+          _messagesLoading) {
+        return;
+      }
+      unawaited(
+        widget.controller
+            .markConversationVisibleRead(
+              channelId: widget.channelId,
+              channelType: widget.channelType,
+            )
+            .catchError((Object error, StackTrace stackTrace) {
+              AppLogger.warn(
+                'ui',
+                'mark visible read failed',
+                data: {
+                  'source': source,
+                  'channel_id': widget.channelId,
+                  'channel_type': widget.channelType,
+                  'error': error.toString(),
+                  'stack': stackTrace.toString(),
+                },
+              );
+            }),
+      );
+    });
   }
 
   bool _isNearBottom({double threshold = 96}) {
@@ -2080,6 +2224,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         channelId: widget.channelId,
         channelType: widget.channelType,
       );
+      _burnRetryAttempts.remove(clientMsgNo);
       if (mounted) {
         setState(() {
           _messages = _messages
@@ -2088,12 +2233,32 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         });
       }
     } catch (error, stackTrace) {
-      _burnTriggeredClientMsgNos.remove(clientMsgNo);
+      final attempt = (_burnRetryAttempts[clientMsgNo] ?? 0) + 1;
+      _burnRetryAttempts[clientMsgNo] = attempt;
+      final retry =
+          attempt <= 6 &&
+          mounted &&
+          _messages.any(
+            (item) => _value(item, ['client_msg_no']) == clientMsgNo,
+          );
+      if (retry) {
+        final delayMs =
+            min(30000, 1000 * (1 << min(attempt - 1, 5))) +
+            (DateTime.now().millisecond % 500);
+        Future<void>.delayed(Duration(milliseconds: delayMs), () {
+          return _triggerBurnAfterRead(clientMsgNo);
+        });
+      } else {
+        _burnTriggeredClientMsgNos.remove(clientMsgNo);
+        _burnRetryAttempts.remove(clientMsgNo);
+      }
       AppLogger.warn(
         'ui',
         'burn after read trigger failed',
         data: {
           'client_msg_no': clientMsgNo,
+          'attempt': attempt,
+          'retry': retry,
           'error': error.toString(),
           'stack': stackTrace.toString(),
         },

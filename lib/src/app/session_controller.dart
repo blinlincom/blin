@@ -59,6 +59,8 @@ class SessionController extends ChangeNotifier {
   final Map<String, DateTime> _friendStatusCacheAt = <String, DateTime>{};
   final Map<String, Future<Map<String, Object?>>> _friendStatusRequests =
       <String, Future<Map<String, Object?>>>{};
+  final List<BusinessImPresenceEvent> _pendingPresenceEvents =
+      <BusinessImPresenceEvent>[];
   StreamSubscription<BusinessImPresenceEvent>? _presenceSub;
 
   UserSession? get session => _session;
@@ -339,7 +341,9 @@ class SessionController extends ChangeNotifier {
     final rawList = await _friendRequest!.whenComplete(
       () => _friendRequest = null,
     );
-    final list = _hydrateFriendList(rawList);
+    final list = _mergePendingPresenceIntoFriendList(
+      _hydrateFriendList(rawList),
+    );
     _friendCache = list;
     _friendCacheAt = DateTime.now();
     _writeFriendCache(list);
@@ -411,6 +415,16 @@ class SessionController extends ChangeNotifier {
     required int channelType,
   }) {
     return _im.markConversationRead(
+      channelID: channelId,
+      channelType: channelType,
+    );
+  }
+
+  Future<void> markConversationVisibleRead({
+    required String channelId,
+    required int channelType,
+  }) {
+    return _im.markConversationVisibleRead(
       channelID: channelId,
       channelType: channelType,
     );
@@ -1323,14 +1337,10 @@ class SessionController extends ChangeNotifier {
         'memory_friend_count': _friendCache.length,
       },
     );
-    _rememberFriendPresenceStatus(event);
-    final current = _friendCache.isNotEmpty
-        ? _friendCache
-        : _hydrateFriendList(_cache.readFriendList(uid), uid: uid);
-    if (current.isEmpty) {
-      AppLogger.warn(
+    if (_isSelfPresenceEvent(event, uid)) {
+      AppLogger.info(
         'session',
-        'presence event has no local friends to update',
+        'self presence event ignored for friend cache',
         data: {
           'uid': uid,
           'event_uid': event.uid,
@@ -1340,16 +1350,27 @@ class SessionController extends ChangeNotifier {
       );
       return;
     }
-    var changed = false;
-    final next = current
-        .map((item) {
-          if (!_friendMatchesPresence(item, event)) {
-            return item;
-          }
-          changed = true;
-          return _mergePresenceIntoFriend(item, event);
-        })
-        .toList(growable: false);
+    _rememberFriendPresenceStatus(event);
+    final current = _friendCache.isNotEmpty
+        ? _friendCache
+        : _hydrateFriendList(_cache.readFriendList(uid), uid: uid);
+    if (current.isEmpty) {
+      _queuePendingPresenceEvent(event);
+      AppLogger.info(
+        'session',
+        'presence event queued before friend cache',
+        data: {
+          'uid': uid,
+          'event_uid': event.uid,
+          'event_user_id': event.userId,
+          'online': event.online,
+          'pending_count': _pendingPresenceEvents.length,
+        },
+      );
+      return;
+    }
+    final next = _mergePresenceIntoFriendList(current, event);
+    final changed = !identical(current, next);
     if (!changed) {
       AppLogger.info(
         'session',
@@ -1378,6 +1399,87 @@ class SessionController extends ChangeNotifier {
       },
     );
     notifyListeners();
+  }
+
+  bool _isSelfPresenceEvent(BusinessImPresenceEvent event, String uid) {
+    final currentUserId = _session?.userId.toString() ?? '';
+    final eventUserId = event.userId.isNotEmpty
+        ? event.userId
+        : _userIdFromUid(event.uid);
+    return (event.uid.isNotEmpty && event.uid == uid) ||
+        (currentUserId.isNotEmpty && eventUserId == currentUserId);
+  }
+
+  void _queuePendingPresenceEvent(BusinessImPresenceEvent event) {
+    final key = _presenceEventKey(event);
+    _pendingPresenceEvents.removeWhere(
+      (item) => _presenceEventKey(item) == key,
+    );
+    _pendingPresenceEvents.add(event);
+    if (_pendingPresenceEvents.length > 200) {
+      _pendingPresenceEvents.removeRange(
+        0,
+        _pendingPresenceEvents.length - 200,
+      );
+    }
+  }
+
+  String _presenceEventKey(BusinessImPresenceEvent event) {
+    final userId = event.userId.isNotEmpty
+        ? event.userId
+        : _userIdFromUid(event.uid);
+    final userKey = userId.isNotEmpty ? userId : event.uid;
+    return '$userKey:${event.deviceFlag}';
+  }
+
+  List<Map<String, Object?>> _mergePresenceIntoFriendList(
+    List<Map<String, Object?>> current,
+    BusinessImPresenceEvent event,
+  ) {
+    var changed = false;
+    final next = current
+        .map((item) {
+          if (!_friendMatchesPresence(item, event)) {
+            return item;
+          }
+          changed = true;
+          return _mergePresenceIntoFriend(item, event);
+        })
+        .toList(growable: false);
+    return changed ? next : current;
+  }
+
+  List<Map<String, Object?>> _mergePendingPresenceIntoFriendList(
+    List<Map<String, Object?>> friends,
+  ) {
+    if (_pendingPresenceEvents.isEmpty || friends.isEmpty) {
+      return friends;
+    }
+    var next = friends;
+    var applied = 0;
+    final stillPending = <BusinessImPresenceEvent>[];
+    for (final event in _pendingPresenceEvents) {
+      final merged = _mergePresenceIntoFriendList(next, event);
+      if (identical(merged, next)) {
+        stillPending.add(event);
+      } else {
+        next = merged;
+        applied += 1;
+      }
+    }
+    _pendingPresenceEvents
+      ..clear()
+      ..addAll(stillPending);
+    AppLogger.info(
+      'session',
+      'pending presence replayed into friends',
+      data: {
+        'friend_count': friends.length,
+        'applied_count': applied,
+        'remaining_count': _pendingPresenceEvents.length,
+      },
+    );
+    return next;
   }
 
   void _rememberFriendPresenceStatus(BusinessImPresenceEvent event) {
@@ -1505,6 +1607,7 @@ class SessionController extends ChangeNotifier {
     _friendStatusCache.clear();
     _friendStatusCacheAt.clear();
     _friendStatusRequests.clear();
+    _pendingPresenceEvents.clear();
     _refreshRequest = null;
     _lastHotRefreshAt = null;
   }

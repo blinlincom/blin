@@ -258,9 +258,12 @@ class _InAppMediaPickerPageState extends State<_InAppMediaPickerPage> {
   Widget build(BuildContext context) {
     final title = _isVideo ? '选择视频' : '选择图片';
     return Scaffold(
+      resizeToAvoidBottomInset: true,
       backgroundColor: _pageColor,
       appBar: _PickerAppBar(title: title),
       body: SafeArea(
+        top: false,
+        bottom: false,
         child: Column(
           children: [
             if (!_loading && _error.isEmpty && _albums.isNotEmpty)
@@ -548,6 +551,7 @@ class _InAppFilePickerPageState extends State<_InAppFilePickerPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      resizeToAvoidBottomInset: true,
       backgroundColor: _pageColor,
       appBar: _PickerAppBar(
         title: '选择文件',
@@ -560,6 +564,8 @@ class _InAppFilePickerPageState extends State<_InAppFilePickerPage> {
         ],
       ),
       body: SafeArea(
+        top: false,
+        bottom: false,
         child: Column(
           children: [
             _FilePickerToolbar(
@@ -1317,8 +1323,8 @@ class _PickerFooterShell extends StatelessWidget {
     return LayoutBuilder(
       builder: (context, constraints) {
         final actionMaxWidth = min(
-          constraints.maxWidth * (compact ? 0.58 : 0.62),
-          compact ? 190.0 : 260.0,
+          constraints.maxWidth * (compact ? 0.62 : 0.56),
+          compact ? 178.0 : 260.0,
         );
         return DecoratedBox(
           decoration: const BoxDecoration(
@@ -1339,7 +1345,7 @@ class _PickerFooterShell extends StatelessWidget {
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
-                    Expanded(
+                    Flexible(
                       child: Align(
                         alignment: Alignment.centerLeft,
                         child: leading,
@@ -1347,7 +1353,10 @@ class _PickerFooterShell extends StatelessWidget {
                     ),
                     SizedBox(width: compact ? 8 : 12),
                     ConstrainedBox(
-                      constraints: BoxConstraints(maxWidth: actionMaxWidth),
+                      constraints: BoxConstraints(
+                        minWidth: compact ? 84 : 96,
+                        maxWidth: actionMaxWidth,
+                      ),
                       child: SingleChildScrollView(
                         scrollDirection: Axis.horizontal,
                         reverse: true,

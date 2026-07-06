@@ -94,7 +94,10 @@ class BusinessImService extends ChangeNotifier {
   bool _suppressCatchupSoundOnNextConnect = true;
   int _soundFreshAfterSeconds = 0;
   final Set<String> _openMessageChannels = <String>{};
+  final Set<String> _readVisibleMessageChannels = <String>{};
   final Set<String> _reportedReadReceiptKeys = <String>{};
+  final Set<String> _handledDeleteCommandKeys = <String>{};
+  final Queue<String> _handledDeleteCommandKeyOrder = Queue<String>();
   final Map<String, DateTime> _playedIncomingSoundIds = <String, DateTime>{};
   final Map<String, Map<String, Object?>> _groupMuteStates =
       <String, Map<String, Object?>>{};
@@ -301,6 +304,8 @@ class BusinessImService extends ChangeNotifier {
       _suppressCatchupSoundOnNextConnect = true;
       _playedIncomingSoundIds.clear();
       _reportedReadReceiptKeys.clear();
+      _handledDeleteCommandKeys.clear();
+      _handledDeleteCommandKeyOrder.clear();
       _presenceLatestEventSeconds.clear();
       _pendingActionReceipts.clear();
       _invalidMessageChannels.clear();
@@ -314,6 +319,7 @@ class BusinessImService extends ChangeNotifier {
       return;
     }
     _foreground = false;
+    _readVisibleMessageChannels.clear();
     _suppressCatchupSoundOnNextConnect = true;
     _reconnectTimer?.cancel();
     _reconnectTimer = null;
@@ -381,7 +387,11 @@ class BusinessImService extends ChangeNotifier {
   }) async {
     channelID = _canonicalChannelId(channelID, channelType);
     _openMessageChannels.add(_messageKey(channelID, channelType));
-    await markConversationRead(channelID: channelID, channelType: channelType);
+    AppLogger.info(
+      'im',
+      'conversation opened',
+      data: {'channel_id': channelID, 'channel_type': channelType},
+    );
   }
 
   void closeConversation({
@@ -389,6 +399,8 @@ class BusinessImService extends ChangeNotifier {
     required int channelType,
   }) {
     channelID = _canonicalChannelId(channelID, channelType);
+    final key = _messageKey(channelID, channelType);
+    _readVisibleMessageChannels.remove(key);
     // 离开聊天页前再确认一次已读，避免返回会话列表时红点仍停留在旧缓存。
     unawaited(
       markConversationRead(
@@ -406,7 +418,35 @@ class BusinessImService extends ChangeNotifier {
         );
       }),
     );
-    _openMessageChannels.remove(_messageKey(channelID, channelType));
+    _openMessageChannels.remove(key);
+  }
+
+  Future<void> markConversationVisibleRead({
+    required String channelID,
+    required int channelType,
+  }) async {
+    channelID = _canonicalChannelId(channelID, channelType);
+    final key = _messageKey(channelID, channelType);
+    if (!_foreground || !_openMessageChannels.contains(key)) {
+      AppLogger.info(
+        'im',
+        'visible read ignored',
+        data: {
+          'channel_id': channelID,
+          'channel_type': channelType,
+          'foreground': _foreground,
+          'open_channel': _openMessageChannels.contains(key),
+        },
+      );
+      return;
+    }
+    await markConversationRead(channelID: channelID, channelType: channelType);
+    _readVisibleMessageChannels.add(key);
+    AppLogger.info(
+      'im',
+      'conversation visible read',
+      data: {'channel_id': channelID, 'channel_type': channelType},
+    );
   }
 
   Future<void> markConversationRead({
@@ -1092,6 +1132,7 @@ class BusinessImService extends ChangeNotifier {
         'needs_history_sync': needsHistorySync,
         'retry_blocked': retryBlocked,
         'open_channel': _openMessageChannels.contains(key),
+        'read_visible_channel': _readVisibleMessageChannels.contains(key),
         'cached_count': cached.length,
         'result_count': sorted.length,
         'first_message': _messageLogSummary(
@@ -1102,7 +1143,7 @@ class BusinessImService extends ChangeNotifier {
         ),
       },
     );
-    if (_openMessageChannels.contains(key)) {
+    if (_foreground && _readVisibleMessageChannels.contains(key)) {
       final previousMarker = _cache.readReadMarker(
         uid: _requireChat().uid,
         channelId: channelID,
@@ -3579,24 +3620,9 @@ class BusinessImService extends ChangeNotifier {
     final receipt = _cleanPayload({
       ...payload,
       ..._asMap(payload[nestedKey]),
-      'operator_id': _value(payload, [
-        'operator_id',
-        'reader_id',
-        'receiver_id',
-        'sender_id',
-        'user_id',
-        'userid',
-      ]),
-      'operator_uid': _value(message, [
-        'from_uid',
-      ], fallback: _value(payload, ['operator_uid', 'sender_uid', 'from_uid'])),
-      'operator_nickname': _value(payload, [
-        'operator_nickname',
-        'reader_nickname',
-        'receiver_nickname',
-        'sender_nickname',
-        'nickname',
-      ]),
+      'operator_id': _paymentActionActorId(payload, nestedKey),
+      'operator_uid': _paymentActionActorUid(message, payload, nestedKey),
+      'operator_nickname': _paymentActionActorName(payload, nestedKey),
     });
     final normalized = _paymentActionReceiptMessage(
       channelId: _value(message, [
@@ -3611,8 +3637,7 @@ class BusinessImService extends ChangeNotifier {
       idKey: idKey,
       idValue: idValue,
       receipt: receipt,
-      actorIsCurrentUser:
-          message['is_me'] == true || _actionReceiptFromCurrentUser(receipt),
+      actorIsCurrentUser: _actionReceiptFromCurrentUser(receipt),
     );
     return {
       ...message,
@@ -3638,6 +3663,130 @@ class BusinessImService extends ChangeNotifier {
       idKey,
       'id',
     ], fallback: _value(nested, [idKey, 'id']));
+  }
+
+  String _paymentActionActorId(Map<String, Object?> payload, String nestedKey) {
+    final nested = _asMap(payload[nestedKey]);
+    final receipt = _asMap(payload['receipt']);
+    return _value(
+      receipt,
+      [
+        'operator_id',
+        'reader_id',
+        'actor_id',
+        'receive_user_id',
+        'receiver_user_id',
+        'user_id',
+        'userid',
+        'id',
+      ],
+      fallback: _value(
+        payload,
+        ['operator_id', 'reader_id', 'actor_id'],
+        fallback: _value(
+          nested,
+          [
+            'operator_id',
+            'reader_id',
+            'actor_id',
+            'receiver_id',
+            'receive_user_id',
+            'receiver_user_id',
+            'user_id',
+            'userid',
+            'id',
+          ],
+          fallback: _value(payload, [
+            'sender_id',
+            'from_id',
+            'user_id',
+            'userid',
+          ]),
+        ),
+      ),
+    );
+  }
+
+  String _paymentActionActorUid(
+    Map<String, Object?> message,
+    Map<String, Object?> payload,
+    String nestedKey,
+  ) {
+    final nested = _asMap(payload[nestedKey]);
+    final receipt = _asMap(payload['receipt']);
+    return _value(
+      receipt,
+      [
+        'operator_uid',
+        'reader_uid',
+        'actor_uid',
+        'receive_uid',
+        'receiver_uid',
+        'uid',
+      ],
+      fallback: _value(
+        payload,
+        ['operator_uid', 'reader_uid', 'actor_uid'],
+        fallback: _value(
+          nested,
+          [
+            'operator_uid',
+            'reader_uid',
+            'actor_uid',
+            'receive_uid',
+            'receiver_uid',
+            'uid',
+          ],
+          fallback: _value(message, [
+            'from_uid',
+          ], fallback: _value(payload, ['sender_uid', 'from_uid', 'uid'])),
+        ),
+      ),
+    );
+  }
+
+  String _paymentActionActorName(
+    Map<String, Object?> payload,
+    String nestedKey,
+  ) {
+    final nested = _asMap(payload[nestedKey]);
+    final receipt = _asMap(payload['receipt']);
+    return _value(
+      receipt,
+      [
+        'operator_nickname',
+        'reader_nickname',
+        'actor_name',
+        'actor_nickname',
+        'nickname',
+        'username',
+      ],
+      fallback: _value(
+        payload,
+        [
+          'operator_nickname',
+          'reader_nickname',
+          'actor_name',
+          'actor_nickname',
+          'sender_nickname',
+          'from_nickname',
+          'sender_username',
+          'from_username',
+          'nickname',
+          'username',
+        ],
+        fallback: _value(nested, [
+          'operator_nickname',
+          'reader_nickname',
+          'actor_name',
+          'actor_nickname',
+          'receiver_nickname',
+          'receiver_username',
+          'nickname',
+          'username',
+        ]),
+      ),
+    );
   }
 
   Map<String, Object?> _paymentActionTargetMessage({
@@ -4042,6 +4191,14 @@ class BusinessImService extends ChangeNotifier {
     final chat = _requireChat();
     final target = _value(payload, ['target_client_msg_no', 'client_msg_no']);
     if (target.isNotEmpty) {
+      if (!_rememberDeleteCommand(
+        source: 'recall_cmd',
+        channelId: channelId,
+        channelType: channelType,
+        targetClientMsgNo: target,
+      )) {
+        return true;
+      }
       _cache.deleteMessage(
         uid: chat.uid,
         channelId: channelId,
@@ -4090,6 +4247,14 @@ class BusinessImService extends ChangeNotifier {
     if (cmd == 'burn_after_read') {
       final target = _value(payload, ['target_client_msg_no', 'client_msg_no']);
       if (target.isNotEmpty) {
+        if (!_rememberDeleteCommand(
+          source: 'burn_after_read_cmd',
+          channelId: channelId,
+          channelType: channelType,
+          targetClientMsgNo: target,
+        )) {
+          return true;
+        }
         _cache.deleteMessage(
           uid: chat.uid,
           channelId: channelId,
@@ -4157,6 +4322,35 @@ class BusinessImService extends ChangeNotifier {
       state: payload,
       source: 'tcp_cmd',
     );
+    return true;
+  }
+
+  bool _rememberDeleteCommand({
+    required String source,
+    required String channelId,
+    required int channelType,
+    required String targetClientMsgNo,
+  }) {
+    final key =
+        '$source|${_messageKey(channelId, channelType)}|$targetClientMsgNo';
+    if (!_handledDeleteCommandKeys.add(key)) {
+      AppLogger.info(
+        'im',
+        'delete command duplicate ignored',
+        data: {
+          'source': source,
+          'channel_id': channelId,
+          'channel_type': channelType,
+          'target_client_msg_no': targetClientMsgNo,
+        },
+      );
+      return false;
+    }
+    _handledDeleteCommandKeyOrder.add(key);
+    while (_handledDeleteCommandKeyOrder.length > 500) {
+      final expired = _handledDeleteCommandKeyOrder.removeFirst();
+      _handledDeleteCommandKeys.remove(expired);
+    }
     return true;
   }
 
@@ -4454,6 +4648,25 @@ class BusinessImService extends ChangeNotifier {
 
   bool _actionReceiptFromCurrentUser(Map<String, Object?> receipt) {
     final currentUserId = _requireSession().userId.toString();
+    final action = _value(receipt, ['action', 'content_type']);
+    if (action == ChatContentTypes.redPacketReceived ||
+        action == ChatContentTypes.transferReceived) {
+      final nestedKey = action == ChatContentTypes.redPacketReceived
+          ? 'red_packet'
+          : 'transfer';
+      final actorId = _paymentActionActorId(receipt, nestedKey);
+      if (actorId.isNotEmpty) {
+        return actorId == currentUserId;
+      }
+      final actorUid = _paymentActionActorUid(
+        const <String, Object?>{},
+        receipt,
+        nestedKey,
+      );
+      if (actorUid.isNotEmpty) {
+        return _isCurrentUserChannel(actorUid);
+      }
+    }
     final sources = [
       receipt,
       _asMap(receipt['receipt']),
@@ -5274,52 +5487,8 @@ class BusinessImService extends ChangeNotifier {
     if (actionTarget.isEmpty) {
       return '';
     }
-    final actorKey = _value(
-      payload,
-      [
-        'actor_id',
-        'operator_id',
-        'reader_id',
-        'receiver_id',
-        'receive_user_id',
-        'receiver_user_id',
-        'user_id',
-        'userid',
-      ],
-      fallback: _value(nested, [
-        'actor_id',
-        'operator_id',
-        'reader_id',
-        'receiver_id',
-        'receive_user_id',
-        'receiver_user_id',
-        'user_id',
-        'userid',
-      ]),
-    );
-    final actorUid = _value(
-      payload,
-      [
-        'actor_uid',
-        'operator_uid',
-        'reader_uid',
-        'receiver_uid',
-        'receive_uid',
-        'uid',
-      ],
-      fallback: _value(
-        message,
-        ['from_uid'],
-        fallback: _value(nested, [
-          'actor_uid',
-          'operator_uid',
-          'reader_uid',
-          'receiver_uid',
-          'receive_uid',
-          'uid',
-        ]),
-      ),
-    );
+    final actorKey = _paymentActionActorId(payload, nestedKey);
+    final actorUid = _paymentActionActorUid(message, payload, nestedKey);
     final actor = actorKey.isNotEmpty ? actorKey : actorUid;
     if (actor.isEmpty) {
       return '';
@@ -5356,20 +5525,42 @@ class BusinessImService extends ChangeNotifier {
     Map<String, Object?> existing,
     Map<String, Object?> incoming,
   ) {
-    final merged = <String, Object?>{...existing, ...incoming};
+    final merged = _mergeNonEmpty(existing, incoming);
     final existingPayload = _asMap(existing['payload']);
     final incomingPayload = _asMap(incoming['payload']);
     if (existingPayload.isNotEmpty || incomingPayload.isNotEmpty) {
-      final payload = <String, Object?>{...existingPayload, ...incomingPayload};
+      final payload = _mergeNonEmpty(existingPayload, incomingPayload);
       for (final key in ['red_packet', 'transfer', 'media', 'receipt']) {
         final existingNested = _asMap(existingPayload[key]);
         final incomingNested = _asMap(incomingPayload[key]);
         if (existingNested.isNotEmpty || incomingNested.isNotEmpty) {
-          payload[key] = {...existingNested, ...incomingNested};
+          payload[key] = _mergeNonEmpty(existingNested, incomingNested);
         }
       }
+      _preserveNonEmptyString(payload, existingPayload, incomingPayload, [
+        'client_msg_no',
+        'content_type',
+        'content',
+        'text',
+        'file_path',
+        'image_path',
+        'video_path',
+        'url',
+        'cover',
+        'thumbnail',
+      ]);
       merged['payload'] = payload;
     }
+    _preservePositiveInt(merged, existing, incoming, ['message_seq']);
+    _preserveNonEmptyString(merged, existing, incoming, [
+      'message_id',
+      'message_idstr',
+      'client_msg_no',
+      'content',
+      'content_type',
+      'timestamp',
+      'from_uid',
+    ]);
     final sameClientMsgNo =
         _value(existing, ['client_msg_no']).isNotEmpty &&
         _value(existing, ['client_msg_no']) ==
@@ -5381,6 +5572,36 @@ class BusinessImService extends ChangeNotifier {
       ], fallback: _requireChat().uid);
     }
     return merged;
+  }
+
+  void _preservePositiveInt(
+    Map<String, Object?> target,
+    Map<String, Object?> existing,
+    Map<String, Object?> incoming,
+    List<String> keys,
+  ) {
+    for (final key in keys) {
+      final existingValue = _intValue(existing, [key]);
+      final incomingValue = _intValue(incoming, [key]);
+      if (existingValue > 0 && incomingValue <= 0) {
+        target[key] = existingValue;
+      }
+    }
+  }
+
+  void _preserveNonEmptyString(
+    Map<String, Object?> target,
+    Map<String, Object?> existing,
+    Map<String, Object?> incoming,
+    List<String> keys,
+  ) {
+    for (final key in keys) {
+      final existingValue = _value(existing, [key]);
+      final incomingValue = _value(incoming, [key]);
+      if (existingValue.isNotEmpty && incomingValue.isEmpty) {
+        target[key] = existingValue;
+      }
+    }
   }
 
   bool _canStoreChannel(
@@ -5590,11 +5811,25 @@ class BusinessImService extends ChangeNotifier {
     )) {
       return;
     }
-    final normalizedMessage = <String, Object?>{
+    var normalizedMessage = <String, Object?>{
       ...message,
       'channel_id': channelId,
       'channel_type': channelType,
     };
+    final storedMessages = _readMessagesForChannel(channelId, channelType);
+    final storedIndex = storedMessages.indexWhere(
+      (item) => _sameMessageIdentity(
+        item,
+        _value(normalizedMessage, ['client_msg_no']),
+        _intValue(normalizedMessage, ['message_seq']),
+      ),
+    );
+    if (storedIndex >= 0) {
+      normalizedMessage = _mergeMessageFields(
+        normalizedMessage,
+        storedMessages[storedIndex],
+      );
+    }
     if (_isSystemActionMessage(normalizedMessage)) {
       AppLogger.info(
         'im',
@@ -5642,9 +5877,10 @@ class BusinessImService extends ChangeNotifier {
     final payload = _asMap(normalizedMessage['payload']);
     _rememberProfileFromMap(normalizedMessage);
     final content = _messageConversationContent(normalizedMessage, payload);
-    final isCurrentOpen = _openMessageChannels.contains(
-      _messageKey(channelId, channelType),
-    );
+    final channelKey = _messageKey(channelId, channelType);
+    final isCurrentOpen = _openMessageChannels.contains(channelKey);
+    final isCurrentReadVisible =
+        _foreground && _readVisibleMessageChannels.contains(channelKey);
     final isOutgoing = normalizedMessage['is_me'] == true;
     final previousUnread = index >= 0
         ? _intValue(conversations[index], ['unread_quantity'])
@@ -5669,7 +5905,9 @@ class BusinessImService extends ChangeNotifier {
       'last_client_msg_no':
           normalizedMessage['client_msg_no']?.toString() ?? '',
       'last_msg_seq': normalizedMessage['message_seq'] ?? 0,
-      'unread_quantity': isOutgoing || isCurrentOpen ? 0 : previousUnread + 1,
+      'unread_quantity': isOutgoing || isCurrentReadVisible
+          ? 0
+          : previousUnread + 1,
     });
     if (index >= 0) {
       conversations[index] = next;
@@ -5694,6 +5932,7 @@ class BusinessImService extends ChangeNotifier {
         'is_update': index >= 0,
         'is_outgoing': isOutgoing,
         'is_current_open': isCurrentOpen,
+        'is_current_read_visible': isCurrentReadVisible,
         'previous_unread': previousUnread,
         'unread_quantity': _intValue(next, ['unread_quantity']),
         'conversation_count': conversations.length,
