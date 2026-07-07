@@ -77,6 +77,7 @@ class BusinessImService extends ChangeNotifier {
   bool _manualStop = false;
   bool _connecting = false;
   bool _foreground = true;
+  bool _backgroundKeepAliveEnabled = true;
   bool _gatewayAckDraining = false;
   int _reconnectAttempt = 0;
   int _conversationVersion = 0;
@@ -117,6 +118,7 @@ class BusinessImService extends ChangeNotifier {
   bool get isStarted => _started;
   String get statusText => _statusText;
   String? get lastError => _lastError;
+  bool get backgroundKeepAliveEnabled => _backgroundKeepAliveEnabled;
   int get conversationVersion => _conversationVersion;
   bool get initialHistorySyncing => _initialHistorySyncing;
   bool get initialHistorySyncBlocked =>
@@ -219,6 +221,7 @@ class BusinessImService extends ChangeNotifier {
     UserSession session, {
     required String device,
     bool chatIsFresh = false,
+    bool backgroundKeepAliveEnabled = true,
   }) async {
     final chat = session.chat;
     if (chat == null || chat.uid.isEmpty || chat.token.isEmpty) {
@@ -226,6 +229,7 @@ class BusinessImService extends ChangeNotifier {
     }
     _manualStop = false;
     _started = true;
+    _backgroundKeepAliveEnabled = backgroundKeepAliveEnabled;
     _session = session;
     _device = device;
     _gatewayChatIssuedAt = chatIsFresh ? DateTime.now() : null;
@@ -270,6 +274,7 @@ class BusinessImService extends ChangeNotifier {
         'device': device,
         'private_history_sync_enabled': chat.privateHistorySyncEnabled,
         'group_history_sync_enabled': chat.groupHistorySyncEnabled,
+        'background_keep_alive_enabled': _backgroundKeepAliveEnabled,
         'initial_history_syncing': _initialHistorySyncing,
         'gateway_stream_addr': chat.stream?.httpsStreamAddr.isNotEmpty == true
             ? chat.stream?.httpsStreamAddr
@@ -335,8 +340,20 @@ class BusinessImService extends ChangeNotifier {
     _foreground = false;
     _readVisibleMessageChannels.clear();
     _suppressCatchupSoundOnNextConnect = true;
-    _reconnectTimer?.cancel();
-    _reconnectTimer = null;
+    if (!_backgroundKeepAliveEnabled) {
+      _reconnectTimer?.cancel();
+      _reconnectTimer = null;
+    }
+    AppLogger.info(
+      'im',
+      'background realtime policy applied',
+      data: {
+        'state': state,
+        'background_keep_alive_enabled': _backgroundKeepAliveEnabled,
+        'gateway_active': _gatewayStream != null,
+        'connecting': _connecting,
+      },
+    );
   }
 
   void resumeConnection() {
@@ -347,6 +364,25 @@ class BusinessImService extends ChangeNotifier {
     if (_gatewayStream == null && !_connecting) {
       unawaited(_connectRealtime());
     }
+  }
+
+  void setBackgroundKeepAliveEnabled(bool enabled) {
+    if (_backgroundKeepAliveEnabled == enabled) {
+      return;
+    }
+    _backgroundKeepAliveEnabled = enabled;
+    AppLogger.info(
+      'im',
+      'background keep alive policy changed',
+      data: {'enabled': enabled, 'foreground': _foreground},
+    );
+    if (!enabled && !_foreground) {
+      _reconnectTimer?.cancel();
+      _reconnectTimer = null;
+    } else if (enabled && _started && _gatewayStream == null && !_connecting) {
+      unawaited(_connectRealtime());
+    }
+    notifyListeners();
   }
 
   Future<List<Map<String, Object?>>> refreshLocalConversations({
@@ -2391,7 +2427,9 @@ class BusinessImService extends ChangeNotifier {
   }
 
   Future<void> _connectRealtime() async {
-    if (_manualStop || _connecting || !_foreground) {
+    if (_manualStop ||
+        _connecting ||
+        (!_foreground && !_backgroundKeepAliveEnabled)) {
       return;
     }
     _connecting = true;
@@ -2424,10 +2462,18 @@ class BusinessImService extends ChangeNotifier {
         Duration(seconds: max(30, stream.expireIn)),
       );
       _gatewayAckUrl = _gatewayAckUrlFor(openUrl);
+      final recoveryReason = _hasRealtimeConnectedOnce || _reconnectAttempt > 0
+          ? 'reconnect'
+          : 'initial_connect';
       AppLogger.info(
         'im',
         'gateway stream connect start',
-        data: {'addr': openUrl, 'cursor_len': lastCursor.length},
+        data: {
+          'addr': openUrl,
+          'cursor_len': lastCursor.length,
+          'foreground': _foreground,
+          'background_keep_alive_enabled': _backgroundKeepAliveEnabled,
+        },
       );
       await client.connect(
         uri: uri,
@@ -2447,10 +2493,10 @@ class BusinessImService extends ChangeNotifier {
           _handleRealtimeClosed(reason, error?.toString());
         },
       );
-      if (_manualStop || !_foreground) {
+      if (_manualStop || (!_foreground && !_backgroundKeepAliveEnabled)) {
         await client.close().catchError((Object _) => null);
         _connecting = false;
-        if (!_foreground) {
+        if (!_foreground && !_backgroundKeepAliveEnabled) {
           _setStatus('未连接');
         }
         return;
@@ -2461,11 +2507,21 @@ class BusinessImService extends ChangeNotifier {
       _hasRealtimeConnectedOnce = true;
       _suppressCatchupSoundOnNextConnect = false;
       _setStatus('已连接');
-      unawaited(syncConversationsFromServer());
+      unawaited(
+        _recoverOfflineMessagesAfterRealtimeConnected(
+          reason: recoveryReason,
+          cursor: lastCursor,
+        ),
+      );
       AppLogger.info(
         'im',
         'gateway stream connected',
-        data: {'addr': openUrl, 'cursor_len': lastCursor.length},
+        data: {
+          'addr': openUrl,
+          'cursor_len': lastCursor.length,
+          'foreground': _foreground,
+          'background_keep_alive_enabled': _backgroundKeepAliveEnabled,
+        },
       );
     } catch (error, stackTrace) {
       _connecting = false;
@@ -2486,6 +2542,70 @@ class BusinessImService extends ChangeNotifier {
         );
       }
       _scheduleReconnect('connect_failed');
+    }
+  }
+
+  Future<void> _recoverOfflineMessagesAfterRealtimeConnected({
+    required String reason,
+    required String cursor,
+  }) async {
+    final session = _session;
+    final chat = session?.chat;
+    if (session == null || chat == null) {
+      return;
+    }
+    final startedAt = DateTime.now();
+    AppLogger.info(
+      'im',
+      'offline sync start',
+      data: {
+        'reason': reason,
+        'cursor_len': cursor.length,
+        'conversation_count': _latestConversations.length,
+        'private_history_sync_enabled': chat.privateHistorySyncEnabled,
+        'group_history_sync_enabled': chat.groupHistorySyncEnabled,
+      },
+    );
+    try {
+      final conversations = await syncConversationsFromServer();
+      var syncedChannels = 0;
+      for (final conversation in conversations.take(30)) {
+        final channelType = _intValue(conversation, ['channel_type']);
+        if (!_historySyncEnabledForType(channelType, chat)) {
+          continue;
+        }
+        final channelId = _value(conversation, ['channel_id']);
+        if (channelId.isEmpty || channelType <= 0) {
+          continue;
+        }
+        await syncChannelMessages(
+          channelID: channelId,
+          channelType: channelType,
+          groupId: _value(conversation, ['group_id', 'id']),
+          limit: _historySyncLimit,
+        );
+        syncedChannels++;
+      }
+      AppLogger.info(
+        'im',
+        'offline sync done',
+        data: {
+          'reason': reason,
+          'conversation_count': conversations.length,
+          'synced_channel_count': syncedChannels,
+          'ms': DateTime.now().difference(startedAt).inMilliseconds,
+        },
+      );
+    } catch (error, stackTrace) {
+      AppLogger.warn(
+        'im',
+        'offline sync failed',
+        data: {
+          'reason': reason,
+          'error': error.toString(),
+          'stack': stackTrace.toString(),
+        },
+      );
     }
   }
 
@@ -3218,7 +3338,7 @@ class BusinessImService extends ChangeNotifier {
     if (_manualStop) {
       return;
     }
-    if (!_foreground) {
+    if (!_foreground && !_backgroundKeepAliveEnabled) {
       unawaited(_closeRealtimeOnly());
       _setStatus('未连接');
       AppLogger.info(
@@ -3235,11 +3355,17 @@ class BusinessImService extends ChangeNotifier {
   }
 
   void _scheduleReconnect(String source) {
-    if (!_started || _manualStop || !_foreground) {
+    if (!_started ||
+        _manualStop ||
+        (!_foreground && !_backgroundKeepAliveEnabled)) {
       AppLogger.info(
         'im',
         'skip gateway reconnect while backgrounded',
-        data: {'source': source},
+        data: {
+          'source': source,
+          'foreground': _foreground,
+          'background_keep_alive_enabled': _backgroundKeepAliveEnabled,
+        },
       );
       return;
     }

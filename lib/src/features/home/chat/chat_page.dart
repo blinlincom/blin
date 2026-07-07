@@ -1757,7 +1757,10 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     });
   }
 
-  Future<void> _startLiveKitCall(String mediaType) async {
+  Future<void> _startLiveKitCall(
+    String mediaType, {
+    List<String> initialInviteUserIds = const [],
+  }) async {
     if (_channelInvalid) {
       setState(() => _message = '当前会话不可用');
       return;
@@ -1770,6 +1773,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
             controller: widget.controller,
             groupId: _groupId,
             mediaType: mediaType,
+            initialSelectedIds: initialInviteUserIds,
           ),
         ),
       );
@@ -1796,6 +1800,32 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
             : (mediaType == 'video' ? '视频通话' : '语音通话'),
         inviteUserIds: inviteUserIds,
       ),
+    );
+  }
+
+  Future<void> _redialFromCallMessage(Map<String, Object?> item) async {
+    final payload = _asObjectMap(item['payload']);
+    final content = _messageContentText(item, payload);
+    final meta = _callMessageUi(payload, content: content);
+    final currentUserId = widget.controller.session?.userId.toString() ?? '';
+    final initialInviteUserIds = _isGroup
+        ? _callParticipantUserIds(payload, currentUserId: currentUserId)
+        : const <String>[];
+    AppLogger.info(
+      'ui',
+      'call message redial tapped',
+      data: {
+        'channel_id': widget.channelId,
+        'channel_type': widget.channelType,
+        'client_msg_no': _value(item, ['client_msg_no']),
+        'media_type': meta.mediaType,
+        'call_type': meta.callType,
+        'initial_invite_count': initialInviteUserIds.length,
+      },
+    );
+    await _startLiveKitCall(
+      meta.mediaType,
+      initialInviteUserIds: initialInviteUserIds,
     );
   }
 
@@ -1986,6 +2016,9 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     }
     if (contentType == ChatContentTypes.transfer) {
       return () => _receiveTransfer(item);
+    }
+    if (contentType == ChatContentTypes.call) {
+      return () => _redialFromCallMessage(item);
     }
     if (contentType == ChatContentTypes.image ||
         contentType == ChatContentTypes.video ||
@@ -3020,11 +3053,13 @@ class _GroupCallInvitePickerPage extends StatefulWidget {
     required this.controller,
     required this.groupId,
     required this.mediaType,
+    this.initialSelectedIds = const [],
   });
 
   final SessionController controller;
   final String groupId;
   final String mediaType;
+  final List<String> initialSelectedIds;
 
   @override
   State<_GroupCallInvitePickerPage> createState() =>
@@ -3033,13 +3068,20 @@ class _GroupCallInvitePickerPage extends StatefulWidget {
 
 class _GroupCallInvitePickerPageState
     extends State<_GroupCallInvitePickerPage> {
-  late final Future<Map<String, Object?>> _future;
+  late final Future<List<Map<String, Object?>>> _future;
   final Set<String> _selectedIds = <String>{};
+  final Set<String> _validMemberIds = <String>{};
+  bool _membersReady = false;
 
   @override
   void initState() {
     super.initState();
-    _future = widget.controller.groupMembers(widget.groupId);
+    _selectedIds.addAll(
+      widget.initialSelectedIds
+          .map(_privateReceiverIdFromChannel)
+          .where((id) => id.isNotEmpty),
+    );
+    _future = _loadInviteMembers();
   }
 
   @override
@@ -3050,16 +3092,18 @@ class _GroupCallInvitePickerPageState
         title: Text(title),
         actions: [
           TextButton(
-            onPressed: _selectedIds.isEmpty
+            onPressed: _selectedInviteIds.isEmpty
                 ? null
-                : () => Navigator.of(context).pop(_selectedIds.toList()),
+                : () => Navigator.of(context).pop(_selectedInviteIds),
             child: Text(
-              _selectedIds.isEmpty ? '发起' : '发起(${_selectedIds.length})',
+              _selectedInviteIds.isEmpty
+                  ? '发起'
+                  : '发起(${_selectedInviteIds.length})',
             ),
           ),
         ],
       ),
-      body: FutureBuilder<Map<String, Object?>>(
+      body: FutureBuilder<List<Map<String, Object?>>>(
         future: _future,
         builder: (context, snapshot) {
           if (snapshot.connectionState != ConnectionState.done) {
@@ -3068,14 +3112,7 @@ class _GroupCallInvitePickerPageState
           if (snapshot.hasError) {
             return _ErrorState(text: snapshot.error.toString());
           }
-          final currentUserId =
-              widget.controller.session?.userId.toString() ?? '';
-          final members = _listFromResult(snapshot.data ?? const {})
-              .where((item) {
-                final id = _memberUserId(item);
-                return id.isNotEmpty && id != currentUserId;
-              })
-              .toList(growable: false);
+          final members = snapshot.data ?? const <Map<String, Object?>>[];
           if (members.isEmpty) {
             return const _EmptyRow(text: '暂无可邀请成员');
           }
@@ -3115,6 +3152,24 @@ class _GroupCallInvitePickerPageState
     );
   }
 
+  Future<List<Map<String, Object?>>> _loadInviteMembers() async {
+    final result = await widget.controller.groupMembers(widget.groupId);
+    final currentUserId = widget.controller.session?.userId.toString() ?? '';
+    final members = _listFromResult(result)
+        .where((item) {
+          final id = _memberUserId(item);
+          return id.isNotEmpty && id != currentUserId;
+        })
+        .toList(growable: false);
+    final validMemberIds = members.map(_memberUserId).toSet();
+    _validMemberIds
+      ..clear()
+      ..addAll(validMemberIds);
+    _selectedIds.removeWhere((id) => !validMemberIds.contains(id));
+    _membersReady = true;
+    return members;
+  }
+
   void _toggle(String userId) {
     if (userId.isEmpty) {
       return;
@@ -3124,5 +3179,15 @@ class _GroupCallInvitePickerPageState
         _selectedIds.add(userId);
       }
     });
+  }
+
+  List<String> get _selectedInviteIds {
+    if (!_membersReady) {
+      return const [];
+    }
+    if (_validMemberIds.isEmpty) {
+      return const [];
+    }
+    return _selectedIds.where(_validMemberIds.contains).toList(growable: false);
   }
 }

@@ -150,8 +150,8 @@ class _HomePageState extends State<HomePage> {
         return;
       }
       await Navigator.of(context).push(
-        MaterialPageRoute<void>(
-          builder: (_) => LiveKitCallPage.incoming(
+        _callPageRoute(
+          LiveKitCallPage.incoming(
             controller: widget.controller,
             initialCall: call,
           ),

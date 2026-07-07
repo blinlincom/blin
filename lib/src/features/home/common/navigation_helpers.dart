@@ -13,9 +13,23 @@ Future<Map<String, String>?> _openInput(
 }
 
 Future<void> _push(BuildContext context, Widget page) {
+  if (page is LiveKitCallPage) {
+    return Navigator.of(context).push(_callPageRoute(page));
+  }
   return Navigator.of(
     context,
   ).push(MaterialPageRoute<void>(builder: (_) => page));
+}
+
+PageRoute<void> _callPageRoute(LiveKitCallPage page) {
+  return PageRouteBuilder<void>(
+    opaque: false,
+    barrierColor: Colors.transparent,
+    pageBuilder: (_, __, ___) => page,
+    transitionsBuilder: (_, animation, __, child) {
+      return FadeTransition(opacity: animation, child: child);
+    },
+  );
 }
 
 Future<bool> _confirmDanger(

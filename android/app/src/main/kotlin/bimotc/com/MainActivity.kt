@@ -1,9 +1,15 @@
 package bimotc.com
 
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.os.Build
+import android.os.PowerManager
+import android.provider.Settings
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
+import android.app.NotificationManager
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -15,11 +21,12 @@ import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
 class MainActivity : FlutterActivity() {
-    private val channelName = "bimotc.com/cache_security"
+    private val cacheSecurityChannelName = "bimotc.com/cache_security"
+    private val backgroundReceiveChannelName = "bimotc.com/background_receive"
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
-        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channelName).setMethodCallHandler { call, result ->
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, cacheSecurityChannelName).setMethodCallHandler { call, result ->
             when (call.method) {
                 "getCacheKey" -> runCatching {
                     SecureCacheKeyStore(applicationContext).getOrCreateCacheKey()
@@ -29,6 +36,85 @@ class MainActivity : FlutterActivity() {
                 else -> result.notImplemented()
             }
         }
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, backgroundReceiveChannelName).setMethodCallHandler { call, result ->
+            when (call.method) {
+                "start", "update" -> runCatching {
+                    val title = call.argument<String>("title") ?: "BIM 正在接收消息"
+                    val text = call.argument<String>("text") ?: "后台接收保护运行中"
+                    BackgroundReceiveService.start(applicationContext, title, text)
+                    true
+                }.onSuccess(result::success).onFailure {
+                    result.error("BACKGROUND_RECEIVE_START_ERROR", it.message, null)
+                }
+                "stop" -> runCatching {
+                    BackgroundReceiveService.stop(applicationContext)
+                    true
+                }.onSuccess(result::success).onFailure {
+                    result.error("BACKGROUND_RECEIVE_STOP_ERROR", it.message, null)
+                }
+                "status" -> result.success(backgroundReceiveStatus())
+                "openNotificationSettings" -> runCatching {
+                    openNotificationSettings()
+                    true
+                }.onSuccess(result::success).onFailure {
+                    result.error("OPEN_NOTIFICATION_SETTINGS_ERROR", it.message, null)
+                }
+                "openBatterySettings" -> runCatching {
+                    openBatterySettings()
+                    true
+                }.onSuccess(result::success).onFailure {
+                    result.error("OPEN_BATTERY_SETTINGS_ERROR", it.message, null)
+                }
+                else -> result.notImplemented()
+            }
+        }
+    }
+
+    private fun backgroundReceiveStatus(): Map<String, Any> {
+        val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+        val batteryIgnored = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            powerManager.isIgnoringBatteryOptimizations(packageName)
+        } else {
+            true
+        }
+        val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        val notificationEnabled = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            notificationManager.areNotificationsEnabled()
+        } else {
+            true
+        }
+        return mapOf(
+            "platform" to "android",
+            "supported" to true,
+            "service_running" to BackgroundReceiveService.running,
+            "notification_permission_granted" to notificationEnabled,
+            "battery_optimization_ignored" to batteryIgnored,
+            "note" to "Android 后台接收依赖前台服务、通知权限和电池优化设置"
+        )
+    }
+
+    private fun openNotificationSettings() {
+        val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                .putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
+        } else {
+            Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+                .setData(Uri.parse("package:$packageName"))
+        }
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        startActivity(intent)
+    }
+
+    private fun openBatterySettings() {
+        val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
+                .setData(Uri.parse("package:$packageName"))
+        } else {
+            Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+                .setData(Uri.parse("package:$packageName"))
+        }
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        startActivity(intent)
     }
 }
 

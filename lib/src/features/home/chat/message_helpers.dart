@@ -426,9 +426,11 @@ String _quoteContentTypeText(String contentType) {
 
 bool _isSystemNoticeMessage(Map<String, Object?> item) {
   final contentType = _messageContentType(item);
+  if (contentType == ChatContentTypes.call) {
+    return false;
+  }
   return contentType == ChatContentTypes.redPacketReceived ||
       contentType == ChatContentTypes.transferReceived ||
-      contentType == ChatContentTypes.call ||
       _boolValue(item['is_system']) ||
       _boolValue(_asObjectMap(item['payload'])['is_system']);
 }
@@ -464,69 +466,17 @@ String _systemNoticeText(Map<String, Object?> item) {
 }
 
 String _callNoticeText(Map<String, Object?> payload) {
-  final direct = _value(payload, ['content']).trim();
-  if (direct.isNotEmpty && direct != '[消息]') {
-    return direct;
-  }
-  final call = _asObjectMap(payload['call']);
-  final status = _value(call, [
-    'status',
-  ], fallback: _value(payload, ['call_status', 'status'])).toLowerCase();
-  if (status == 'canceled' || status == 'cancelled') {
-    return '已取消';
-  }
-  if (status == 'rejected') {
-    return '已拒绝';
-  }
-  if (status == 'missed' || status == 'timeout') {
-    return '未接听';
-  }
-  if (status == 'failed') {
-    return '通话异常结束';
-  }
-  final mediaType = _value(call, [
-    'media_type',
-  ], fallback: _value(payload, ['media_type']));
-  final callType = _value(call, [
-    'call_type',
-  ], fallback: _value(payload, ['call_type']));
-  final media = mediaType == 'video' ? '视频通话' : '语音通话';
-  final title = callType == 'group' ? '群$media' : media;
-  final duration = _intValue(call, ['duration']);
-  final fallbackDuration = _intValue(payload, ['duration']);
-  return '$title ${_callDurationLabel(duration > 0 ? duration : fallbackDuration)}';
+  final meta = _callMessageUi(payload);
+  return meta.statusText.isEmpty
+      ? meta.title
+      : '${meta.title} ${meta.statusText}';
 }
 
 String _callConversationText(Map<String, Object?> payload, String content) {
-  final callText = _callNoticeText({
-    ...payload,
-    if (content.trim().isNotEmpty) 'content': content.trim(),
-  });
-  if (callText == '已取消') {
-    return '[通话已取消]';
-  }
-  if (callText == '已拒绝') {
-    return '[通话已拒绝]';
-  }
-  if (callText == '未接听') {
-    final media = _callMediaLabel(payload);
-    return '[未接通$media]';
-  }
-  final media = _callMediaLabel(payload);
-  final duration = callText.replaceFirst(RegExp(r'^群?语音通话\s*|^群?视频通话\s*'), '');
-  return duration == callText ? '[$media]' : '[$media] $duration';
-}
-
-String _callMediaLabel(Map<String, Object?> payload) {
-  final call = _asObjectMap(payload['call']);
-  final mediaType = _value(call, [
-    'media_type',
-  ], fallback: _value(payload, ['media_type']));
-  final callType = _value(call, [
-    'call_type',
-  ], fallback: _value(payload, ['call_type']));
-  final media = mediaType == 'video' ? '视频通话' : '语音通话';
-  return callType == 'group' ? '群$media' : media;
+  final meta = _callMessageUi(payload, content: content);
+  return meta.statusText.isEmpty
+      ? '[${meta.title}]'
+      : '[${meta.title}] ${meta.statusText}';
 }
 
 String _callDurationLabel(int seconds) {
@@ -539,6 +489,203 @@ String _callDurationLabel(int seconds) {
     return '$hours:${two(minutes)}:${two(remain)}';
   }
   return '${two(minutes)}:${two(remain)}';
+}
+
+class _CallMessageUi {
+  const _CallMessageUi({
+    required this.mediaType,
+    required this.callType,
+    required this.statusText,
+  });
+
+  final String mediaType;
+  final String callType;
+  final String statusText;
+
+  bool get isVideo => mediaType == 'video';
+  bool get isGroup => callType == 'group';
+  String get mediaLabel => isVideo ? '视频通话' : '语音通话';
+  String get title => isGroup ? '群$mediaLabel' : mediaLabel;
+}
+
+_CallMessageUi _callMessageUi(
+  Map<String, Object?> payload, {
+  String content = '',
+}) {
+  final call = _asObjectMap(payload['call']);
+  final direct = _callDirectText(payload, content);
+  final mediaType = _callMediaType(payload, call, direct);
+  final callType = _callType(payload, call, direct);
+  final duration = max(
+    _intValue(call, ['duration', 'duration_seconds', 'seconds']),
+    _intValue(payload, ['duration', 'duration_seconds', 'seconds']),
+  );
+  final status = _callStatusCategory(payload, call, direct);
+  final statusText = switch (status) {
+    'canceled' => '已取消',
+    'rejected' => '已拒绝',
+    'missed' => '未接听',
+    'failed' => '通话异常结束',
+    _ => _callDurationStatusText(duration, direct),
+  };
+  return _CallMessageUi(
+    mediaType: mediaType,
+    callType: callType,
+    statusText: statusText,
+  );
+}
+
+String _callDirectText(Map<String, Object?> payload, String content) {
+  final raw = content.trim().isNotEmpty
+      ? content.trim()
+      : _value(payload, ['content', 'text']).trim();
+  return raw == '[消息]' ? '' : raw;
+}
+
+String _callMediaType(
+  Map<String, Object?> payload,
+  Map<String, Object?> call,
+  String direct,
+) {
+  final raw = _value(call, [
+    'media_type',
+    'media',
+  ], fallback: _value(payload, ['media_type', 'media'])).toLowerCase();
+  if (raw == 'video' || raw == '视频') {
+    return 'video';
+  }
+  if (direct.contains('视频')) {
+    return 'video';
+  }
+  return 'audio';
+}
+
+String _callType(
+  Map<String, Object?> payload,
+  Map<String, Object?> call,
+  String direct,
+) {
+  final raw = _value(call, [
+    'call_type',
+  ], fallback: _value(payload, ['call_type'])).toLowerCase();
+  if (raw == 'group' || raw == 'meeting' || raw == 'private') {
+    return raw;
+  }
+  return direct.contains('群') ? 'group' : 'private';
+}
+
+String _callStatusCategory(
+  Map<String, Object?> payload,
+  Map<String, Object?> call,
+  String direct,
+) {
+  final text = [
+    _value(call, [
+      'status',
+      'state',
+      'event',
+    ], fallback: _value(payload, ['call_status', 'status', 'state', 'event'])),
+    _value(call, [
+      'status_text',
+      'reason',
+    ], fallback: _value(payload, ['status_text', 'reason'])),
+    direct,
+  ].join(' ').toLowerCase();
+  if (text.contains('cancel') || text.contains('取消')) {
+    return 'canceled';
+  }
+  if (text.contains('reject') || text.contains('拒绝')) {
+    return 'rejected';
+  }
+  if (text.contains('miss') ||
+      text.contains('timeout') ||
+      text.contains('no_answer') ||
+      text.contains('unanswered') ||
+      text.contains('未接')) {
+    return 'missed';
+  }
+  if (text.contains('fail') || text.contains('error') || text.contains('异常')) {
+    return 'failed';
+  }
+  return '';
+}
+
+String _callDurationStatusText(int duration, String direct) {
+  if (duration > 0) {
+    return '通话时长 ${_callDurationLabel(duration)}';
+  }
+  final directDuration = RegExp(
+    r'(?:(?:\d{1,2}:)?\d{1,2}:\d{2})',
+  ).firstMatch(direct)?.group(0);
+  if (directDuration != null && directDuration != '00:00') {
+    return '通话时长 $directDuration';
+  }
+  final stripped = direct
+      .replaceFirst(RegExp(r'^群?语音通话\s*'), '')
+      .replaceFirst(RegExp(r'^群?视频通话\s*'), '')
+      .trim();
+  if (stripped.isNotEmpty && stripped != direct) {
+    return stripped == '00:00' ? '' : stripped;
+  }
+  return '';
+}
+
+List<String> _callParticipantUserIds(
+  Map<String, Object?> payload, {
+  String currentUserId = '',
+}) {
+  final ids = <String>{};
+  final call = _asObjectMap(payload['call']);
+
+  void addId(Object? value) {
+    final text = value?.toString().trim() ?? '';
+    if (text.isEmpty) {
+      return;
+    }
+    final parts = _idsFromText(text).isEmpty ? [text] : _idsFromText(text);
+    for (final part in parts) {
+      final normalized = _privateReceiverIdFromChannel(part);
+      if (normalized.isNotEmpty && normalized != currentUserId) {
+        ids.add(normalized);
+      }
+    }
+  }
+
+  void collect(Object? value) {
+    if (value is List) {
+      for (final item in value) {
+        collect(item);
+      }
+      return;
+    }
+    if (value is Map) {
+      final map = value.map((key, value) => MapEntry(key.toString(), value));
+      for (final key in [
+        'user_id',
+        'uid',
+        'im_uid',
+        'member_uid',
+        'receiver_id',
+        'id',
+      ]) {
+        addId(map[key]);
+      }
+      collect(map['user']);
+      collect(map['member']);
+      collect(map['profile']);
+      return;
+    }
+    addId(value);
+  }
+
+  for (final source in [call, payload]) {
+    collect(source['participants']);
+    collect(source['invite_user_ids']);
+    collect(source['invitee_ids']);
+    collect(source['user_ids']);
+    collect(source['members']);
+  }
+  return ids.toList(growable: false);
 }
 
 String _paymentNoticeText(

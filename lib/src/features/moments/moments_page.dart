@@ -1005,21 +1005,45 @@ class _MomentMediaGrid extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final width = MediaQuery.sizeOf(context).width - 78;
-    if (media.length == 1) {
-      return _MomentMediaTile(
-        media: media.first,
-        size: width.clamp(160, 240).toDouble(),
-        large: true,
-      );
-    }
-    final tile = ((width - 8) / 3).clamp(74, 112).toDouble();
-    return Wrap(
-      spacing: 4,
-      runSpacing: 4,
-      children: [
-        for (final item in media) _MomentMediaTile(media: item, size: tile),
-      ],
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final fallbackWidth = MediaQuery.sizeOf(context).width - 78;
+        final availableWidth = constraints.maxWidth.isFinite
+            ? constraints.maxWidth
+            : fallbackWidth;
+        if (media.length == 1) {
+          final size = _singleMomentMediaSize(
+            context,
+            media.first,
+            availableWidth,
+          );
+          return _MomentMediaTile(
+            media: media.first,
+            width: size.width,
+            height: size.height,
+          );
+        }
+
+        final spacing = 4.0;
+        final columns = media.length == 2 || media.length == 4 ? 2 : 3;
+        final gridWidth = availableWidth
+            .clamp(160, columns * 106 + (columns - 1) * spacing)
+            .toDouble();
+        final tile = ((gridWidth - (columns - 1) * spacing) / columns)
+            .clamp(72, 106)
+            .toDouble();
+        return SizedBox(
+          width: columns * tile + (columns - 1) * spacing,
+          child: Wrap(
+            spacing: spacing,
+            runSpacing: spacing,
+            children: [
+              for (final item in media)
+                _MomentMediaTile(media: item, width: tile, height: tile),
+            ],
+          ),
+        );
+      },
     );
   }
 }
@@ -1027,52 +1051,155 @@ class _MomentMediaGrid extends StatelessWidget {
 class _MomentMediaTile extends StatelessWidget {
   const _MomentMediaTile({
     required this.media,
-    required this.size,
-    this.large = false,
+    required this.width,
+    required this.height,
   });
 
   final Map<String, Object?> media;
-  final double size;
-  final bool large;
+  final double width;
+  final double height;
 
   @override
   Widget build(BuildContext context) {
-    final type = _textValue(media, ['type', 'media_type']);
+    final isVideo = _isMomentVideo(media);
     final url = _mediaUrl(_textValue(media, ['url', 'image_url', 'video_url']));
     final thumb = _mediaUrl(_textValue(media, ['thumb_url', 'cover_url']));
-    final isVideo = type == 'video';
     return GestureDetector(
       onTap: () => _openMomentMediaViewer(context, media),
-      child: Container(
-        width: large && isVideo ? size * 1.35 : size,
-        height: size,
-        color: const Color(0xffdfe3e8),
-        clipBehavior: Clip.antiAlias,
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            if ((isVideo ? thumb : url).isNotEmpty)
-              Image.network(
-                isVideo && thumb.isNotEmpty ? thumb : url,
-                fit: BoxFit.cover,
-                gaplessPlayback: true,
-                errorBuilder: (_, __, ___) =>
-                    _MomentMediaFallback(isVideo: isVideo),
-                loadingBuilder: (context, child, progress) => progress == null
-                    ? child
-                    : _MomentMediaFallback(isVideo: isVideo),
-              )
-            else
-              _MomentMediaFallback(isVideo: isVideo),
-            if (isVideo)
-              const Center(
-                child: Icon(
-                  Icons.play_circle_fill,
-                  color: Colors.white,
-                  size: 42,
-                ),
+      child: SizedBox(
+        width: width,
+        height: height,
+        child: ColoredBox(
+          color: const Color(0xffdfe3e8),
+          child: ClipRect(
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                if ((isVideo ? thumb : url).isNotEmpty)
+                  Image.network(
+                    isVideo && thumb.isNotEmpty ? thumb : url,
+                    fit: BoxFit.cover,
+                    gaplessPlayback: true,
+                    errorBuilder: (_, __, ___) =>
+                        _MomentMediaFallback(isVideo: isVideo),
+                    loadingBuilder: (context, child, progress) =>
+                        progress == null
+                        ? child
+                        : _MomentMediaFallback(isVideo: isVideo),
+                  )
+                else
+                  _MomentMediaFallback(isVideo: isVideo),
+                if (isVideo)
+                  const Center(
+                    child: Icon(
+                      Icons.play_circle_fill,
+                      color: Colors.white,
+                      size: 42,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+Size _singleMomentMediaSize(
+  BuildContext context,
+  Map<String, Object?> media,
+  double availableWidth,
+) {
+  final isVideo = _isMomentVideo(media);
+  final viewport = MediaQuery.sizeOf(context);
+  final maxWidth = availableWidth.clamp(150, isVideo ? 292 : 256).toDouble();
+  final maxHeight = (viewport.height * 0.34)
+      .clamp(180, isVideo ? 240 : 280)
+      .toDouble();
+  final ratio = _momentMediaAspectRatio(media, isVideo: isVideo);
+  var width = maxWidth;
+  var height = width / ratio;
+  if (height > maxHeight) {
+    height = maxHeight;
+    width = height * ratio;
+  }
+  return Size(width.clamp(120, maxWidth).toDouble(), height);
+}
+
+double _momentMediaAspectRatio(
+  Map<String, Object?> media, {
+  required bool isVideo,
+}) {
+  final width = _doubleValue(media, [
+    'width',
+    'media_width',
+    'image_width',
+    'video_width',
+    'w',
+  ]);
+  final height = _doubleValue(media, [
+    'height',
+    'media_height',
+    'image_height',
+    'video_height',
+    'h',
+  ]);
+  final fallback = isVideo ? 16 / 9 : 1.0;
+  if (width <= 0 || height <= 0) {
+    return fallback;
+  }
+  final ratio = width / height;
+  final minRatio = isVideo ? 1.0 : 0.68;
+  final maxRatio = isVideo ? 16 / 9 : 1.78;
+  return ratio.clamp(minRatio, maxRatio).toDouble();
+}
+
+bool _isMomentVideo(Map<String, Object?> media) {
+  final type = _textValue(media, ['type', 'media_type']).toLowerCase();
+  if (type == 'video' || type == 'videos') {
+    return true;
+  }
+  final mime = _textValue(media, ['mime', 'mime_type']).toLowerCase();
+  if (mime.startsWith('video/')) {
+    return true;
+  }
+  final url = _textValue(media, ['url', 'video_url', 'file_url']).toLowerCase();
+  return url.endsWith('.mp4') ||
+      url.endsWith('.mov') ||
+      url.endsWith('.m4v') ||
+      url.endsWith('.webm');
+}
+
+class _MomentMediaViewerScaffold extends StatelessWidget {
+  const _MomentMediaViewerScaffold({required this.url});
+
+  final String url;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        backgroundColor: Colors.black,
+        foregroundColor: Colors.white,
+        elevation: 0,
+      ),
+      body: SafeArea(
+        child: InteractiveViewer(
+          minScale: 1,
+          maxScale: 4,
+          child: Center(
+            child: Image.network(
+              url,
+              fit: BoxFit.contain,
+              errorBuilder: (_, __, ___) => const Icon(
+                Icons.broken_image_outlined,
+                color: Colors.white70,
+                size: 48,
               ),
-          ],
+            ),
+          ),
         ),
       ),
     );
@@ -1674,18 +1801,33 @@ class _MomentVideoViewerState extends State<_MomentVideoViewer> {
         foregroundColor: Colors.white,
         elevation: 0,
       ),
-      body: Center(
-        child: _error.isNotEmpty
-            ? Text(_error, style: const TextStyle(color: Colors.white70))
-            : controller == null
-            ? const CircularProgressIndicator(
-                color: Colors.white,
-                strokeWidth: 2,
-              )
-            : AspectRatio(
-                aspectRatio: controller.value.aspectRatio,
-                child: VideoPlayer(controller),
-              ),
+      body: SafeArea(
+        child: Center(
+          child: _error.isNotEmpty
+              ? Text(_error, style: const TextStyle(color: Colors.white70))
+              : controller == null
+              ? const CircularProgressIndicator(
+                  color: Colors.white,
+                  strokeWidth: 2,
+                )
+              : LayoutBuilder(
+                  builder: (context, constraints) {
+                    final ratio = controller.value.aspectRatio
+                        .clamp(0.56, 16 / 9)
+                        .toDouble();
+                    return ConstrainedBox(
+                      constraints: BoxConstraints(
+                        maxWidth: constraints.maxWidth,
+                        maxHeight: constraints.maxHeight,
+                      ),
+                      child: AspectRatio(
+                        aspectRatio: ratio,
+                        child: VideoPlayer(controller),
+                      ),
+                    );
+                  },
+                ),
+        ),
       ),
       floatingActionButton: controller == null
           ? null
@@ -1790,12 +1932,11 @@ Future<bool> _confirmMomentAction(
 }
 
 void _openMomentMediaViewer(BuildContext context, Map<String, Object?> media) {
-  final type = _textValue(media, ['type', 'media_type']);
   final url = _mediaUrl(_textValue(media, ['url', 'image_url', 'video_url']));
   if (url.isEmpty) {
     return;
   }
-  if (type == 'video') {
+  if (_isMomentVideo(media)) {
     Navigator.of(context).push(
       MaterialPageRoute<void>(builder: (_) => _MomentVideoViewer(url: url)),
     );
@@ -1803,27 +1944,7 @@ void _openMomentMediaViewer(BuildContext context, Map<String, Object?> media) {
   }
   Navigator.of(context).push(
     MaterialPageRoute<void>(
-      builder: (_) => Scaffold(
-        backgroundColor: Colors.black,
-        appBar: AppBar(
-          backgroundColor: Colors.black,
-          foregroundColor: Colors.white,
-          elevation: 0,
-        ),
-        body: Center(
-          child: InteractiveViewer(
-            child: Image.network(
-              url,
-              fit: BoxFit.contain,
-              errorBuilder: (_, __, ___) => const Icon(
-                Icons.broken_image_outlined,
-                color: Colors.white70,
-                size: 48,
-              ),
-            ),
-          ),
-        ),
-      ),
+      builder: (_) => _MomentMediaViewerScaffold(url: url),
     ),
   );
 }
@@ -1902,6 +2023,24 @@ int _intValue(
       return value;
     }
     final parsed = int.tryParse(value?.toString() ?? '');
+    if (parsed != null) {
+      return parsed;
+    }
+  }
+  return fallback;
+}
+
+double _doubleValue(
+  Map<String, Object?> source,
+  List<String> keys, {
+  double fallback = 0,
+}) {
+  for (final key in keys) {
+    final value = source[key];
+    if (value is num) {
+      return value.toDouble();
+    }
+    final parsed = double.tryParse(value?.toString() ?? '');
     if (parsed != null) {
       return parsed;
     }

@@ -83,7 +83,8 @@ class _MessageBubble extends StatelessWidget {
       ChatContentTypes.file ||
       ChatContentTypes.voice ||
       ChatContentTypes.contactCard ||
-      ChatContentTypes.transfer => const EdgeInsets.symmetric(
+      ChatContentTypes.transfer ||
+      ChatContentTypes.call => const EdgeInsets.symmetric(
         horizontal: 11,
         vertical: 9,
       ),
@@ -99,6 +100,7 @@ class _MessageBubble extends StatelessWidget {
       ChatContentTypes.file ||
       ChatContentTypes.video ||
       ChatContentTypes.contactCard ||
+      ChatContentTypes.call ||
       ChatContentTypes.transfer => width * 0.62,
       ChatContentTypes.voice => width * 0.46,
       ChatContentTypes.image ||
@@ -286,6 +288,11 @@ class _MessageBubbleContent extends StatelessWidget {
         ),
         receiving: redPacketReceiving,
       ),
+      ChatContentTypes.call => _CallPreview(
+        payload: payload,
+        content: content,
+        isMe: isMe,
+      ),
       _ => Text(
         content.isEmpty ? '[消息]' : content,
         style: const TextStyle(
@@ -296,6 +303,85 @@ class _MessageBubbleContent extends StatelessWidget {
         ),
       ),
     };
+  }
+}
+
+class _CallPreview extends StatelessWidget {
+  const _CallPreview({
+    required this.payload,
+    required this.content,
+    required this.isMe,
+  });
+
+  final Map<String, Object?> payload;
+  final String content;
+  final bool isMe;
+
+  @override
+  Widget build(BuildContext context) {
+    final meta = _callMessageUi(payload, content: content);
+    final icon = meta.isVideo ? Icons.videocam_outlined : Icons.call_outlined;
+    final iconColor = isMe ? const Color(0xff2f7f35) : const Color(0xff1677ff);
+    final subtitleColor = isMe
+        ? const Color(0xff477a35)
+        : const Color(0xff747b86);
+    return Semantics(
+      button: true,
+      label: '重新发起${meta.title}',
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minWidth: 118, minHeight: 44),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 30,
+              height: 30,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: isMe ? const Color(0x55ffffff) : const Color(0xffeef5ff),
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: Icon(icon, size: 19, color: iconColor),
+            ),
+            const SizedBox(width: 9),
+            Flexible(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    meta.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: _textColor,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                      height: 1.15,
+                    ),
+                  ),
+                  if (meta.statusText.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Text(
+                        meta.statusText,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: subtitleColor,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          height: 1.1,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 

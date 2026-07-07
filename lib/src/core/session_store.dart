@@ -17,6 +17,7 @@ class SessionStore {
   static const _sessionVerifiedAtKey = 'session_verified_at';
   static const _launchAtKey = 'last_launch_at';
   static const _resumeAtKey = 'last_resume_at';
+  static const _backgroundReceiveKey = 'background_receive_protection_enabled';
 
   UserSession? readSession() {
     final raw = _kv.decodeString(_sessionKey);
@@ -98,6 +99,18 @@ class SessionStore {
     final now = DateTime.now().millisecondsSinceEpoch;
     _kv.encodeInt(_resumeAtKey, now);
     return now;
+  }
+
+  bool readBackgroundReceiveProtectionEnabled() {
+    final value = _kv.decodeString(_backgroundReceiveKey);
+    if (value == null || value.isEmpty) {
+      return true;
+    }
+    return value == '1';
+  }
+
+  void writeBackgroundReceiveProtectionEnabled(bool enabled) {
+    _kv.encodeString(_backgroundReceiveKey, enabled ? '1' : '0');
   }
 
   String _newDeviceId() {

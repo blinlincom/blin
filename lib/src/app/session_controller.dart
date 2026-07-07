@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/widgets.dart';
 
@@ -10,6 +11,7 @@ import '../core/app_logger.dart';
 import '../core/models.dart';
 import '../core/session_store.dart';
 import '../features/moments/moments_cache_store.dart';
+import '../im/background_receive_guard.dart';
 import '../im/business_im_service.dart';
 import '../im/chat_feature_service.dart';
 import '../im/im_cache_store.dart';
@@ -71,6 +73,9 @@ class SessionController extends ChangeNotifier {
   final List<BusinessImPresenceEvent> _pendingPresenceEvents =
       <BusinessImPresenceEvent>[];
   StreamSubscription<BusinessImPresenceEvent>? _presenceSub;
+  bool _backgroundReceiveProtectionEnabled = true;
+  BackgroundReceiveStatus _backgroundReceiveStatus =
+      BackgroundReceiveStatus.unsupported('unknown', '尚未检测');
 
   UserSession? get session => _session;
   AppInfo? get appInfo => _appInfo;
@@ -89,6 +94,12 @@ class SessionController extends ChangeNotifier {
   int get lastSessionVerifiedAt => _lastSessionVerifiedAt;
   String get imStatusText => _im.statusText;
   String? get imError => _im.lastError;
+  bool get backgroundReceiveProtectionEnabled =>
+      _backgroundReceiveProtectionEnabled;
+  BackgroundReceiveStatus get backgroundReceiveStatus =>
+      _backgroundReceiveStatus;
+  bool get _effectiveBackgroundKeepAliveEnabled =>
+      _backgroundReceiveProtectionEnabled && Platform.isAndroid;
   int get conversationVersion => _im.conversationVersion;
   bool get initialHistorySyncing => _im.initialHistorySyncing;
   bool get initialHistorySyncBlocked => _im.initialHistorySyncBlocked;
@@ -115,6 +126,8 @@ class SessionController extends ChangeNotifier {
     _device = _store.ensureDeviceId();
     _session = _store.readSession();
     _appInfo = _store.readAppInfo() ?? const AppInfo(name: AppConfig.appName);
+    _backgroundReceiveProtectionEnabled = _store
+        .readBackgroundReceiveProtectionEnabled();
     _lastSessionVerifiedAt = _store.readSessionVerifiedAt();
     AppLogger.info(
       'session',
@@ -122,6 +135,7 @@ class SessionController extends ChangeNotifier {
       data: {
         'logged_in': _session != null,
         'device': _device,
+        'background_receive_enabled': _backgroundReceiveProtectionEnabled,
         'last_session_verified_at': _lastSessionVerifiedAt,
       },
     );
@@ -244,6 +258,7 @@ class SessionController extends ChangeNotifier {
     if (_session == null) {
       return;
     }
+    unawaited(_applyBackgroundReceiveProtection(source: 'hot_resume'));
     if (_im.isStarted) {
       AppLogger.info('session', 'hot resume use existing im session');
       _im.resumeConnection();
@@ -519,7 +534,12 @@ class SessionController extends ChangeNotifier {
     required String source,
   }) async {
     try {
-      await _im.start(session, device: _device);
+      await _im.start(
+        session,
+        device: _device,
+        backgroundKeepAliveEnabled: _effectiveBackgroundKeepAliveEnabled,
+      );
+      unawaited(_applyBackgroundReceiveProtection(source: source));
       AppLogger.info(
         'session',
         'cached im start success',
@@ -1870,12 +1890,53 @@ class SessionController extends ChangeNotifier {
     return result;
   }
 
+  Future<void> setBackgroundReceiveProtectionEnabled(bool enabled) async {
+    _backgroundReceiveProtectionEnabled = enabled;
+    _store.writeBackgroundReceiveProtectionEnabled(enabled);
+    _im.setBackgroundKeepAliveEnabled(_effectiveBackgroundKeepAliveEnabled);
+    notifyListeners();
+    await _applyBackgroundReceiveProtection(source: 'user_setting');
+    await refreshBackgroundReceiveStatus();
+    AppLogger.info(
+      'session',
+      'background receive protection changed',
+      data: {'enabled': enabled},
+    );
+  }
+
+  Future<void> refreshBackgroundReceiveStatus() async {
+    _backgroundReceiveStatus = await BackgroundReceiveGuard.status();
+    notifyListeners();
+    AppLogger.info(
+      'session',
+      'background receive status refreshed',
+      data: {
+        'platform': _backgroundReceiveStatus.platform,
+        'supported': _backgroundReceiveStatus.supported,
+        'service_running': _backgroundReceiveStatus.serviceRunning,
+        'notification_permission_granted':
+            _backgroundReceiveStatus.notificationPermissionGranted,
+        'battery_optimization_ignored':
+            _backgroundReceiveStatus.batteryOptimizationIgnored,
+      },
+    );
+  }
+
+  Future<void> openBackgroundNotificationSettings() {
+    return BackgroundReceiveGuard.openNotificationSettings();
+  }
+
+  Future<void> openBackgroundBatterySettings() {
+    return BackgroundReceiveGuard.openBatterySettings();
+  }
+
   Future<void> logout() async {
     AppLogger.info('session', 'logout start');
     final current = _session;
     _store.clearSession();
     _session = null;
     _clearListCaches();
+    unawaited(BackgroundReceiveGuard.stop(reason: 'logout'));
     notifyListeners();
     if (current == null) {
       return;
@@ -1893,6 +1954,43 @@ class SessionController extends ChangeNotifier {
   void clearError() {
     _error = null;
     notifyListeners();
+  }
+
+  Future<void> _applyBackgroundReceiveProtection({
+    required String source,
+  }) async {
+    final current = _session ?? _store.readSession();
+    final chat = current?.chat;
+    if (!_backgroundReceiveProtectionEnabled ||
+        current == null ||
+        chat == null ||
+        chat.uid.isEmpty) {
+      await BackgroundReceiveGuard.stop(reason: source);
+      return;
+    }
+    await BackgroundReceiveGuard.start(
+      enabled: _backgroundReceiveProtectionEnabled,
+      statusText: _backgroundReceiveStatusText,
+      uid: chat.uid,
+    );
+    unawaited(refreshBackgroundReceiveStatus());
+  }
+
+  String get _backgroundReceiveStatusText {
+    final status = _im.statusText;
+    if (status == '已连接') {
+      return '消息连接正常';
+    }
+    if (status == '连接中') {
+      return '连接中...';
+    }
+    if (status == '重连中') {
+      return '重连中...';
+    }
+    if (status == '同步中') {
+      return '同步中...';
+    }
+    return status.isEmpty ? '等待连接' : status;
   }
 
   UserSession _requireSession() {
@@ -1949,7 +2047,13 @@ class SessionController extends ChangeNotifier {
     _session = withProfile;
     _store.writeSession(withProfile);
     _lastSessionVerifiedAt = _store.markSessionVerified();
-    await _im.start(withProfile, device: _device, chatIsFresh: true);
+    await _im.start(
+      withProfile,
+      device: _device,
+      chatIsFresh: true,
+      backgroundKeepAliveEnabled: _effectiveBackgroundKeepAliveEnabled,
+    );
+    unawaited(_applyBackgroundReceiveProtection(source: 'session_refresh'));
     unawaited(_warmBasicData());
     AppLogger.info(
       'session',
@@ -2261,6 +2365,18 @@ class SessionController extends ChangeNotifier {
     final status = _im.statusText;
     final becameConnected = status == '已连接' && _lastImStatusText != status;
     _lastImStatusText = status;
+    final chat = _session?.chat;
+    if (_backgroundReceiveProtectionEnabled &&
+        chat != null &&
+        chat.uid.isNotEmpty) {
+      unawaited(
+        BackgroundReceiveGuard.update(
+          enabled: true,
+          statusText: _backgroundReceiveStatusText,
+          uid: chat.uid,
+        ),
+      );
+    }
     if (becameConnected) {
       _refreshFriendPresenceAfterConnect();
     }

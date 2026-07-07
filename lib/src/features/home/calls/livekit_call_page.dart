@@ -12,6 +12,7 @@ const _groupCallVideoEncoding = lk.VideoEncoding(
 );
 const _callCloseAfterToneDelay = Duration(milliseconds: 360);
 const _remoteCallCloseDelay = Duration(milliseconds: 680);
+const _callMiniWindowSize = Size(154, 64);
 
 lk.RoomOptions _callRoomOptions(LiveKitCallInfo call) {
   return lk.RoomOptions(
@@ -223,9 +224,16 @@ class _LiveKitCallPageState extends State<LiveKitCallPage> {
   var _durationLabel = '00:00';
   var _pageClosing = false;
   var _callAnswered = false;
+  var _minimized = false;
+  var _privatePreviewDragging = false;
+  var _floatingDragging = false;
+  var _localVideoPrimary = false;
+  Offset? _privatePreviewOffset;
+  Offset? _floatingOffset;
 
   bool get _connected => _connectedAt != null;
   bool get _incomingWaiting => widget.incoming && !_connected && !_connecting;
+  bool get _canMinimize => !_incomingWaiting && !_ending && _call != null;
   bool get _videoCall =>
       (_call?.isVideo ?? false) || widget.mediaType == 'video';
   bool get _gridCall =>
@@ -808,25 +816,42 @@ class _LiveKitCallPageState extends State<LiveKitCallPage> {
   @override
   Widget build(BuildContext context) {
     return AnnotatedRegion<SystemUiOverlayStyle>(
-      value: const SystemUiOverlayStyle(
-        statusBarColor: Color(0xff08090c),
-        statusBarIconBrightness: Brightness.light,
-        statusBarBrightness: Brightness.dark,
-        systemNavigationBarColor: Color(0xff08090c),
-        systemNavigationBarIconBrightness: Brightness.light,
-      ),
+      value: _minimized
+          ? const SystemUiOverlayStyle(
+              statusBarColor: Colors.transparent,
+              statusBarIconBrightness: Brightness.dark,
+              statusBarBrightness: Brightness.light,
+              systemNavigationBarColor: Colors.transparent,
+              systemNavigationBarIconBrightness: Brightness.dark,
+            )
+          : const SystemUiOverlayStyle(
+              statusBarColor: Color(0xff08090c),
+              statusBarIconBrightness: Brightness.light,
+              statusBarBrightness: Brightness.dark,
+              systemNavigationBarColor: Color(0xff08090c),
+              systemNavigationBarIconBrightness: Brightness.light,
+            ),
       child: PopScope(
         canPop: false,
         onPopInvokedWithResult: (didPop, _) {
           if (!didPop) {
-            unawaited(_hangup());
+            if (_minimized) {
+              _restoreCallPage();
+            } else {
+              unawaited(_hangup());
+            }
           }
         },
         child: Scaffold(
-          backgroundColor: const Color(0xff08090c),
+          backgroundColor: _minimized
+              ? Colors.transparent
+              : const Color(0xff08090c),
           body: SafeArea(
             child: LayoutBuilder(
               builder: (context, constraints) {
+                if (_minimized) {
+                  return _buildMinimizedOverlay(constraints);
+                }
                 return Stack(
                   children: [
                     Positioned.fill(child: _buildStage(constraints)),
@@ -837,7 +862,9 @@ class _LiveKitCallPageState extends State<LiveKitCallPage> {
                       child: _CallTopBar(
                         title: _callTitle,
                         subtitle: _connected ? _durationLabel : _statusText,
+                        canMinimize: _canMinimize,
                         onBack: _hangup,
+                        onMinimize: _minimizeCallPage,
                       ),
                     ),
                     Positioned(
@@ -899,7 +926,227 @@ class _LiveKitCallPageState extends State<LiveKitCallPage> {
       call: _call,
       videoCall: _videoCall,
       fallbackProfile: _peerProfile,
+      localVideoPrimary: _localVideoPrimary,
+      previewOffset: _privatePreviewOffset,
+      previewDragging: _privatePreviewDragging,
+      onPreviewTap: _togglePrivateVideoPrimary,
+      onPreviewDragStart: _startPrivatePreviewDrag,
+      onPreviewDragUpdate: _updatePrivatePreviewDrag,
+      onPreviewDragEnd: _endPrivatePreviewDrag,
     );
+  }
+
+  Widget _buildMinimizedOverlay(BoxConstraints constraints) {
+    final position = _floatingOffset ?? _defaultFloatingOffset(constraints);
+    return Stack(
+      children: [
+        Positioned(
+          left: position.dx,
+          top: position.dy,
+          child: _DraggableCallMiniWindow(
+            title: _callTitle,
+            subtitle: _connected ? _durationLabel : _statusText,
+            videoCall: _videoCall,
+            dragging: _floatingDragging,
+            onTap: _restoreCallPage,
+            onPanStart: (_) => setState(() => _floatingDragging = true),
+            onPanUpdate: (details) {
+              setState(() {
+                final current =
+                    _floatingOffset ?? _defaultFloatingOffset(constraints);
+                _floatingOffset = _clampFloatingOffset(
+                  current + details.delta,
+                  constraints,
+                );
+              });
+            },
+            onPanEnd: (_) {
+              setState(() {
+                _floatingDragging = false;
+                _floatingOffset = _snapFloatingOffset(
+                  _floatingOffset ?? _defaultFloatingOffset(constraints),
+                  constraints,
+                );
+              });
+              AppLogger.info(
+                'call',
+                'call floating window snapped',
+                data: {
+                  'call_id': _call?.callId,
+                  'dx': _floatingOffset?.dx,
+                  'dy': _floatingOffset?.dy,
+                },
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  void _minimizeCallPage() {
+    if (!_canMinimize || _minimized) {
+      return;
+    }
+    AppLogger.info(
+      'call',
+      'call page minimized',
+      data: {'call_id': _call?.callId, 'video_call': _videoCall},
+    );
+    setState(() => _minimized = true);
+  }
+
+  void _restoreCallPage() {
+    if (!_minimized) {
+      return;
+    }
+    AppLogger.info(
+      'call',
+      'call page restored',
+      data: {'call_id': _call?.callId},
+    );
+    setState(() => _minimized = false);
+  }
+
+  void _togglePrivateVideoPrimary() {
+    if (!_videoCall) {
+      return;
+    }
+    setState(() => _localVideoPrimary = !_localVideoPrimary);
+  }
+
+  void _startPrivatePreviewDrag(DragStartDetails details) {
+    setState(() => _privatePreviewDragging = true);
+  }
+
+  void _updatePrivatePreviewDrag(
+    DragUpdateDetails details,
+    BoxConstraints constraints,
+  ) {
+    setState(() {
+      final current =
+          _privatePreviewOffset ?? _defaultPrivatePreviewOffset(constraints);
+      _privatePreviewOffset = _clampPrivatePreviewOffset(
+        current + details.delta,
+        constraints,
+      );
+    });
+  }
+
+  void _endPrivatePreviewDrag(
+    DragEndDetails details,
+    BoxConstraints constraints,
+  ) {
+    setState(() {
+      _privatePreviewDragging = false;
+      _privatePreviewOffset = _snapPrivatePreviewOffset(
+        _privatePreviewOffset ?? _defaultPrivatePreviewOffset(constraints),
+        constraints,
+      );
+    });
+    AppLogger.info(
+      'call',
+      'private preview snapped',
+      data: {
+        'call_id': _call?.callId,
+        'dx': _privatePreviewOffset?.dx,
+        'dy': _privatePreviewOffset?.dy,
+      },
+    );
+  }
+
+  Size _privatePreviewSize(BoxConstraints constraints) {
+    return _callPreviewSizeFor(constraints);
+  }
+
+  Offset _defaultPrivatePreviewOffset(BoxConstraints constraints) {
+    return _defaultCallPreviewOffset(context, constraints);
+  }
+
+  Offset _clampPrivatePreviewOffset(Offset offset, BoxConstraints constraints) {
+    final size = _privatePreviewSize(constraints);
+    final minX = 12.0;
+    final maxX = max(minX, constraints.maxWidth - size.width - 12);
+    final minY = _privatePreviewTopInset(context) + 8;
+    final maxY = max(
+      minY,
+      constraints.maxHeight - _privatePreviewBottomInset(context) - size.height,
+    );
+    return Offset(
+      offset.dx.clamp(minX, maxX).toDouble(),
+      offset.dy.clamp(minY, maxY).toDouble(),
+    );
+  }
+
+  Offset _snapPrivatePreviewOffset(Offset offset, BoxConstraints constraints) {
+    final size = _privatePreviewSize(constraints);
+    final minX = 12.0;
+    final maxX = max(minX, constraints.maxWidth - size.width - 12);
+    final minY = _privatePreviewTopInset(context) + 8;
+    final maxY = max(
+      minY,
+      constraints.maxHeight - _privatePreviewBottomInset(context) - size.height,
+    );
+    final snapX = offset.dx + size.width / 2 < constraints.maxWidth / 2
+        ? minX
+        : maxX;
+    final snapY = offset.dy + size.height / 2 < constraints.maxHeight / 2
+        ? minY
+        : maxY;
+    return Offset(snapX, snapY);
+  }
+
+  double _privatePreviewTopInset(BuildContext context) {
+    return MediaQuery.paddingOf(context).top;
+  }
+
+  double _privatePreviewBottomInset(BuildContext context) {
+    return max(142, MediaQuery.paddingOf(context).bottom + 126).toDouble();
+  }
+
+  Offset _defaultFloatingOffset(BoxConstraints constraints) {
+    return Offset(14, _floatingTopInset(context) + 12);
+  }
+
+  Offset _clampFloatingOffset(Offset offset, BoxConstraints constraints) {
+    const size = _callMiniWindowSize;
+    final minX = 12.0;
+    final maxX = max(minX, constraints.maxWidth - size.width - 12);
+    final minY = _floatingTopInset(context) + 8;
+    final maxY = max(
+      minY,
+      constraints.maxHeight - _floatingBottomInset(context) - size.height,
+    );
+    return Offset(
+      offset.dx.clamp(minX, maxX).toDouble(),
+      offset.dy.clamp(minY, maxY).toDouble(),
+    );
+  }
+
+  Offset _snapFloatingOffset(Offset offset, BoxConstraints constraints) {
+    const size = _callMiniWindowSize;
+    final minX = 12.0;
+    final maxX = max(minX, constraints.maxWidth - size.width - 12);
+    final minY = _floatingTopInset(context) + 8;
+    final maxY = max(
+      minY,
+      constraints.maxHeight - _floatingBottomInset(context) - size.height,
+    );
+    final snapX = offset.dx + size.width / 2 < constraints.maxWidth / 2
+        ? minX
+        : maxX;
+    final snapY = offset.dy + size.height / 2 < constraints.maxHeight / 2
+        ? minY
+        : maxY;
+    return Offset(snapX, snapY);
+  }
+
+  double _floatingTopInset(BuildContext context) {
+    return MediaQuery.paddingOf(context).top;
+  }
+
+  double _floatingBottomInset(BuildContext context) {
+    return max(24, MediaQuery.paddingOf(context).bottom + 12).toDouble();
   }
 
   String get _callTitle {
@@ -1046,12 +1293,28 @@ class _PrivateCallStage extends StatelessWidget {
     required this.call,
     required this.videoCall,
     required this.fallbackProfile,
+    required this.localVideoPrimary,
+    required this.previewOffset,
+    required this.previewDragging,
+    required this.onPreviewTap,
+    required this.onPreviewDragStart,
+    required this.onPreviewDragUpdate,
+    required this.onPreviewDragEnd,
   });
 
   final lk.Room room;
   final LiveKitCallInfo? call;
   final bool videoCall;
   final LiveKitCallParticipant? fallbackProfile;
+  final bool localVideoPrimary;
+  final Offset? previewOffset;
+  final bool previewDragging;
+  final VoidCallback onPreviewTap;
+  final GestureDragStartCallback onPreviewDragStart;
+  final void Function(DragUpdateDetails details, BoxConstraints constraints)
+  onPreviewDragUpdate;
+  final void Function(DragEndDetails details, BoxConstraints constraints)
+  onPreviewDragEnd;
 
   @override
   Widget build(BuildContext context) {
@@ -1099,39 +1362,69 @@ class _PrivateCallStage extends StatelessWidget {
         ),
       );
     }
-    return Stack(
-      children: [
-        Positioned.fill(
-          child: remote == null
-              ? _NoVideoSurface(
-                  label: _participantDisplayName(
-                    null,
-                    fallbackProfile,
-                    fallback: '等待对方加入',
-                  ),
-                  avatar: fallbackProfile?.avatar ?? '',
-                )
-              : _ParticipantVideoSurface(
-                  participant: remote,
-                  profile: _participantProfile(call, remote.identity),
-                  fit: lk.VideoViewFit.cover,
-                ),
-        ),
-        if (local != null)
-          Positioned(
-            top: 78,
-            right: 14,
-            child: SizedBox(
-              width: 108,
-              height: 160,
-              child: _ParticipantVideoSurface(
-                participant: local,
-                profile: _participantProfile(call, local.identity),
-                compact: true,
-              ),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final size = _callPreviewSizeFor(constraints);
+        final offset =
+            previewOffset ?? _defaultCallPreviewOffset(context, constraints);
+        final lk.Participant? mainParticipant = localVideoPrimary
+            ? local
+            : remote;
+        final lk.Participant? smallParticipant = localVideoPrimary
+            ? remote
+            : local;
+        final mainProfile = mainParticipant == null
+            ? fallbackProfile
+            : _participantProfile(call, mainParticipant.identity);
+        return Stack(
+          children: [
+            Positioned.fill(
+              child: mainParticipant == null
+                  ? _NoVideoSurface(
+                      label: _participantDisplayName(
+                        null,
+                        mainProfile,
+                        fallback: localVideoPrimary ? '本地视频' : '等待对方加入',
+                      ),
+                      avatar: mainProfile?.avatar ?? '',
+                    )
+                  : _ParticipantVideoSurface(
+                      participant: mainParticipant,
+                      profile: mainProfile,
+                      fit: lk.VideoViewFit.cover,
+                    ),
             ),
-          ),
-      ],
+            if (smallParticipant != null)
+              AnimatedPositioned(
+                duration: previewDragging
+                    ? Duration.zero
+                    : const Duration(milliseconds: 210),
+                curve: Curves.easeOutCubic,
+                left: offset.dx,
+                top: offset.dy,
+                width: size.width,
+                height: size.height,
+                child: _DraggableCallPreview(
+                  dragging: previewDragging,
+                  onTap: onPreviewTap,
+                  onPanStart: onPreviewDragStart,
+                  onPanUpdate: (details) =>
+                      onPreviewDragUpdate(details, constraints),
+                  onPanEnd: (details) => onPreviewDragEnd(details, constraints),
+                  child: _ParticipantVideoSurface(
+                    participant: smallParticipant,
+                    profile: _participantProfile(
+                      call,
+                      smallParticipant.identity,
+                    ),
+                    compact: true,
+                    fit: lk.VideoViewFit.cover,
+                  ),
+                ),
+              ),
+          ],
+        );
+      },
     );
   }
 }
@@ -1180,6 +1473,52 @@ class _ParticipantGridStage extends StatelessWidget {
             compact: participants.length > 4,
           );
         },
+      ),
+    );
+  }
+}
+
+class _DraggableCallPreview extends StatelessWidget {
+  const _DraggableCallPreview({
+    required this.dragging,
+    required this.onTap,
+    required this.onPanStart,
+    required this.onPanUpdate,
+    required this.onPanEnd,
+    required this.child,
+  });
+
+  final bool dragging;
+  final VoidCallback onTap;
+  final GestureDragStartCallback onPanStart;
+  final GestureDragUpdateCallback onPanUpdate;
+  final GestureDragEndCallback onPanEnd;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      label: '切换通话主画面',
+      child: GestureDetector(
+        onTap: onTap,
+        onPanStart: onPanStart,
+        onPanUpdate: onPanUpdate,
+        onPanEnd: onPanEnd,
+        child: AnimatedScale(
+          scale: dragging ? 1.03 : 1,
+          duration: const Duration(milliseconds: 150),
+          curve: Curves.easeOutCubic,
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                border: Border.all(color: const Color(0x99ffffff), width: 1),
+              ),
+              child: child,
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -1294,12 +1633,16 @@ class _CallTopBar extends StatelessWidget {
   const _CallTopBar({
     required this.title,
     required this.subtitle,
+    required this.canMinimize,
     required this.onBack,
+    required this.onMinimize,
   });
 
   final String title;
   final String subtitle;
+  final bool canMinimize;
   final VoidCallback onBack;
+  final VoidCallback onMinimize;
 
   @override
   Widget build(BuildContext context) {
@@ -1352,7 +1695,123 @@ class _CallTopBar extends StatelessWidget {
               ],
             ),
           ),
+          if (canMinimize)
+            SizedBox(
+              width: 44,
+              height: 44,
+              child: IconButton(
+                tooltip: '缩小通话',
+                onPressed: onMinimize,
+                icon: const Icon(
+                  Icons.picture_in_picture_alt_rounded,
+                  color: Colors.white,
+                  size: 22,
+                ),
+              ),
+            ),
         ],
+      ),
+    );
+  }
+}
+
+class _DraggableCallMiniWindow extends StatelessWidget {
+  const _DraggableCallMiniWindow({
+    required this.title,
+    required this.subtitle,
+    required this.videoCall,
+    required this.dragging,
+    required this.onTap,
+    required this.onPanStart,
+    required this.onPanUpdate,
+    required this.onPanEnd,
+  });
+
+  final String title;
+  final String subtitle;
+  final bool videoCall;
+  final bool dragging;
+  final VoidCallback onTap;
+  final GestureDragStartCallback onPanStart;
+  final GestureDragUpdateCallback onPanUpdate;
+  final GestureDragEndCallback onPanEnd;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      label: '恢复通话',
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: onTap,
+        onPanStart: onPanStart,
+        onPanUpdate: onPanUpdate,
+        onPanEnd: onPanEnd,
+        child: AnimatedScale(
+          scale: dragging ? 1.03 : 1,
+          duration: const Duration(milliseconds: 150),
+          curve: Curves.easeOutCubic,
+          child: Container(
+            width: _callMiniWindowSize.width,
+            height: _callMiniWindowSize.height,
+            padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+            decoration: BoxDecoration(
+              color: const Color(0xee141821),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: const Color(0x33ffffff)),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 38,
+                  height: 38,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: const Color(0xff252c39),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Icon(
+                    videoCall ? Icons.videocam_rounded : Icons.call_rounded,
+                    color: Colors.white,
+                    size: 20,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          height: 1.1,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        subtitle,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Color(0xffb6bdc9),
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                          height: 1,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -1643,4 +2102,20 @@ lk.VideoTrack? _participantVideoTrack(lk.Participant participant) {
     }
   }
   return null;
+}
+
+Size _callPreviewSizeFor(BoxConstraints constraints) {
+  final width = (constraints.maxWidth * 0.27).clamp(96.0, 140.0).toDouble();
+  return Size(width, width * 1.48);
+}
+
+Offset _defaultCallPreviewOffset(
+  BuildContext context,
+  BoxConstraints constraints,
+) {
+  final size = _callPreviewSizeFor(constraints);
+  return Offset(
+    constraints.maxWidth - size.width - 14,
+    MediaQuery.paddingOf(context).top + 64,
+  );
 }
