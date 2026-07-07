@@ -3348,6 +3348,7 @@ class BusinessImService extends ChangeNotifier {
         payload,
         action: ChatContentTypes.transferReceived,
       ),
+      ChatContentTypes.call => _callContent(payload),
       _ => rawContent,
     };
     return <String, Object?>{
@@ -3434,6 +3435,7 @@ class BusinessImService extends ChangeNotifier {
         payload,
         action: ChatContentTypes.transferReceived,
       ),
+      ChatContentTypes.call => _callContent(payload),
       _ => content.isNotEmpty ? content : _payloadContent(payload),
     };
     return <String, Object?>{
@@ -3739,6 +3741,7 @@ class BusinessImService extends ChangeNotifier {
       ImMessageTypes.gif => ChatContentTypes.gif,
       ImMessageTypes.sticker => ChatContentTypes.sticker,
       ImMessageTypes.contactCard => ChatContentTypes.contactCard,
+      ImMessageTypes.call => ChatContentTypes.call,
       _ => '',
     };
   }
@@ -3758,6 +3761,7 @@ class BusinessImService extends ChangeNotifier {
       ChatContentTypes.gif => ImMessageTypes.gif,
       ChatContentTypes.sticker => ImMessageTypes.sticker,
       ChatContentTypes.contactCard => ImMessageTypes.contactCard,
+      ChatContentTypes.call => ImMessageTypes.call,
       _ => 0,
     };
   }
@@ -6728,6 +6732,7 @@ class BusinessImService extends ChangeNotifier {
         payload,
         action: ChatContentTypes.transferReceived,
       ),
+      ChatContentTypes.call => _callContent(payload),
       _ => '',
     };
   }
@@ -6752,7 +6757,60 @@ class BusinessImService extends ChangeNotifier {
         if (content.isNotEmpty) 'content': content,
       });
     }
+    if (contentType == ChatContentTypes.call) {
+      return _callContent({
+        ...payload,
+        if (content.isNotEmpty) 'content': content,
+      });
+    }
     return content.isNotEmpty ? content : _payloadContent(payload);
+  }
+
+  String _callContent(Map<String, Object?> payload) {
+    final direct = payload['content']?.toString().trim() ?? '';
+    if (direct.isNotEmpty && direct != '[消息]') {
+      return direct;
+    }
+    final call = _asMap(payload['call']);
+    final status = _value(call, [
+      'status',
+    ], fallback: _value(payload, ['call_status', 'status'])).toLowerCase();
+    if (status == 'canceled' || status == 'cancelled') {
+      return '已取消';
+    }
+    if (status == 'rejected') {
+      return '已拒绝';
+    }
+    if (status == 'missed' || status == 'timeout') {
+      return '未接听';
+    }
+    if (status == 'failed') {
+      return '通话异常结束';
+    }
+    final mediaType = _value(call, [
+      'media_type',
+    ], fallback: _value(payload, ['media_type']));
+    final callType = _value(call, [
+      'call_type',
+    ], fallback: _value(payload, ['call_type']));
+    final media = mediaType == 'video' ? '视频通话' : '语音通话';
+    final title = callType == 'group' ? '群$media' : media;
+    final duration = _intValue(call, [
+      'duration',
+    ], fallback: _intValue(payload, ['duration']));
+    return '$title ${_callDurationText(duration)}';
+  }
+
+  String _callDurationText(int seconds) {
+    final normalized = max(0, seconds);
+    final hours = normalized ~/ 3600;
+    final minutes = (normalized % 3600) ~/ 60;
+    final remain = normalized % 60;
+    String two(int value) => value.toString().padLeft(2, '0');
+    if (hours > 0) {
+      return '$hours:${two(minutes)}:${two(remain)}';
+    }
+    return '${two(minutes)}:${two(remain)}';
   }
 
   String _redPacketContent(Map<String, Object?> payload) {

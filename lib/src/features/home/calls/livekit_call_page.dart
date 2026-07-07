@@ -174,6 +174,7 @@ class LiveKitCallPage extends StatefulWidget {
     this.receiverId = '',
     this.groupId = '',
     this.title = '',
+    this.inviteUserIds = const [],
     super.key,
   }) : initialCall = null,
        incoming = false;
@@ -187,6 +188,7 @@ class LiveKitCallPage extends StatefulWidget {
        receiverId = '',
        groupId = '',
        title = '',
+       inviteUserIds = const [],
        incoming = true;
 
   final SessionController controller;
@@ -195,6 +197,7 @@ class LiveKitCallPage extends StatefulWidget {
   final String receiverId;
   final String groupId;
   final String title;
+  final List<String> inviteUserIds;
   final LiveKitCallInfo? initialCall;
   final bool incoming;
 
@@ -276,6 +279,7 @@ class _LiveKitCallPageState extends State<LiveKitCallPage> {
         receiverId: widget.receiverId,
         groupId: widget.groupId,
         title: widget.title,
+        inviteUserIds: widget.inviteUserIds,
       );
       if (_ending) {
         unawaited(widget.controller.cancelLiveKitCall(call.callId));
@@ -575,6 +579,7 @@ class _LiveKitCallPageState extends State<LiveKitCallPage> {
     }
     if (event.event.event == 'call.accept') {
       _callAnswered = true;
+      _mergeCallInfo(event.event.call);
       unawaited(_sound.stopRing());
       if (!_connected) {
         _setStatus('正在连接音视频');
@@ -608,6 +613,28 @@ class _LiveKitCallPageState extends State<LiveKitCallPage> {
       return '对方已拒绝';
     }
     return '通话已结束';
+  }
+
+  void _mergeCallInfo(LiveKitCallInfo next) {
+    final current = _call;
+    if (!mounted || current == null || current.callId != next.callId) {
+      return;
+    }
+    setState(() => _call = next.withConnectionFrom(current));
+  }
+
+  LiveKitCallParticipant? get _peerProfile {
+    final call = _call;
+    if (call == null || !call.isPrivate) {
+      return null;
+    }
+    final currentUserId = widget.controller.session?.userId ?? 0;
+    for (final participant in call.participants) {
+      if (participant.userId > 0 && participant.userId != currentUserId) {
+        return participant;
+      }
+    }
+    return call.participants.isEmpty ? null : call.participants.first;
   }
 
   Future<void> _toggleMic() async {
@@ -852,10 +879,12 @@ class _LiveKitCallPageState extends State<LiveKitCallPage> {
     }
     final room = _room;
     if (room == null) {
+      final peer = _peerProfile;
       return _CallWaitingStage(
-        title: _callTitle,
+        title: peer?.name.isNotEmpty == true ? peer!.name : _callTitle,
         statusText: _statusText,
         videoCall: _videoCall,
+        avatarUrl: peer?.avatar ?? '',
       );
     }
     if (_gridCall) {
@@ -865,7 +894,12 @@ class _LiveKitCallPageState extends State<LiveKitCallPage> {
         maxWidth: constraints.maxWidth,
       );
     }
-    return _PrivateCallStage(room: room, call: _call, videoCall: _videoCall);
+    return _PrivateCallStage(
+      room: room,
+      call: _call,
+      videoCall: _videoCall,
+      fallbackProfile: _peerProfile,
+    );
   }
 
   String get _callTitle {
@@ -946,11 +980,13 @@ class _CallWaitingStage extends StatelessWidget {
     required this.title,
     required this.statusText,
     required this.videoCall,
+    this.avatarUrl = '',
   });
 
   final String title;
   final String statusText;
   final bool videoCall;
+  final String avatarUrl;
 
   @override
   Widget build(BuildContext context) {
@@ -960,16 +996,22 @@ class _CallWaitingStage extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            SizedBox(
-              width: 76,
-              height: 76,
-              child: CircularProgressIndicator(
-                strokeWidth: 2.4,
-                color: videoCall
-                    ? const Color(0xff66d9ef)
-                    : const Color(0xff6ee786),
-                backgroundColor: const Color(0xff232733),
-              ),
+            Stack(
+              alignment: Alignment.center,
+              children: [
+                SizedBox(
+                  width: 86,
+                  height: 86,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2.2,
+                    color: videoCall
+                        ? const Color(0xff66d9ef)
+                        : const Color(0xff6ee786),
+                    backgroundColor: const Color(0xff232733),
+                  ),
+                ),
+                _CallAvatar(label: title, imageUrl: avatarUrl, size: 76),
+              ],
             ),
             const SizedBox(height: 22),
             Text(
@@ -1003,11 +1045,13 @@ class _PrivateCallStage extends StatelessWidget {
     required this.room,
     required this.call,
     required this.videoCall,
+    required this.fallbackProfile,
   });
 
   final lk.Room room;
   final LiveKitCallInfo? call;
   final bool videoCall;
+  final LiveKitCallParticipant? fallbackProfile;
 
   @override
   Widget build(BuildContext context) {
@@ -1016,7 +1060,8 @@ class _PrivateCallStage extends StatelessWidget {
         : room.remoteParticipants.values.first;
     final local = room.localParticipant;
     if (!videoCall) {
-      final profile = _participantProfile(call, remote?.identity);
+      final profile =
+          _participantProfile(call, remote?.identity) ?? fallbackProfile;
       final title = _participantDisplayName(
         remote,
         profile,
@@ -1058,7 +1103,14 @@ class _PrivateCallStage extends StatelessWidget {
       children: [
         Positioned.fill(
           child: remote == null
-              ? const _NoVideoSurface(label: '等待对方加入')
+              ? _NoVideoSurface(
+                  label: _participantDisplayName(
+                    null,
+                    fallbackProfile,
+                    fallback: '等待对方加入',
+                  ),
+                  avatar: fallbackProfile?.avatar ?? '',
+                )
               : _ParticipantVideoSurface(
                   participant: remote,
                   profile: _participantProfile(call, remote.identity),

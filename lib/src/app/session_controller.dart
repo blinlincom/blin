@@ -56,6 +56,7 @@ class SessionController extends ChangeNotifier {
   String _lastImStatusText = '';
   Future<void>? _presenceRefreshRequest;
   Future<void>? _refreshRequest;
+  Future<void>? _cachedImStartRequest;
   List<Map<String, Object?>> _friendCache = const [];
   List<Map<String, Object?>> _groupCache = const [];
   DateTime? _friendCacheAt;
@@ -81,6 +82,8 @@ class SessionController extends ChangeNotifier {
   bool get isLoggedIn =>
       _session?.userToken.isNotEmpty == true ||
       _store.readSession()?.userToken.isNotEmpty == true;
+  bool get isSessionRestoring =>
+      _booting || _refreshRequest != null || (isLoggedIn && !_im.isStarted);
   int get lastColdLaunchAt => _lastColdLaunchAt;
   int get lastHotResumeAt => _lastHotResumeAt;
   int get lastSessionVerifiedAt => _lastSessionVerifiedAt;
@@ -478,12 +481,37 @@ class SessionController extends ChangeNotifier {
       );
       return;
     }
+    final existing = _cachedImStartRequest;
+    if (existing != null) {
+      AppLogger.info(
+        'session',
+        'reuse cached im start request',
+        data: {'source': source, 'uid': chat.uid},
+      );
+      unawaited(existing);
+      return;
+    }
     AppLogger.info(
       'session',
       'cached im start scheduled for persistent login',
       data: {'source': source, 'uid': chat.uid},
     );
-    unawaited(_startCachedIm(current, source: source));
+    final request = _queueCachedImStart(current, source: source);
+    unawaited(request);
+  }
+
+  Future<void> _queueCachedImStart(
+    UserSession session, {
+    required String source,
+  }) {
+    late final Future<void> request;
+    request = _startCachedIm(session, source: source).whenComplete(() {
+      if (identical(_cachedImStartRequest, request)) {
+        _cachedImStartRequest = null;
+      }
+    });
+    _cachedImStartRequest = request;
+    return request;
   }
 
   Future<void> _startCachedIm(
@@ -649,6 +677,7 @@ class SessionController extends ChangeNotifier {
     final cached = _cachedConversationsForSession(current);
     AppLogger.info('session', 'load conversations start');
     try {
+      await _ensureImReadyForConversationRead(cachedCount: cached.length);
       final local = await _im.loadConversations().timeout(
         const Duration(seconds: 8),
         onTimeout: () {
@@ -671,20 +700,76 @@ class SessionController extends ChangeNotifier {
       final memoryCache = _im.cachedConversations();
       final fallback = memoryCache.isNotEmpty ? memoryCache : cached;
       if (fallback.isNotEmpty) {
-        AppLogger.warn(
-          'session',
-          'load conversations failed, keep cached conversations',
-          data: {
-            'cached_count': fallback.length,
-            'error': error.toString(),
-            'stack': stackTrace.toString(),
-          },
-        );
-        _startCachedImForPersistentLogin(source: 'load_conversations_fallback');
+        final isLoginRace = error.toString().contains('请先登录');
+        if (isLoginRace) {
+          AppLogger.info(
+            'session',
+            'conversation load deferred until im session ready',
+            data: {'cached_count': fallback.length},
+          );
+        } else {
+          AppLogger.warn(
+            'session',
+            'load conversations failed, keep cached conversations',
+            data: {
+              'cached_count': fallback.length,
+              'error': error.toString(),
+              'stack': stackTrace.toString(),
+            },
+          );
+          _startCachedImForPersistentLogin(
+            source: 'load_conversations_fallback',
+          );
+        }
         return fallback;
       }
       rethrow;
     }
+  }
+
+  Future<void> _ensureImReadyForConversationRead({
+    required int cachedCount,
+  }) async {
+    if (_im.isStarted) {
+      return;
+    }
+    final refresh = _refreshRequest;
+    if (refresh != null) {
+      AppLogger.info(
+        'session',
+        'conversation load waits session refresh',
+        data: {'cached_count': cachedCount},
+      );
+      await refresh;
+      if (_im.isStarted) {
+        return;
+      }
+    }
+    final current = _session ?? _store.readSession();
+    final chat = current?.chat;
+    if (current == null ||
+        chat == null ||
+        chat.uid.isEmpty ||
+        chat.token.isEmpty) {
+      return;
+    }
+    final start = _cachedImStartRequest;
+    if (start != null) {
+      AppLogger.info(
+        'session',
+        'conversation load waits cached im start',
+        data: {'uid': chat.uid, 'cached_count': cachedCount},
+      );
+      await start;
+      return;
+    }
+    AppLogger.info(
+      'session',
+      'conversation load starts cached im session',
+      data: {'uid': chat.uid, 'cached_count': cachedCount},
+    );
+    final request = _queueCachedImStart(current, source: 'conversation_load');
+    await request;
   }
 
   Future<List<Map<String, Object?>>> loadFriends({

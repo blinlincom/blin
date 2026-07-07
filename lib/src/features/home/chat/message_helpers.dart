@@ -419,6 +419,7 @@ String _quoteContentTypeText(String contentType) {
     ChatContentTypes.video => '[视频]',
     ChatContentTypes.file => '[文件]',
     ChatContentTypes.contactCard => '[名片]',
+    ChatContentTypes.call => '[通话]',
     _ => '[消息]',
   };
 }
@@ -427,12 +428,17 @@ bool _isSystemNoticeMessage(Map<String, Object?> item) {
   final contentType = _messageContentType(item);
   return contentType == ChatContentTypes.redPacketReceived ||
       contentType == ChatContentTypes.transferReceived ||
+      contentType == ChatContentTypes.call ||
       _boolValue(item['is_system']) ||
       _boolValue(_asObjectMap(item['payload'])['is_system']);
 }
 
 String _systemNoticeText(Map<String, Object?> item) {
   final payload = _asObjectMap(item['payload']);
+  final contentType = _messageContentType(item);
+  if (contentType == ChatContentTypes.call) {
+    return _callNoticeText(payload);
+  }
   final content = _messageContentText(item, payload);
   if (content.isNotEmpty &&
       content != '[消息]' &&
@@ -442,7 +448,6 @@ String _systemNoticeText(Map<String, Object?> item) {
       content != '[已收款]') {
     return content;
   }
-  final contentType = _messageContentType(item);
   if (contentType == ChatContentTypes.redPacketReceived) {
     return _paymentNoticeText(
       payload,
@@ -456,6 +461,84 @@ String _systemNoticeText(Map<String, Object?> item) {
     );
   }
   return content.isEmpty ? '[系统消息]' : content;
+}
+
+String _callNoticeText(Map<String, Object?> payload) {
+  final direct = _value(payload, ['content']).trim();
+  if (direct.isNotEmpty && direct != '[消息]') {
+    return direct;
+  }
+  final call = _asObjectMap(payload['call']);
+  final status = _value(call, [
+    'status',
+  ], fallback: _value(payload, ['call_status', 'status'])).toLowerCase();
+  if (status == 'canceled' || status == 'cancelled') {
+    return '已取消';
+  }
+  if (status == 'rejected') {
+    return '已拒绝';
+  }
+  if (status == 'missed' || status == 'timeout') {
+    return '未接听';
+  }
+  if (status == 'failed') {
+    return '通话异常结束';
+  }
+  final mediaType = _value(call, [
+    'media_type',
+  ], fallback: _value(payload, ['media_type']));
+  final callType = _value(call, [
+    'call_type',
+  ], fallback: _value(payload, ['call_type']));
+  final media = mediaType == 'video' ? '视频通话' : '语音通话';
+  final title = callType == 'group' ? '群$media' : media;
+  final duration = _intValue(call, ['duration']);
+  final fallbackDuration = _intValue(payload, ['duration']);
+  return '$title ${_callDurationLabel(duration > 0 ? duration : fallbackDuration)}';
+}
+
+String _callConversationText(Map<String, Object?> payload, String content) {
+  final callText = _callNoticeText({
+    ...payload,
+    if (content.trim().isNotEmpty) 'content': content.trim(),
+  });
+  if (callText == '已取消') {
+    return '[通话已取消]';
+  }
+  if (callText == '已拒绝') {
+    return '[通话已拒绝]';
+  }
+  if (callText == '未接听') {
+    final media = _callMediaLabel(payload);
+    return '[未接通$media]';
+  }
+  final media = _callMediaLabel(payload);
+  final duration = callText.replaceFirst(RegExp(r'^群?语音通话\s*|^群?视频通话\s*'), '');
+  return duration == callText ? '[$media]' : '[$media] $duration';
+}
+
+String _callMediaLabel(Map<String, Object?> payload) {
+  final call = _asObjectMap(payload['call']);
+  final mediaType = _value(call, [
+    'media_type',
+  ], fallback: _value(payload, ['media_type']));
+  final callType = _value(call, [
+    'call_type',
+  ], fallback: _value(payload, ['call_type']));
+  final media = mediaType == 'video' ? '视频通话' : '语音通话';
+  return callType == 'group' ? '群$media' : media;
+}
+
+String _callDurationLabel(int seconds) {
+  final normalized = max(0, seconds);
+  final hours = normalized ~/ 3600;
+  final minutes = (normalized % 3600) ~/ 60;
+  final remain = normalized % 60;
+  String two(int value) => value.toString().padLeft(2, '0');
+  if (hours > 0) {
+    return '$hours:${two(minutes)}:${two(remain)}';
+  }
+  return '${two(minutes)}:${two(remain)}';
 }
 
 String _paymentNoticeText(

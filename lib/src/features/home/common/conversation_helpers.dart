@@ -29,6 +29,9 @@ String _conversationSubtitle(Map<String, Object?> item) {
   if (contentType == ChatContentTypes.transfer) {
     return _transferConversationText(payload, content);
   }
+  if (contentType == ChatContentTypes.call) {
+    return _callConversationText(payload, content);
+  }
   return content;
 }
 

@@ -75,6 +75,32 @@ class LiveKitCallInfo {
     final next = LiveKitCallInfo.fromJson(map);
     return next.liveKitToken.isNotEmpty ? next : this;
   }
+
+  LiveKitCallInfo withConnectionFrom(LiveKitCallInfo current) {
+    return LiveKitCallInfo(
+      callId: callId,
+      callNo: callNo,
+      roomName: roomName,
+      callType: callType,
+      mediaType: mediaType,
+      channelId: channelId,
+      channelType: channelType,
+      creatorId: creatorId,
+      receiverId: receiverId,
+      groupId: groupId,
+      title: title,
+      status: status,
+      statusText: statusText,
+      liveKitUrl: liveKitUrl.isNotEmpty ? liveKitUrl : current.liveKitUrl,
+      liveKitToken: liveKitToken.isNotEmpty
+          ? liveKitToken
+          : current.liveKitToken,
+      participants: participants.isNotEmpty
+          ? participants
+          : current.participants,
+      self: self ?? current.self,
+    );
+  }
 }
 
 class LiveKitCallParticipant {

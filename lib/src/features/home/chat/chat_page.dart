@@ -1762,6 +1762,26 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       setState(() => _message = '当前会话不可用');
       return;
     }
+    var inviteUserIds = const <String>[];
+    if (_isGroup) {
+      final selected = await Navigator.of(context).push<List<String>>(
+        MaterialPageRoute<List<String>>(
+          builder: (_) => _GroupCallInvitePickerPage(
+            controller: widget.controller,
+            groupId: _groupId,
+            mediaType: mediaType,
+          ),
+        ),
+      );
+      if (selected == null) {
+        return;
+      }
+      inviteUserIds = selected;
+      if (inviteUserIds.isEmpty) {
+        setState(() => _message = '请选择通话成员');
+        return;
+      }
+    }
     final callType = _isGroup ? 'group' : 'private';
     await _push(
       context,
@@ -1774,6 +1794,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         title: _isGroup
             ? _chatHeaderTitle()
             : (mediaType == 'video' ? '视频通话' : '语音通话'),
+        inviteUserIds: inviteUserIds,
       ),
     );
   }
@@ -2991,5 +3012,117 @@ class _ChatToastState extends State<_ChatToast> {
         ),
       ),
     );
+  }
+}
+
+class _GroupCallInvitePickerPage extends StatefulWidget {
+  const _GroupCallInvitePickerPage({
+    required this.controller,
+    required this.groupId,
+    required this.mediaType,
+  });
+
+  final SessionController controller;
+  final String groupId;
+  final String mediaType;
+
+  @override
+  State<_GroupCallInvitePickerPage> createState() =>
+      _GroupCallInvitePickerPageState();
+}
+
+class _GroupCallInvitePickerPageState
+    extends State<_GroupCallInvitePickerPage> {
+  late final Future<Map<String, Object?>> _future;
+  final Set<String> _selectedIds = <String>{};
+
+  @override
+  void initState() {
+    super.initState();
+    _future = widget.controller.groupMembers(widget.groupId);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final title = widget.mediaType == 'video' ? '选择视频通话成员' : '选择语音通话成员';
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(title),
+        actions: [
+          TextButton(
+            onPressed: _selectedIds.isEmpty
+                ? null
+                : () => Navigator.of(context).pop(_selectedIds.toList()),
+            child: Text(
+              _selectedIds.isEmpty ? '发起' : '发起(${_selectedIds.length})',
+            ),
+          ),
+        ],
+      ),
+      body: FutureBuilder<Map<String, Object?>>(
+        future: _future,
+        builder: (context, snapshot) {
+          if (snapshot.connectionState != ConnectionState.done) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          if (snapshot.hasError) {
+            return _ErrorState(text: snapshot.error.toString());
+          }
+          final currentUserId =
+              widget.controller.session?.userId.toString() ?? '';
+          final members = _listFromResult(snapshot.data ?? const {})
+              .where((item) {
+                final id = _memberUserId(item);
+                return id.isNotEmpty && id != currentUserId;
+              })
+              .toList(growable: false);
+          if (members.isEmpty) {
+            return const _EmptyRow(text: '暂无可邀请成员');
+          }
+          return ListView.separated(
+            itemCount: members.length,
+            separatorBuilder: (_, _) => const Divider(height: 1),
+            itemBuilder: (context, index) {
+              final member = members[index];
+              final userId = _memberUserId(member);
+              final selected = _selectedIds.contains(userId);
+              return ListTile(
+                leading: _Avatar(
+                  label: _memberTitle(member),
+                  imageUrl: _avatarUrlFromMap(member),
+                  size: 38,
+                ),
+                title: Text(
+                  _memberTitle(member),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                subtitle: Text(
+                  _memberSubtitle(member),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                trailing: Checkbox(
+                  value: selected,
+                  onChanged: (_) => _toggle(userId),
+                ),
+                onTap: () => _toggle(userId),
+              );
+            },
+          );
+        },
+      ),
+    );
+  }
+
+  void _toggle(String userId) {
+    if (userId.isEmpty) {
+      return;
+    }
+    setState(() {
+      if (!_selectedIds.remove(userId)) {
+        _selectedIds.add(userId);
+      }
+    });
   }
 }

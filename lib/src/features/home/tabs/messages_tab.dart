@@ -121,6 +121,18 @@ class _MessagesTabState extends State<MessagesTab> {
         return;
       }
       final isLoginRace = error.toString().contains('请先登录');
+      if (isLoginRace && widget.controller.isSessionRestoring) {
+        AppLogger.info(
+          'ui',
+          'conversation load waits restored session',
+          data: {'booting': widget.controller.booting},
+        );
+        setState(() {
+          _loading = true;
+          _error = null;
+        });
+        return;
+      }
       AppLogger.warn(
         'ui',
         'conversation load failed without local cache',

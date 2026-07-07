@@ -86,6 +86,7 @@ class _HomePageState extends State<HomePage> {
   bool _initialSyncOverlayVisible = false;
   Timer? _initialSyncOverlayHideTimer;
   final Set<int> _activeIncomingCallIds = <int>{};
+  final Map<int, DateTime> _recentEndedCallIds = <int, DateTime>{};
   StreamSubscription<BusinessImCallEvent>? _callSub;
 
   @override
@@ -129,9 +130,16 @@ class _HomePageState extends State<HomePage> {
   void _onCallEvent(BusinessImCallEvent event) {
     final callEvent = event.event;
     final call = callEvent.call;
+    final currentUserId = widget.controller.session?.userId ?? 0;
+    if (_isTerminalCallEvent(callEvent)) {
+      _rememberEndedCall(call.callId);
+    }
     if (!callEvent.isInvite ||
         call.callId <= 0 ||
-        callEvent.operatorId == widget.controller.session?.userId ||
+        call.isEnded ||
+        call.creatorId == currentUserId ||
+        callEvent.operatorId == currentUserId ||
+        _recentEndedCallIds.containsKey(call.callId) ||
         _activeIncomingCallIds.contains(call.callId)) {
       return;
     }
@@ -151,6 +159,24 @@ class _HomePageState extends State<HomePage> {
       );
       _activeIncomingCallIds.remove(call.callId);
     });
+  }
+
+  bool _isTerminalCallEvent(LiveKitCallEvent event) {
+    return event.call.isEnded ||
+        event.isCancel ||
+        event.isReject ||
+        event.event == 'call.hangup';
+  }
+
+  void _rememberEndedCall(int callId) {
+    if (callId <= 0) {
+      return;
+    }
+    final now = DateTime.now();
+    _recentEndedCallIds.removeWhere(
+      (_, value) => now.difference(value).inMinutes >= 10,
+    );
+    _recentEndedCallIds[callId] = now;
   }
 
   void _onControllerChanged() {
