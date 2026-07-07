@@ -6,7 +6,6 @@ class _ChatToolsPanel extends StatefulWidget {
     required this.onTextOption,
     required this.onImage,
     required this.onEmoji,
-    required this.onGif,
     required this.onSticker,
     required this.onVoice,
     required this.onVideo,
@@ -23,7 +22,6 @@ class _ChatToolsPanel extends StatefulWidget {
   final VoidCallback onTextOption;
   final VoidCallback onImage;
   final VoidCallback onEmoji;
-  final VoidCallback onGif;
   final VoidCallback onSticker;
   final VoidCallback onVoice;
   final VoidCallback onVideo;
@@ -113,12 +111,6 @@ class _ChatToolsPanelState extends State<_ChatToolsPanel> {
         '表情',
         widget.onEmoji,
         const Color(0xffffc043),
-      ),
-      _ToolItem(
-        Icons.gif_box_rounded,
-        'GIF',
-        widget.onGif,
-        const Color(0xff20c997),
       ),
       _ToolItem(
         Icons.sticky_note_2_rounded,

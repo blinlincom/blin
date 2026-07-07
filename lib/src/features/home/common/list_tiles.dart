@@ -365,8 +365,6 @@ class _ContactTile extends StatelessWidget {
     required this.isGroup,
     required this.onTap,
     this.avatarUrl = '',
-    this.avatarColor,
-    this.icon,
     this.onLongPress,
     super.key,
   });
@@ -377,8 +375,6 @@ class _ContactTile extends StatelessWidget {
   final bool isGroup;
   final VoidCallback onTap;
   final String avatarUrl;
-  final Color? avatarColor;
-  final IconData? icon;
   final VoidCallback? onLongPress;
 
   @override
@@ -399,10 +395,8 @@ class _ContactTile extends StatelessWidget {
               label: title,
               imageUrl: avatarUrl,
               size: 38,
-              color:
-                  avatarColor ??
-                  (isGroup ? const Color(0xff34c759) : _primaryColor),
-              icon: icon ?? (isGroup ? Icons.groups : null),
+              color: isGroup ? const Color(0xff34c759) : _primaryColor,
+              icon: isGroup ? Icons.groups : null,
             ),
             const SizedBox(width: 12),
             Expanded(
@@ -443,6 +437,96 @@ class _ContactTile extends StatelessWidget {
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(color: _mutedColor, fontSize: 12),
               ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SelectableContactTile extends StatelessWidget {
+  const _SelectableContactTile({
+    required this.title,
+    required this.subtitle,
+    required this.avatarUrl,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String title;
+  final String subtitle;
+  final String avatarUrl;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      child: Container(
+        constraints: const BoxConstraints(minHeight: 58),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
+        decoration: const BoxDecoration(
+          color: _surfaceColor,
+          border: Border(bottom: BorderSide(color: _lightBorderColor)),
+        ),
+        child: Row(
+          children: [
+            _Avatar(
+              label: title,
+              imageUrl: avatarUrl,
+              size: 40,
+              color: _primaryColor,
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                    title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: _textColor,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  if (subtitle.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 3),
+                      child: Text(
+                        subtitle,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: _mutedColor,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 160),
+              curve: Curves.easeOutCubic,
+              width: 24,
+              height: 24,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: selected ? _primaryColor : _surfaceColor,
+                border: Border.all(
+                  color: selected ? _primaryColor : _borderColor,
+                ),
+                shape: BoxShape.circle,
+              ),
+              child: selected
+                  ? const Icon(Icons.check, color: Colors.white, size: 16)
+                  : null,
+            ),
           ],
         ),
       ),

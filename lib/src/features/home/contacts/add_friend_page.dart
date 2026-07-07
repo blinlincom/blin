@@ -26,38 +26,58 @@ class _AddFriendPageState extends State<AddFriendPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: _pageColor,
       appBar: AppBar(title: const Text('添加好友')),
       body: SafeArea(
         child: ListView(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.only(bottom: 24),
           children: [
-            TextField(
-              controller: _friendId,
-              decoration: const InputDecoration(
-                labelText: '用户名',
-                hintText: '建议从搜索页选择用户',
+            ColoredBox(
+              color: _surfaceColor,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+                child: Column(
+                  children: [
+                    TextField(
+                      controller: _friendId,
+                      textInputAction: TextInputAction.next,
+                      decoration: const InputDecoration(
+                        labelText: '用户名',
+                        hintText: '只能通过用户名添加好友',
+                        prefixIcon: Icon(Icons.alternate_email),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: _remark,
+                      maxLines: 3,
+                      decoration: const InputDecoration(
+                        labelText: '申请备注',
+                        hintText: '告诉对方你是谁',
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _remark,
-              maxLines: 3,
-              decoration: const InputDecoration(labelText: '申请备注'),
-            ),
-            const SizedBox(height: 16),
-            _ButtonRow(
-              children: [
-                OutlinedButton.icon(
-                  onPressed: _loading ? null : _checkStatus,
-                  icon: const Icon(Icons.manage_search),
-                  label: const Text('查询关系'),
-                ),
-                FilledButton.icon(
-                  onPressed: _loading ? null : _apply,
-                  icon: const Icon(Icons.send),
-                  label: const Text('发送申请'),
-                ),
-              ],
+            const _GroupGap(),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Column(
+                children: [
+                  FilledButton.icon(
+                    onPressed: _loading ? null : _apply,
+                    icon: const Icon(Icons.send_outlined),
+                    label: const Text('发送申请'),
+                  ),
+                  const SizedBox(height: 10),
+                  OutlinedButton.icon(
+                    onPressed: _loading ? null : _checkStatus,
+                    icon: const Icon(Icons.manage_search),
+                    label: const Text('查看好友状态'),
+                  ),
+                ],
+              ),
             ),
             if (_loading) const _LinearBusy(),
             _ResultBlock(text: _message),

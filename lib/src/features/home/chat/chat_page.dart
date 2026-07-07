@@ -1530,7 +1530,6 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                             onTextOption: _openTextOptions,
                             onImage: () => _sendMedia(ChatContentTypes.image),
                             onEmoji: () => _sendMedia(ChatContentTypes.emoji),
-                            onGif: () => _sendMedia(ChatContentTypes.gif),
                             onSticker: () =>
                                 _sendMedia(ChatContentTypes.sticker),
                             onVoice: () => _sendMedia(ChatContentTypes.voice),

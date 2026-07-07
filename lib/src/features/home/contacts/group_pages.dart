@@ -12,8 +12,6 @@ class CreateGroupPage extends StatefulWidget {
 class _CreateGroupPageState extends State<CreateGroupPage> {
   final _name = TextEditingController();
   final _notice = TextEditingController();
-  final _avatar = TextEditingController();
-  final _memberIds = TextEditingController();
   final _selected = <String>{};
   late Future<List<Map<String, Object?>>> _friendsFuture;
   bool _loading = false;
@@ -30,8 +28,6 @@ class _CreateGroupPageState extends State<CreateGroupPage> {
   void dispose() {
     _name.dispose();
     _notice.dispose();
-    _avatar.dispose();
-    _memberIds.dispose();
     super.dispose();
   }
 
@@ -46,39 +42,58 @@ class _CreateGroupPageState extends State<CreateGroupPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('创建群聊')),
+      backgroundColor: _pageColor,
+      appBar: AppBar(
+        title: const Text('发起群聊'),
+        actions: [
+          TextButton(
+            onPressed: _loading ? null : _create,
+            child: _loading
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Text('完成'),
+          ),
+        ],
+      ),
       body: SafeArea(
         child: ListView(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.only(bottom: 24),
           children: [
-            TextField(
-              controller: _name,
-              decoration: const InputDecoration(labelText: '群名称'),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _notice,
-              maxLines: 3,
-              decoration: const InputDecoration(labelText: '群公告'),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _avatar,
-              decoration: const InputDecoration(labelText: '群头像 URL'),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _memberIds,
-              decoration: const InputDecoration(
-                labelText: '成员',
-                hintText: '从下方好友列表选择，调试可填内部账号',
+            ColoredBox(
+              color: _surfaceColor,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+                child: Column(
+                  children: [
+                    TextField(
+                      controller: _name,
+                      textInputAction: TextInputAction.next,
+                      decoration: const InputDecoration(
+                        labelText: '群名称',
+                        hintText: '给这个群起个名字',
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: _notice,
+                      maxLines: 3,
+                      decoration: const InputDecoration(
+                        labelText: '群公告',
+                        hintText: '可选，创建后群成员可见',
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
-            const SizedBox(height: 16),
-            FilledButton.icon(
-              onPressed: _loading ? null : _create,
-              icon: const Icon(Icons.group_add_outlined),
-              label: const Text('创建'),
+            const _GroupGap(),
+            _InfoBar(
+              text: _selected.isEmpty
+                  ? '请选择至少一位好友'
+                  : '已选择 ${_selected.length} 位好友',
             ),
             if (_loading) const _LinearBusy(),
             _ResultBlock(text: _message),
@@ -106,27 +121,24 @@ class _CreateGroupPageState extends State<CreateGroupPage> {
                 return Column(
                   children: [
                     for (final item in friends)
-                      CheckboxListTile(
-                        value: _selected.contains(_friendUserId(item)),
-                        onChanged: (checked) {
+                      _SelectableContactTile(
+                        title: _friendTitle(item),
+                        subtitle: _friendSubtitle(item),
+                        avatarUrl: _friendAvatarUrl(item),
+                        selected: _selected.contains(_friendUserId(item)),
+                        onTap: () {
                           final id = _friendUserId(item);
                           if (id.isEmpty) {
                             return;
                           }
                           setState(() {
-                            if (checked == true) {
-                              _selected.add(id);
-                            } else {
+                            if (_selected.contains(id)) {
                               _selected.remove(id);
+                            } else {
+                              _selected.add(id);
                             }
                           });
                         },
-                        title: Text(_friendTitle(item)),
-                        subtitle: Text(_friendSubtitle(item)),
-                        controlAffinity: ListTileControlAffinity.leading,
-                        shape: const RoundedRectangleBorder(
-                          borderRadius: BorderRadius.zero,
-                        ),
                       ),
                   ],
                 );
@@ -144,10 +156,11 @@ class _CreateGroupPageState extends State<CreateGroupPage> {
       setState(() => _error = '群名称不能为空');
       return;
     }
-    final memberIds = <String>{
-      ..._selected,
-      ..._idsFromText(_memberIds.text),
-    }.toList();
+    final memberIds = _selected.toList();
+    if (memberIds.isEmpty) {
+      setState(() => _error = '请选择至少一位好友');
+      return;
+    }
     setState(() {
       _loading = true;
       _error = '';
@@ -157,7 +170,6 @@ class _CreateGroupPageState extends State<CreateGroupPage> {
       final result = await widget.controller.createGroup(
         name: name,
         memberIds: memberIds,
-        avatar: _avatar.text.trim(),
         notice: _notice.text.trim(),
       );
       setState(() => _message = _friendlyResult(result, successText: '群聊已创建'));
@@ -298,7 +310,7 @@ class _GroupDetailPageState extends State<GroupDetailPage> {
       title: '更新群资料',
       fields: const [
         ActionInputField(id: 'name', label: '群名称'),
-        ActionInputField(id: 'avatar', label: '群头像 URL'),
+        ActionInputField(id: 'avatar', label: '群头像地址'),
         ActionInputField(id: 'notice', label: '群公告', maxLines: 3),
       ],
     );
@@ -320,7 +332,7 @@ class _GroupDetailPageState extends State<GroupDetailPage> {
       context,
       title: '添加群成员',
       fields: const [
-        ActionInputField(id: 'member_ids', label: '成员', hint: '多个内部账号用逗号分隔'),
+        ActionInputField(id: 'member_ids', label: '成员用户名', hint: '多个用户名用逗号分隔'),
       ],
     );
     if (data == null) {

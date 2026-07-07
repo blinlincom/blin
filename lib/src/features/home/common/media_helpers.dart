@@ -172,10 +172,7 @@ Future<List<Directory>> _candidateFileDirectories() async {
 }
 
 List<ActionInputField> _mediaFields(String contentType) {
-  final fields = <ActionInputField>[
-    const ActionInputField(id: 'url', label: '资源 URL'),
-    const ActionInputField(id: 'file_path', label: '本地文件路径'),
-  ];
+  final fields = <ActionInputField>[];
   switch (contentType) {
     case ChatContentTypes.emoji:
       fields.add(const ActionInputField(id: 'emoji_code', label: '表情编码'));
@@ -193,15 +190,13 @@ List<ActionInputField> _mediaFields(String contentType) {
       );
       break;
     case ChatContentTypes.video:
-      fields
-        ..add(const ActionInputField(id: 'cover_url', label: '封面 URL'))
-        ..add(
-          const ActionInputField(
-            id: 'duration',
-            label: '时长秒数',
-            keyboardType: TextInputType.number,
-          ),
-        );
+      fields.add(
+        const ActionInputField(
+          id: 'duration',
+          label: '时长秒数',
+          keyboardType: TextInputType.number,
+        ),
+      );
       break;
     case ChatContentTypes.file:
       fields

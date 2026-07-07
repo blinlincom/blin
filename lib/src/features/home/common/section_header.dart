@@ -25,8 +25,19 @@ class _ResultBlock extends StatelessWidget {
       width: double.infinity,
       margin: const EdgeInsets.only(top: 12),
       padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(border: Border.all(color: _borderColor)),
-      child: SelectableText(text),
+      decoration: const BoxDecoration(
+        color: Color(0xffedf8f1),
+        border: Border(left: BorderSide(color: _chatAckColor, width: 3)),
+      ),
+      child: Text(
+        text,
+        style: const TextStyle(
+          color: Color(0xff1f7a3d),
+          fontSize: 13,
+          height: 1.35,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
     );
   }
 }
@@ -45,8 +56,19 @@ class _ErrorBlock extends StatelessWidget {
       width: double.infinity,
       margin: const EdgeInsets.only(top: 12),
       padding: const EdgeInsets.all(12),
-      color: const Color(0xffffeeee),
-      child: Text(text, style: const TextStyle(color: _dangerColor)),
+      decoration: const BoxDecoration(
+        color: Color(0xffffeeee),
+        border: Border(left: BorderSide(color: _dangerColor, width: 3)),
+      ),
+      child: Text(
+        text,
+        style: const TextStyle(
+          color: _dangerColor,
+          fontSize: 13,
+          height: 1.35,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
     );
   }
 }

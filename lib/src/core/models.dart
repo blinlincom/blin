@@ -205,6 +205,7 @@ class UserSession {
     required this.chat,
     this.nickname = '',
     this.avatar = '',
+    this.profileBackground = '',
   });
 
   final int userId;
@@ -213,6 +214,7 @@ class UserSession {
   final ChatSession? chat;
   final String nickname;
   final String avatar;
+  final String profileBackground;
 
   factory UserSession.fromJson(Map<String, Object?> map) {
     return UserSession(
@@ -222,6 +224,18 @@ class UserSession {
       chat: map['chat'] == null ? null : ChatSession.fromJson(map['chat']),
       nickname: map['nickname']?.toString() ?? '',
       avatar: map['usertx']?.toString() ?? '',
+      profileBackground:
+          _stringFromKeys(map, const [
+            'profile_background',
+            'profile_background_url',
+            'moments_background',
+            'moments_cover',
+            'cover_url',
+            'background_url',
+            'user_bg',
+            'userbg',
+          ]) ??
+          '',
     );
   }
 
@@ -232,9 +246,15 @@ class UserSession {
     'chat': chat?.toJson(),
     'nickname': nickname,
     'usertx': avatar,
+    'profile_background': profileBackground,
   };
 
-  UserSession copyWith({ChatSession? chat, String? nickname, String? avatar}) {
+  UserSession copyWith({
+    ChatSession? chat,
+    String? nickname,
+    String? avatar,
+    String? profileBackground,
+  }) {
     return UserSession(
       userId: userId,
       username: username,
@@ -242,6 +262,7 @@ class UserSession {
       chat: chat ?? this.chat,
       nickname: nickname ?? this.nickname,
       avatar: avatar ?? this.avatar,
+      profileBackground: profileBackground ?? this.profileBackground,
     );
   }
 }

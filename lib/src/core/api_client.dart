@@ -167,6 +167,18 @@ class ApiClient {
     return session.copyWith(
       nickname: result.data['nickname']?.toString() ?? session.nickname,
       avatar: result.data['usertx']?.toString() ?? session.avatar,
+      profileBackground:
+          _stringFromKeys(result.data, const [
+            'profile_background',
+            'profile_background_url',
+            'moments_background',
+            'moments_cover',
+            'cover_url',
+            'background_url',
+            'user_bg',
+            'userbg',
+          ]) ??
+          session.profileBackground,
     );
   }
 
@@ -1317,4 +1329,14 @@ class _SecureResponseContext {
   final String device;
   final String timestamp;
   final String nonce;
+}
+
+String? _stringFromKeys(Map<String, Object?> map, List<String> keys) {
+  for (final key in keys) {
+    final value = map[key]?.toString().trim() ?? '';
+    if (value.isNotEmpty) {
+      return value;
+    }
+  }
+  return null;
 }

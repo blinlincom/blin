@@ -18,9 +18,6 @@ class QuickActionsPage extends StatelessWidget {
         '添加朋友',
         () => _push(context, SearchPage(controller: controller)),
       ),
-      _ActionEntry(Icons.qr_code_scanner, '扫一扫', () => _showSoon(context)),
-      _ActionEntry(Icons.payments_outlined, '收付款', () => _showSoon(context)),
-      _ActionEntry(Icons.note_add_outlined, '新建笔记', () => _showSoon(context)),
       _ActionEntry(
         Icons.phone_outlined,
         '语音会议',
@@ -46,16 +43,6 @@ class QuickActionsPage extends StatelessWidget {
             title: '视频会议',
           ),
         ),
-      ),
-      _ActionEntry(
-        Icons.group_work_outlined,
-        '创建群聊',
-        () => _push(context, CreateGroupPage(controller: controller)),
-      ),
-      _ActionEntry(
-        Icons.contacts_outlined,
-        '通讯录',
-        () => Navigator.of(context).pop(),
       ),
     ];
     return Scaffold(

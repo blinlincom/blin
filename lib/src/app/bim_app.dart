@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../core/app_config.dart';
 import '../features/auth/auth_page.dart';
@@ -69,12 +70,20 @@ class _BimAppState extends State<BimApp> with WidgetsBindingObserver {
         surface: Colors.white,
       ),
       scaffoldBackgroundColor: const Color(0xfff7f9fc),
+      visualDensity: VisualDensity.standard,
       appBarTheme: const AppBarTheme(
         elevation: 0,
         scrolledUnderElevation: 0,
-        backgroundColor: Color(0xfff7f9fc),
+        backgroundColor: Colors.white,
         foregroundColor: black,
         centerTitle: true,
+        systemOverlayStyle: SystemUiOverlayStyle(
+          statusBarColor: Colors.transparent,
+          statusBarIconBrightness: Brightness.dark,
+          statusBarBrightness: Brightness.light,
+          systemNavigationBarColor: Colors.white,
+          systemNavigationBarIconBrightness: Brightness.dark,
+        ),
         titleTextStyle: TextStyle(
           color: black,
           fontSize: 17,
@@ -85,19 +94,19 @@ class _BimAppState extends State<BimApp> with WidgetsBindingObserver {
         filled: true,
         fillColor: fill,
         border: OutlineInputBorder(
-          borderRadius: BorderRadius.all(Radius.circular(12)),
+          borderRadius: BorderRadius.all(Radius.circular(6)),
           borderSide: BorderSide(color: border),
         ),
         enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.all(Radius.circular(12)),
+          borderRadius: BorderRadius.all(Radius.circular(6)),
           borderSide: BorderSide(color: border),
         ),
         focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.all(Radius.circular(12)),
+          borderRadius: BorderRadius.all(Radius.circular(6)),
           borderSide: BorderSide(color: blue, width: 1.4),
         ),
         errorBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.all(Radius.circular(12)),
+          borderRadius: BorderRadius.all(Radius.circular(6)),
           borderSide: BorderSide(color: Colors.red),
         ),
         contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 14),
@@ -106,7 +115,7 @@ class _BimAppState extends State<BimApp> with WidgetsBindingObserver {
         style: FilledButton.styleFrom(
           elevation: 0,
           shape: const RoundedRectangleBorder(
-            borderRadius: BorderRadius.all(Radius.circular(14)),
+            borderRadius: BorderRadius.all(Radius.circular(6)),
           ),
           minimumSize: const Size.fromHeight(48),
           textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
@@ -116,7 +125,7 @@ class _BimAppState extends State<BimApp> with WidgetsBindingObserver {
         style: OutlinedButton.styleFrom(
           elevation: 0,
           shape: const RoundedRectangleBorder(
-            borderRadius: BorderRadius.all(Radius.circular(14)),
+            borderRadius: BorderRadius.all(Radius.circular(6)),
           ),
           minimumSize: const Size.fromHeight(44),
           side: const BorderSide(color: border),
@@ -125,7 +134,7 @@ class _BimAppState extends State<BimApp> with WidgetsBindingObserver {
       textButtonTheme: TextButtonThemeData(
         style: TextButton.styleFrom(
           shape: const RoundedRectangleBorder(
-            borderRadius: BorderRadius.all(Radius.circular(12)),
+            borderRadius: BorderRadius.all(Radius.circular(6)),
           ),
           foregroundColor: blue,
         ),
@@ -145,9 +154,7 @@ class _BimAppState extends State<BimApp> with WidgetsBindingObserver {
       snackBarTheme: const SnackBarThemeData(
         elevation: 0,
         behavior: SnackBarBehavior.fixed,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.all(Radius.circular(12)),
-        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.zero),
       ),
     );
   }

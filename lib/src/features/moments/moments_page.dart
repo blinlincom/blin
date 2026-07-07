@@ -1,9 +1,9 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:photo_manager/photo_manager.dart';
 import 'package:video_player/video_player.dart';
 
@@ -37,7 +37,9 @@ class _MomentsPageState extends State<MomentsPage> {
   bool _loading = true;
   bool _refreshing = false;
   bool _loadingMore = false;
+  bool _appBarOnCover = true;
   String _error = '';
+  String _profileBackgroundUrl = '';
   int _page = 1;
   int _pageCount = 1;
 
@@ -59,11 +61,22 @@ class _MomentsPageState extends State<MomentsPage> {
   }
 
   void _onScroll() {
+    _syncAppBarStyle();
     if (_loadingMore || _loading || _refreshing || _page >= _pageCount) {
       return;
     }
     if (_scrollController.position.extentAfter < 520) {
       unawaited(_loadMore());
+    }
+  }
+
+  void _syncAppBarStyle() {
+    if (!_scrollController.hasClients) {
+      return;
+    }
+    final onCover = _scrollController.offset < 148;
+    if (onCover != _appBarOnCover && mounted) {
+      setState(() => _appBarOnCover = onCover);
     }
   }
 
@@ -82,6 +95,7 @@ class _MomentsPageState extends State<MomentsPage> {
       }
       setState(() {
         _posts = posts;
+        _profileBackgroundUrl = _momentProfileBackground(data);
         _page = _intValue(data, ['current_number'], fallback: 1);
         _pageCount = _intValue(data, ['pagecount'], fallback: 1);
         _loading = false;
@@ -325,87 +339,116 @@ class _MomentsPageState extends State<MomentsPage> {
   @override
   Widget build(BuildContext context) {
     final session = widget.controller.session;
-    return Scaffold(
-      backgroundColor: _momentsPageColor,
-      appBar: AppBar(
-        title: const Text('朋友圈'),
-        centerTitle: true,
-        elevation: 0,
-        scrolledUnderElevation: 0,
-        backgroundColor: _momentsSurface,
-        foregroundColor: _momentsText,
-        actions: [
-          IconButton(
-            tooltip: '发表',
-            onPressed: _openComposer,
-            icon: const Icon(Icons.camera_alt_outlined),
-          ),
-        ],
-      ),
-      body: RefreshIndicator(
-        onRefresh: _refresh,
-        edgeOffset: 0,
-        child: CustomScrollView(
-          controller: _scrollController,
-          physics: const AlwaysScrollableScrollPhysics(),
-          slivers: [
-            SliverToBoxAdapter(
-              child: _MomentHeader(
-                name: _sessionName(
-                  session?.nickname ?? '',
-                  session?.username ?? '',
+    final backgroundUrl = _profileBackgroundUrl.isNotEmpty
+        ? _profileBackgroundUrl
+        : session?.profileBackground ?? '';
+    final overlayStyle = SystemUiOverlayStyle(
+      statusBarColor: Colors.transparent,
+      statusBarIconBrightness: _appBarOnCover
+          ? Brightness.light
+          : Brightness.dark,
+      statusBarBrightness: _appBarOnCover ? Brightness.dark : Brightness.light,
+      systemNavigationBarColor: _momentsSurface,
+      systemNavigationBarIconBrightness: Brightness.dark,
+    );
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: overlayStyle,
+      child: Scaffold(
+        backgroundColor: _momentsPageColor,
+        extendBodyBehindAppBar: true,
+        appBar: AppBar(
+          title: const Text('朋友圈'),
+          centerTitle: true,
+          elevation: 0,
+          scrolledUnderElevation: 0,
+          backgroundColor: _appBarOnCover
+              ? Colors.transparent
+              : _momentsSurface,
+          foregroundColor: _appBarOnCover ? Colors.white : _momentsText,
+          surfaceTintColor: Colors.transparent,
+          shadowColor: Colors.transparent,
+          systemOverlayStyle: overlayStyle,
+          bottom: _appBarOnCover
+              ? null
+              : const PreferredSize(
+                  preferredSize: Size.fromHeight(0.5),
+                  child: Divider(height: 0.5, color: _momentsBorder),
                 ),
-                avatarUrl: session?.avatar ?? '',
-              ),
+          actions: [
+            IconButton(
+              tooltip: '发表',
+              onPressed: _openComposer,
+              icon: const Icon(Icons.camera_alt_outlined),
             ),
-            if (_loading)
-              const SliverFillRemaining(
-                hasScrollBody: false,
-                child: _MomentLoadingState(),
-              )
-            else if (_error.isNotEmpty && _posts.isEmpty)
-              SliverFillRemaining(
-                hasScrollBody: false,
-                child: _MomentErrorState(
-                  error: _error,
-                  onRetry: () => _loadFirst(),
-                ),
-              )
-            else if (_posts.isEmpty)
-              const SliverFillRemaining(
-                hasScrollBody: false,
-                child: _MomentEmptyState(),
-              )
-            else
-              SliverList.builder(
-                itemCount: _posts.length + (_loadingMore ? 1 : 0),
-                itemBuilder: (context, index) {
-                  if (index >= _posts.length) {
-                    return const Padding(
-                      padding: EdgeInsets.symmetric(vertical: 16),
-                      child: Center(
-                        child: SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        ),
-                      ),
-                    );
-                  }
-                  final post = _posts[index];
-                  return _MomentPostTile(
-                    key: ValueKey(_intValue(post, ['post_id', 'id'])),
-                    post: post,
-                    onLike: () => _toggleLike(post),
-                    onComment: () => _comment(post),
-                    onReply: (comment) => _comment(post, reply: comment),
-                    onDeletePost: () => _deletePost(post),
-                    onDeleteComment: (comment) => _deleteComment(post, comment),
-                  );
-                },
-              ),
-            const SliverToBoxAdapter(child: SizedBox(height: 28)),
           ],
+        ),
+        body: RefreshIndicator(
+          onRefresh: _refresh,
+          edgeOffset: MediaQuery.paddingOf(context).top + kToolbarHeight,
+          child: CustomScrollView(
+            controller: _scrollController,
+            physics: const AlwaysScrollableScrollPhysics(),
+            slivers: [
+              SliverToBoxAdapter(
+                child: _MomentHeader(
+                  name: _sessionName(
+                    session?.nickname ?? '',
+                    session?.username ?? '',
+                  ),
+                  avatarUrl: session?.avatar ?? '',
+                  backgroundUrl: backgroundUrl,
+                ),
+              ),
+              if (_loading)
+                const SliverFillRemaining(
+                  hasScrollBody: false,
+                  child: _MomentLoadingState(),
+                )
+              else if (_error.isNotEmpty && _posts.isEmpty)
+                SliverFillRemaining(
+                  hasScrollBody: false,
+                  child: _MomentErrorState(
+                    error: _error,
+                    onRetry: () => _loadFirst(),
+                  ),
+                )
+              else if (_posts.isEmpty)
+                const SliverFillRemaining(
+                  hasScrollBody: false,
+                  child: _MomentEmptyState(),
+                )
+              else
+                SliverList.builder(
+                  itemCount: _posts.length + (_loadingMore ? 1 : 0),
+                  itemBuilder: (context, index) {
+                    if (index >= _posts.length) {
+                      return const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 16),
+                        child: Center(
+                          child: SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          ),
+                        ),
+                      );
+                    }
+                    final post = _posts[index];
+                    return _MomentPostTile(
+                      key: ValueKey(_intValue(post, ['post_id', 'id'])),
+                      post: post,
+                      onLike: () => _toggleLike(post),
+                      onComment: () => _comment(post),
+                      onReply: (comment) => _comment(post, reply: comment),
+                      onDeletePost: () => _deletePost(post),
+                      onDeleteComment: (comment) =>
+                          _deleteComment(post, comment),
+                    );
+                  },
+                ),
+              const SliverToBoxAdapter(child: SizedBox(height: 28)),
+            ],
+          ),
         ),
       ),
     );
@@ -551,94 +594,103 @@ class _MomentComposerPageState extends State<MomentComposerPage> {
   @override
   Widget build(BuildContext context) {
     final bottom = MediaQuery.viewInsetsOf(context).bottom;
-    return Scaffold(
-      resizeToAvoidBottomInset: true,
-      backgroundColor: _momentsSurface,
-      appBar: AppBar(
-        title: const Text('发表朋友圈'),
-        centerTitle: true,
-        elevation: 0,
-        scrolledUnderElevation: 0,
-        backgroundColor: _momentsSurface,
-        foregroundColor: _momentsText,
-        actions: [
-          TextButton(
-            onPressed: _canPublish ? _publish : null,
-            child: _publishing
-                ? const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Text('发表'),
-          ),
-        ],
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: const SystemUiOverlayStyle(
+        statusBarColor: _momentsSurface,
+        statusBarIconBrightness: Brightness.dark,
+        statusBarBrightness: Brightness.light,
+        systemNavigationBarColor: _momentsSurface,
+        systemNavigationBarIconBrightness: Brightness.dark,
       ),
-      body: SafeArea(
-        child: AnimatedPadding(
-          duration: const Duration(milliseconds: 180),
-          curve: Curves.easeOutCubic,
-          padding: EdgeInsets.only(bottom: bottom),
-          child: Column(
-            children: [
-              if (_publishing)
-                LinearProgressIndicator(
-                  value: _media.isEmpty ? null : _progress,
-                  minHeight: 2,
-                  backgroundColor: _momentsFill,
-                  color: _momentsPrimary,
-                ),
-              Expanded(
-                child: ListView(
-                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 20),
-                  children: [
-                    TextField(
-                      controller: _textController,
-                      focusNode: _focusNode,
-                      enabled: !_publishing,
-                      maxLines: null,
-                      minLines: 6,
-                      maxLength: 2000,
-                      textInputAction: TextInputAction.newline,
-                      decoration: const InputDecoration(
-                        hintText: '这一刻的想法...',
-                        border: InputBorder.none,
-                        counterText: '',
-                        filled: false,
-                        contentPadding: EdgeInsets.zero,
-                      ),
-                      style: const TextStyle(
-                        color: _momentsText,
-                        fontSize: 17,
-                        height: 1.45,
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    _ComposerMediaGrid(
-                      media: _media,
-                      publishing: _publishing,
-                      onAddImage: () => _pick('image'),
-                      onAddVideo: () => _pick('video'),
-                      onRemove: (item) => setState(
-                        () => _media = _media
-                            .where((media) => media != item)
-                            .toList(),
-                      ),
-                    ),
-                    if (_error.isNotEmpty) ...[
-                      const SizedBox(height: 16),
-                      Text(
-                        _error,
+      child: Scaffold(
+        resizeToAvoidBottomInset: true,
+        backgroundColor: _momentsSurface,
+        appBar: AppBar(
+          title: const Text('发表朋友圈'),
+          centerTitle: true,
+          elevation: 0,
+          scrolledUnderElevation: 0,
+          backgroundColor: _momentsSurface,
+          foregroundColor: _momentsText,
+          actions: [
+            TextButton(
+              onPressed: _canPublish ? _publish : null,
+              child: _publishing
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Text('发表'),
+            ),
+          ],
+        ),
+        body: SafeArea(
+          child: AnimatedPadding(
+            duration: const Duration(milliseconds: 180),
+            curve: Curves.easeOutCubic,
+            padding: EdgeInsets.only(bottom: bottom),
+            child: Column(
+              children: [
+                if (_publishing)
+                  LinearProgressIndicator(
+                    value: _media.isEmpty ? null : _progress,
+                    minHeight: 2,
+                    backgroundColor: _momentsFill,
+                    color: _momentsPrimary,
+                  ),
+                Expanded(
+                  child: ListView(
+                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 20),
+                    children: [
+                      TextField(
+                        controller: _textController,
+                        focusNode: _focusNode,
+                        enabled: !_publishing,
+                        maxLines: null,
+                        minLines: 6,
+                        maxLength: 2000,
+                        textInputAction: TextInputAction.newline,
+                        decoration: const InputDecoration(
+                          hintText: '这一刻的想法...',
+                          border: InputBorder.none,
+                          counterText: '',
+                          filled: false,
+                          contentPadding: EdgeInsets.zero,
+                        ),
                         style: const TextStyle(
-                          color: Color(0xffc0392b),
-                          fontSize: 13,
+                          color: _momentsText,
+                          fontSize: 17,
+                          height: 1.45,
                         ),
                       ),
+                      const SizedBox(height: 12),
+                      _ComposerMediaGrid(
+                        media: _media,
+                        publishing: _publishing,
+                        onAddImage: () => _pick('image'),
+                        onAddVideo: () => _pick('video'),
+                        onRemove: (item) => setState(
+                          () => _media = _media
+                              .where((media) => media != item)
+                              .toList(),
+                        ),
+                      ),
+                      if (_error.isNotEmpty) ...[
+                        const SizedBox(height: 16),
+                        Text(
+                          _error,
+                          style: const TextStyle(
+                            color: Color(0xffc0392b),
+                            fontSize: 13,
+                          ),
+                        ),
+                      ],
                     ],
-                  ],
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
@@ -647,10 +699,15 @@ class _MomentComposerPageState extends State<MomentComposerPage> {
 }
 
 class _MomentHeader extends StatelessWidget {
-  const _MomentHeader({required this.name, required this.avatarUrl});
+  const _MomentHeader({
+    required this.name,
+    required this.avatarUrl,
+    required this.backgroundUrl,
+  });
 
   final String name;
   final String avatarUrl;
+  final String backgroundUrl;
 
   @override
   Widget build(BuildContext context) {
@@ -658,20 +715,24 @@ class _MomentHeader extends StatelessWidget {
       height: 250,
       child: Stack(
         children: [
-          Container(
+          _MomentCoverImage(
+            imageUrl: backgroundUrl,
             height: 194,
-            color: const Color(0xffcfd5de),
-            alignment: Alignment.bottomRight,
-            padding: const EdgeInsets.fromLTRB(20, 20, 20, 34),
-            child: Text(
-              name,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              textAlign: TextAlign.right,
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 20,
-                fontWeight: FontWeight.w700,
+            child: Align(
+              alignment: Alignment.bottomRight,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(20, 20, 20, 34),
+                child: Text(
+                  name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.right,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 20,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
               ),
             ),
           ),
@@ -690,6 +751,65 @@ class _MomentHeader extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _MomentCoverImage extends StatelessWidget {
+  const _MomentCoverImage({
+    required this.imageUrl,
+    required this.height,
+    required this.child,
+  });
+
+  final String imageUrl;
+  final double height;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final url = _mediaUrl(imageUrl);
+    return SizedBox(
+      height: height,
+      width: double.infinity,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          if (url.isNotEmpty)
+            Image.network(
+              url,
+              fit: BoxFit.cover,
+              gaplessPlayback: true,
+              errorBuilder: (_, __, ___) => const _MomentCoverFallback(),
+              loadingBuilder: (context, child, progress) =>
+                  progress == null ? child : const _MomentCoverFallback(),
+            )
+          else
+            const _MomentCoverFallback(),
+          const DecoratedBox(
+            decoration: BoxDecoration(color: Color(0x33000000)),
+          ),
+          child,
+        ],
+      ),
+    );
+  }
+}
+
+class _MomentCoverFallback extends StatelessWidget {
+  const _MomentCoverFallback();
+
+  @override
+  Widget build(BuildContext context) {
+    return const ColoredBox(
+      color: Color(0xff9aa3af),
+      child: Align(
+        alignment: Alignment.bottomRight,
+        child: Padding(
+          padding: EdgeInsets.fromLTRB(20, 20, 20, 34),
+          child: Icon(Icons.image_outlined, color: Color(0x66ffffff), size: 34),
+        ),
       ),
     );
   }
@@ -2005,6 +2125,33 @@ Map<String, Object?> _mapValue(
 String _textValue(Map<String, Object?> source, List<String> keys) {
   for (final key in keys) {
     final value = source[key]?.toString() ?? '';
+    if (value.isNotEmpty) {
+      return value;
+    }
+  }
+  return '';
+}
+
+String _momentProfileBackground(Map<String, Object?> source) {
+  final direct = _textValue(source, const [
+    'profile_background',
+    'profile_background_url',
+    'moments_background',
+    'moments_cover',
+    'cover_url',
+    'background_url',
+    'user_bg',
+    'userbg',
+  ]);
+  if (direct.isNotEmpty) {
+    return direct;
+  }
+  for (final key in const ['profile', 'user', 'me', 'member', 'owner']) {
+    final nested = _mapValue(source, [key]);
+    if (nested.isEmpty) {
+      continue;
+    }
+    final value = _momentProfileBackground(nested);
     if (value.isNotEmpty) {
       return value;
     }

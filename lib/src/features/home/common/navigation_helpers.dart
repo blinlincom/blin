@@ -139,9 +139,3 @@ Future<void> _markConversationReadAfterPop(
     );
   }
 }
-
-void _showSoon(BuildContext context) {
-  ScaffoldMessenger.of(
-    context,
-  ).showSnackBar(const SnackBar(content: Text('功能建设中')));
-}
