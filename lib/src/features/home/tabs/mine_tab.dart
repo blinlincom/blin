@@ -27,7 +27,6 @@ class MineTab extends StatelessWidget {
                         imageUrl: session?.avatar ?? '',
                         size: 68,
                         color: const Color(0xff8e99a8),
-                        circle: true,
                       ),
                       const SizedBox(width: 16),
                       Expanded(

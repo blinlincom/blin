@@ -10,6 +10,7 @@ import 'package:video_player/video_player.dart';
 import '../../app/session_controller.dart';
 import '../../core/app_config.dart';
 import '../../core/app_logger.dart';
+import '../../core/design_tokens.dart';
 import '../../core/models.dart';
 
 const _momentsPageColor = Color(0xfff5f6f8);
@@ -19,7 +20,7 @@ const _momentsSecondary = Color(0xff687282);
 const _momentsMuted = Color(0xff9aa0aa);
 const _momentsBorder = Color(0xffe7e8ec);
 const _momentsFill = Color(0xfff1f2f5);
-const _momentsPrimary = Color(0xff1677ff);
+const _momentsPrimary = BimColors.primary;
 const _momentsLike = Color(0xff526996);
 
 class MomentsPage extends StatefulWidget {

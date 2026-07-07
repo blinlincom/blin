@@ -48,7 +48,9 @@ class _Composer extends StatelessWidget {
             const SizedBox(width: 6),
             Expanded(
               child: Container(
-                constraints: const BoxConstraints(minHeight: 42),
+                constraints: const BoxConstraints(
+                  minHeight: BimDimensions.composerControl,
+                ),
                 decoration: BoxDecoration(
                   color: _fillColor,
                   borderRadius: BorderRadius.circular(6),
@@ -129,7 +131,10 @@ class _Composer extends StatelessWidget {
                           foregroundColor: Colors.white,
                           backgroundColor: _chatAckColor,
                           padding: const EdgeInsets.symmetric(horizontal: 8),
-                          minimumSize: const Size(42, 40),
+                          minimumSize: const Size(
+                            BimDimensions.composerControl,
+                            40,
+                          ),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(6),
                           ),
@@ -168,8 +173,8 @@ class _ComposerIconButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      width: 42,
-      height: 42,
+      width: BimDimensions.composerControl,
+      height: BimDimensions.composerControl,
       child: IconButton(
         tooltip: tooltip,
         onPressed: onPressed,

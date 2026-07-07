@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../core/app_config.dart';
+import '../core/design_tokens.dart';
 import '../features/auth/auth_page.dart';
 import '../features/home/home_page.dart';
 import 'session_controller.dart';
@@ -57,10 +58,10 @@ class _BimAppState extends State<BimApp> with WidgetsBindingObserver {
   }
 
   ThemeData _theme() {
-    const black = Color(0xff111827);
-    const blue = Color(0xff2f80ed);
-    const border = Color(0xffe5eaf2);
-    const fill = Color(0xfff4f6fa);
+    const black = BimColors.textDark;
+    const blue = BimColors.primary;
+    const border = BimColors.border;
+    const fill = BimColors.fill;
     return ThemeData(
       useMaterial3: true,
       colorScheme: ColorScheme.fromSeed(
@@ -69,7 +70,7 @@ class _BimAppState extends State<BimApp> with WidgetsBindingObserver {
         primary: blue,
         surface: Colors.white,
       ),
-      scaffoldBackgroundColor: const Color(0xfff7f9fc),
+      scaffoldBackgroundColor: BimColors.background,
       visualDensity: VisualDensity.standard,
       appBarTheme: const AppBarTheme(
         elevation: 0,
@@ -81,12 +82,12 @@ class _BimAppState extends State<BimApp> with WidgetsBindingObserver {
           statusBarColor: Colors.transparent,
           statusBarIconBrightness: Brightness.dark,
           statusBarBrightness: Brightness.light,
-          systemNavigationBarColor: Colors.white,
+          systemNavigationBarColor: BimColors.surface,
           systemNavigationBarIconBrightness: Brightness.dark,
         ),
         titleTextStyle: TextStyle(
           color: black,
-          fontSize: 17,
+          fontSize: BimTypography.title,
           fontWeight: FontWeight.w700,
         ),
       ),
@@ -94,20 +95,20 @@ class _BimAppState extends State<BimApp> with WidgetsBindingObserver {
         filled: true,
         fillColor: fill,
         border: OutlineInputBorder(
-          borderRadius: BorderRadius.all(Radius.circular(6)),
+          borderRadius: BorderRadius.all(Radius.circular(BimRadius.sm)),
           borderSide: BorderSide(color: border),
         ),
         enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.all(Radius.circular(6)),
+          borderRadius: BorderRadius.all(Radius.circular(BimRadius.sm)),
           borderSide: BorderSide(color: border),
         ),
         focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.all(Radius.circular(6)),
+          borderRadius: BorderRadius.all(Radius.circular(BimRadius.sm)),
           borderSide: BorderSide(color: blue, width: 1.4),
         ),
         errorBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.all(Radius.circular(6)),
-          borderSide: BorderSide(color: Colors.red),
+          borderRadius: BorderRadius.all(Radius.circular(BimRadius.sm)),
+          borderSide: BorderSide(color: BimColors.danger),
         ),
         contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 14),
       ),
@@ -115,26 +116,29 @@ class _BimAppState extends State<BimApp> with WidgetsBindingObserver {
         style: FilledButton.styleFrom(
           elevation: 0,
           shape: const RoundedRectangleBorder(
-            borderRadius: BorderRadius.all(Radius.circular(6)),
+            borderRadius: BorderRadius.all(Radius.circular(BimRadius.sm)),
           ),
           minimumSize: const Size.fromHeight(48),
-          textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+          textStyle: const TextStyle(
+            fontSize: BimTypography.body,
+            fontWeight: FontWeight.w700,
+          ),
         ),
       ),
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
           elevation: 0,
           shape: const RoundedRectangleBorder(
-            borderRadius: BorderRadius.all(Radius.circular(6)),
+            borderRadius: BorderRadius.all(Radius.circular(BimRadius.sm)),
           ),
-          minimumSize: const Size.fromHeight(44),
+          minimumSize: const Size.fromHeight(BimDimensions.touchTarget),
           side: const BorderSide(color: border),
         ),
       ),
       textButtonTheme: TextButtonThemeData(
         style: TextButton.styleFrom(
           shape: const RoundedRectangleBorder(
-            borderRadius: BorderRadius.all(Radius.circular(6)),
+            borderRadius: BorderRadius.all(Radius.circular(BimRadius.sm)),
           ),
           foregroundColor: blue,
         ),
@@ -149,7 +153,7 @@ class _BimAppState extends State<BimApp> with WidgetsBindingObserver {
         type: BottomNavigationBarType.fixed,
         backgroundColor: Colors.white,
         selectedItemColor: blue,
-        unselectedItemColor: Color(0xff8a93a3),
+        unselectedItemColor: BimColors.secondaryText,
       ),
       snackBarTheme: const SnackBarThemeData(
         elevation: 0,

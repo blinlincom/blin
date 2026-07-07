@@ -29,7 +29,7 @@ class _ChatHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     if (isGroup) {
       return Container(
-        height: 58,
+        height: BimDimensions.chatHeader,
         decoration: const BoxDecoration(
           color: _surfaceColor,
           border: Border(bottom: BorderSide(color: _lightBorderColor)),
@@ -122,7 +122,7 @@ class _ChatHeader extends StatelessWidget {
       );
     }
     return Container(
-      height: 58,
+      height: BimDimensions.chatHeader,
       decoration: const BoxDecoration(
         color: _surfaceColor,
         border: Border(bottom: BorderSide(color: _lightBorderColor)),

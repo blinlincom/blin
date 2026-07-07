@@ -1443,14 +1443,14 @@ class _PickerAppBar extends StatelessWidget implements PreferredSizeWidget {
   final List<Widget>? actions;
 
   @override
-  Size get preferredSize => const Size.fromHeight(51);
+  Size get preferredSize => const Size.fromHeight(BimDimensions.appBar + 1);
 
   @override
   Widget build(BuildContext context) {
     return AppBar(
       title: Text(title),
       centerTitle: true,
-      toolbarHeight: 50,
+      toolbarHeight: BimDimensions.appBar,
       backgroundColor: _surfaceColor,
       foregroundColor: _textColor,
       elevation: 0,
@@ -1458,7 +1458,7 @@ class _PickerAppBar extends StatelessWidget implements PreferredSizeWidget {
       actions: actions,
       titleTextStyle: const TextStyle(
         color: _textColor,
-        fontSize: 17,
+        fontSize: BimTypography.title,
         fontWeight: FontWeight.w700,
       ),
       bottom: const PreferredSize(

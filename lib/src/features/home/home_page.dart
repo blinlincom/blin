@@ -15,6 +15,7 @@ import 'package:video_player/video_player.dart';
 import '../../app/session_controller.dart';
 import '../../calls/livekit_call_models.dart';
 import '../../core/app_config.dart';
+import '../../core/design_tokens.dart';
 import '../../core/app_logger.dart';
 import '../../core/models.dart';
 import '../moments/moments_page.dart';
@@ -54,20 +55,20 @@ part 'contacts/contact_helpers.dart';
 part 'common/map_helpers.dart';
 part 'common/media_helpers.dart';
 
-const _primaryColor = Color(0xff1677ff);
-const _pageColor = Color(0xfff5f6f8);
-const _surfaceColor = Color(0xffffffff);
-const _borderColor = Color(0xffe7e8ec);
-const _lightBorderColor = Color(0xfff0f1f4);
-const _fillColor = Color(0xfff4f5f7);
-const _mutedColor = Color(0xff9aa0aa);
-const _secondaryTextColor = Color(0xff6f7785);
-const _textColor = Color(0xff202124);
-const _dangerColor = Color(0xffa40000);
-const _chatPageColor = Color(0xfff7f8fa);
-const _chatMineBubbleColor = Color(0xffdff6d8);
-const _chatOnlineColor = Color(0xff55c875);
-const _chatAckColor = Color(0xff42c977);
+const _primaryColor = BimColors.primary;
+const _pageColor = BimColors.background;
+const _surfaceColor = BimColors.surface;
+const _borderColor = BimColors.border;
+const _lightBorderColor = BimColors.borderLight;
+const _fillColor = BimColors.fill;
+const _mutedColor = BimColors.mutedText;
+const _secondaryTextColor = BimColors.secondaryText;
+const _textColor = BimColors.text;
+const _dangerColor = BimColors.dangerDeep;
+const _chatPageColor = BimColors.chatBackground;
+const _chatMineBubbleColor = BimColors.mineBubble;
+const _chatOnlineColor = BimColors.online;
+const _chatAckColor = BimColors.ack;
 const _privateChannelType = 1;
 const _groupChannelType = 2;
 
@@ -240,14 +241,14 @@ class _HomePageState extends State<HomePage> {
           : AppBar(
               title: Text(_title),
               centerTitle: true,
-              toolbarHeight: 50,
+              toolbarHeight: BimDimensions.appBar,
               elevation: 0,
               scrolledUnderElevation: 0,
               backgroundColor: _surfaceColor,
               foregroundColor: _textColor,
               titleTextStyle: const TextStyle(
                 color: _textColor,
-                fontSize: 17,
+                fontSize: BimTypography.title,
                 fontWeight: FontWeight.w700,
               ),
               actions: _actions(showInitialSyncOverlay),
@@ -444,7 +445,7 @@ class _InitialHistorySyncOverlay extends StatelessWidget {
               children: [
                 SizedBox(
                   width: 42,
-                  height: 42,
+                  height: BimDimensions.composerControl,
                   child: failed
                       ? const Icon(
                           Icons.error_outline,
@@ -470,7 +471,7 @@ class _InitialHistorySyncOverlay extends StatelessWidget {
                   textAlign: TextAlign.center,
                   style: const TextStyle(
                     color: _textColor,
-                    fontSize: 17,
+                    fontSize: BimTypography.title,
                     fontWeight: FontWeight.w700,
                     height: 1.25,
                   ),

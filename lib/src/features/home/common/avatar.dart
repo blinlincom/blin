@@ -7,7 +7,6 @@ class _Avatar extends StatelessWidget {
     this.color = _primaryColor,
     this.icon,
     this.imageUrl = '',
-    this.circle = false,
   });
 
   final String label;
@@ -15,16 +14,15 @@ class _Avatar extends StatelessWidget {
   final Color color;
   final IconData? icon;
   final String imageUrl;
-  final bool circle;
 
   @override
   Widget build(BuildContext context) {
+    final radius = _avatarRadius(size);
     final fallback = _AvatarFallback(
       label: label,
       size: size,
       color: color,
       icon: icon,
-      circle: circle,
     );
     final url = _normalizeAvatarUrl(imageUrl);
     if (url.isEmpty) {
@@ -34,9 +32,7 @@ class _Avatar extends StatelessWidget {
       width: size,
       height: size,
       clipBehavior: Clip.antiAlias,
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(circle ? size / 2 : size * 0.28),
-      ),
+      decoration: BoxDecoration(borderRadius: BorderRadius.circular(radius)),
       child: Image.network(
         url,
         width: size,
@@ -57,24 +53,23 @@ class _AvatarFallback extends StatelessWidget {
     required this.size,
     required this.color,
     this.icon,
-    this.circle = false,
   });
 
   final String label;
   final double size;
   final Color color;
   final IconData? icon;
-  final bool circle;
 
   @override
   Widget build(BuildContext context) {
+    final radius = _avatarRadius(size);
     return Container(
       width: size,
       height: size,
       alignment: Alignment.center,
       decoration: BoxDecoration(
         color: color,
-        borderRadius: BorderRadius.circular(circle ? size / 2 : size * 0.28),
+        borderRadius: BorderRadius.circular(radius),
       ),
       child: icon == null
           ? Text(
@@ -88,6 +83,10 @@ class _AvatarFallback extends StatelessWidget {
           : Icon(icon, color: Colors.white, size: size * 0.5),
     );
   }
+}
+
+double _avatarRadius(double size) {
+  return (size * 0.18).clamp(BimRadius.sm, BimRadius.md).toDouble();
 }
 
 class _ActionCircle extends StatelessWidget {
@@ -105,7 +104,7 @@ class _ActionCircle extends StatelessWidget {
   Widget build(BuildContext context) {
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(20),
+      borderRadius: BorderRadius.circular(BimRadius.md),
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
@@ -115,14 +114,8 @@ class _ActionCircle extends StatelessWidget {
             alignment: Alignment.center,
             decoration: BoxDecoration(
               color: Colors.white,
-              borderRadius: BorderRadius.circular(20),
-              boxShadow: const [
-                BoxShadow(
-                  color: Color(0x14000000),
-                  blurRadius: 18,
-                  offset: Offset(0, 8),
-                ),
-              ],
+              borderRadius: BorderRadius.circular(BimRadius.md),
+              border: Border.all(color: _lightBorderColor),
             ),
             child: Icon(icon, color: _primaryColor, size: 25),
           ),

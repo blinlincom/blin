@@ -890,10 +890,10 @@ bool _isValidRedPacketRemark(String value) {
 
 Color? _conversationPrefixColor(String text) {
   if (text.startsWith('[红包]')) {
-    return const Color(0xffe64340);
+    return BimColors.redPacket;
   }
   if (text.startsWith('[转账]')) {
-    return const Color(0xffff8a00);
+    return BimColors.transfer;
   }
   return null;
 }

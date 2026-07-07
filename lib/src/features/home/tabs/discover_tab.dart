@@ -23,7 +23,6 @@ class DiscoverTab extends StatelessWidget {
               imageUrl: session?.avatar ?? '',
               size: 28,
               color: const Color(0xff8e99a8),
-              circle: true,
             ),
             onTap: () => _push(context, MomentsPage(controller: controller)),
           ),

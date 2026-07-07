@@ -85,20 +85,20 @@ class _ChatToolsPanelState extends State<_ChatToolsPanel> {
           Icons.video_call_rounded,
           '视频通话',
           widget.onGroupVideoCall,
-          const Color(0xff1677ff),
+          BimColors.primary,
         ),
       ],
       _ToolItem(
         Icons.attach_money_rounded,
         '转账',
         widget.onTransfer,
-        const Color(0xff28b957),
+        BimColors.transfer,
       ),
       _ToolItem(
         Icons.redeem_rounded,
         '红包',
         widget.onRedPacket,
-        const Color(0xffff543c),
+        BimColors.redPacket,
       ),
       _ToolItem(
         Icons.contact_page_rounded,
@@ -143,7 +143,7 @@ class _ChatToolsPanelState extends State<_ChatToolsPanel> {
       pages.add(items.sublist(index, (index + 8).clamp(0, items.length)));
     }
     return Container(
-      height: 196,
+      height: BimDimensions.chatToolsPanel,
       decoration: const BoxDecoration(
         color: _surfaceColor,
         border: Border(top: BorderSide(color: _lightBorderColor)),
@@ -260,13 +260,15 @@ class _ToolButton extends StatelessWidget {
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           Container(
-            width: 40,
-            height: 40,
+            width: BimDimensions.toolIcon,
+            height: BimDimensions.toolIcon,
             alignment: Alignment.center,
             decoration: BoxDecoration(
               color: item.color,
               borderRadius: BorderRadius.circular(
-                item.icon == Icons.attach_money_rounded ? 20 : 8,
+                item.icon == Icons.attach_money_rounded
+                    ? BimRadius.pill
+                    : BimRadius.md,
               ),
             ),
             child: Icon(item.icon, size: 23, color: Colors.white),

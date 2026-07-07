@@ -321,7 +321,7 @@ class _CallPreview extends StatelessWidget {
   Widget build(BuildContext context) {
     final meta = _callMessageUi(payload, content: content);
     final icon = meta.isVideo ? Icons.videocam_outlined : Icons.call_outlined;
-    final iconColor = isMe ? const Color(0xff2f7f35) : const Color(0xff1677ff);
+    final iconColor = isMe ? const Color(0xff2f7f35) : BimColors.primary;
     final subtitleColor = isMe
         ? const Color(0xff477a35)
         : const Color(0xff747b86);

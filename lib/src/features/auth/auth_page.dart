@@ -5,16 +5,17 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 
 import '../../app/session_controller.dart';
+import '../../core/design_tokens.dart';
 import '../../core/models.dart';
 
-const _authBlue = Color(0xff1677ff);
-const _authPage = Color(0xfff5f6f8);
-const _authSurface = Color(0xffffffff);
-const _authText = Color(0xff202124);
-const _authMuted = Color(0xff6f7785);
-const _authBorder = Color(0xffe7e8ec);
-const _authFill = Color(0xffffffff);
-const _authDanger = Color(0xffa40000);
+const _authBlue = BimColors.primary;
+const _authPage = BimColors.background;
+const _authSurface = BimColors.surface;
+const _authText = BimColors.text;
+const _authMuted = BimColors.secondaryText;
+const _authBorder = BimColors.border;
+const _authFill = BimColors.surface;
+const _authDanger = BimColors.dangerDeep;
 
 enum _LoginMode { password, mobile }
 
@@ -734,7 +735,7 @@ class _AuthBrand extends StatelessWidget {
           alignment: Alignment.center,
           decoration: BoxDecoration(
             color: _authBlue,
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(BimRadius.md),
           ),
           child: icon.isEmpty
               ? const Icon(
@@ -787,7 +788,7 @@ class _AuthTitle extends StatelessWidget {
           title,
           style: const TextStyle(
             color: _authText,
-            fontSize: 34,
+            fontSize: BimTypography.authTitle,
             height: 1,
             fontWeight: FontWeight.w900,
           ),
@@ -872,8 +873,8 @@ class _SegmentedTabs<T> extends StatelessWidget {
   Widget build(BuildContext context) {
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: const Color(0xfff4f5f7),
-        borderRadius: BorderRadius.circular(10),
+        color: BimColors.fill,
+        borderRadius: BorderRadius.circular(BimRadius.md),
       ),
       child: Row(
         children: [
@@ -909,15 +910,15 @@ class _SegmentButton<T> extends StatelessWidget {
       selected: selected,
       child: InkWell(
         onTap: () => onChanged(option.value),
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(BimRadius.md),
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 160),
-          height: 44,
+          height: BimDimensions.touchTarget,
           alignment: Alignment.center,
           margin: const EdgeInsets.all(3),
           decoration: BoxDecoration(
             color: selected ? _authSurface : Colors.transparent,
-            borderRadius: BorderRadius.circular(8),
+            borderRadius: BorderRadius.circular(BimRadius.sm),
           ),
           child: Text(
             option.label,
@@ -966,7 +967,7 @@ class _AuthInput extends StatelessWidget {
       decoration: BoxDecoration(
         color: _authFill,
         border: Border.all(color: _authBorder),
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(BimRadius.sm),
       ),
       child: TextFormField(
         controller: controller,
@@ -1045,7 +1046,7 @@ class _ImageCaptchaInputState extends State<_ImageCaptchaInput> {
       decoration: BoxDecoration(
         color: _authFill,
         border: Border.all(color: _authBorder),
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(BimRadius.sm),
       ),
       child: Row(
         children: [
@@ -1128,9 +1129,9 @@ class _CaptchaPreview extends StatelessWidget {
     final image = captcha?.image.trim() ?? '';
     final child = _imageWidget(image);
     return ClipRRect(
-      borderRadius: BorderRadius.circular(6),
+      borderRadius: BorderRadius.circular(BimRadius.sm),
       child: ColoredBox(
-        color: const Color(0xfff4f5f7),
+        color: BimColors.fill,
         child: SizedBox(
           width: 82,
           height: 34,
@@ -1233,7 +1234,7 @@ class _PrimaryAuthButton extends StatelessWidget {
   Widget build(BuildContext context) {
     return SizedBox(
       width: double.infinity,
-      height: 54,
+      height: 50,
       child: FilledButton(
         onPressed: onPressed,
         style: FilledButton.styleFrom(
@@ -1241,9 +1242,12 @@ class _PrimaryAuthButton extends StatelessWidget {
           disabledBackgroundColor: const Color(0xff9bc8ff),
           foregroundColor: Colors.white,
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(10),
+            borderRadius: BorderRadius.circular(BimRadius.sm),
           ),
-          textStyle: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
+          textStyle: const TextStyle(
+            fontSize: BimTypography.body,
+            fontWeight: FontWeight.w800,
+          ),
         ),
         child: Text(text),
       ),
@@ -1322,7 +1326,7 @@ class _UnavailableState extends StatelessWidget {
       decoration: BoxDecoration(
         color: _authSurface,
         border: Border.all(color: _authBorder),
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(BimRadius.sm),
       ),
       child: Text(
         text,

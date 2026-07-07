@@ -192,7 +192,9 @@ class _ConversationTile extends StatelessWidget {
     return InkWell(
       onTap: onTap,
       child: Container(
-        constraints: const BoxConstraints(minHeight: 72),
+        constraints: const BoxConstraints(
+          minHeight: BimDimensions.conversationRow,
+        ),
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
         decoration: const BoxDecoration(
           color: _surfaceColor,
@@ -383,7 +385,7 @@ class _ContactTile extends StatelessWidget {
       onTap: onTap,
       onLongPress: onLongPress,
       child: Container(
-        constraints: const BoxConstraints(minHeight: 56),
+        constraints: const BoxConstraints(minHeight: BimDimensions.contactRow),
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         decoration: const BoxDecoration(
           color: _surfaceColor,
@@ -556,7 +558,7 @@ class _MenuTile extends StatelessWidget {
     return InkWell(
       onTap: onTap,
       child: Container(
-        constraints: const BoxConstraints(minHeight: 52),
+        constraints: const BoxConstraints(minHeight: BimDimensions.menuRow),
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         decoration: const BoxDecoration(
           color: _surfaceColor,
