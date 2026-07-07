@@ -895,6 +895,11 @@ Color? _conversationPrefixColor(String text) {
   if (text.startsWith('[转账]')) {
     return BimColors.transfer;
   }
+  if (text.startsWith('[表情]') ||
+      text.startsWith('[GIF]') ||
+      text.startsWith('[贴纸]')) {
+    return _primaryColor;
+  }
   return null;
 }
 

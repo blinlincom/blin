@@ -39,6 +39,9 @@ class _MessageRow extends StatelessWidget {
     final readText = _messageReadStatusText(item);
     final statusInsideContent =
         contentType == ChatContentTypes.image ||
+        contentType == ChatContentTypes.emoji ||
+        contentType == ChatContentTypes.gif ||
+        contentType == ChatContentTypes.sticker ||
         contentType == ChatContentTypes.video;
     final showExternalStatus =
         isMe &&

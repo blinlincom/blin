@@ -1425,6 +1425,101 @@ class SessionController extends ChangeNotifier {
     return const {'msg': '已发送'};
   }
 
+  List<Map<String, Object?>> cachedStickerPacks() {
+    final uid = _chatUid();
+    if (uid.isEmpty) {
+      return const [];
+    }
+    return _copyList(_cache.readStickerPacks(uid));
+  }
+
+  Set<String> cachedOwnedStickerPackIds() {
+    final uid = _chatUid();
+    if (uid.isEmpty) {
+      return const {};
+    }
+    return _cache.readOwnedStickerPackIds(uid);
+  }
+
+  Future<List<Map<String, Object?>>> loadStickerPacks({
+    bool refresh = true,
+  }) async {
+    final current = _requireSession();
+    final uid = _chatUid();
+    if (uid.isEmpty) {
+      return const [];
+    }
+    final cached = _cache.readStickerPacks(uid);
+    if (!refresh && cached.isNotEmpty) {
+      return _copyList(cached);
+    }
+    final result = await _api.stickerPacks(
+      session: current,
+      device: _device,
+      limit: 100,
+    );
+    final packs = _mapListFromPayload(result);
+    _cache.writeStickerPacks(uid: uid, packs: packs);
+    AppLogger.info(
+      'session',
+      'sticker packs loaded',
+      data: {'count': packs.length},
+    );
+    notifyListeners();
+    return _copyList(packs);
+  }
+
+  Future<Set<String>> loadOwnedStickerPackIds({bool refresh = true}) async {
+    final current = _requireSession();
+    final uid = _chatUid();
+    if (uid.isEmpty) {
+      return const {};
+    }
+    final cached = _cache.readOwnedStickerPackIds(uid);
+    if (!refresh && cached.isNotEmpty) {
+      return cached;
+    }
+    final result = await _api.stickerMine(session: current, device: _device);
+    final packs = _mapListFromPayload(result);
+    final ids = <String>{
+      ...packs.map(_stickerPackId).where((item) => item.isNotEmpty),
+      ..._stringListFromPayload(result, const [
+        'pack_ids',
+        'ids',
+        'owned_pack_ids',
+      ]),
+    };
+    _cache.writeOwnedStickerPackIds(uid: uid, packIds: ids);
+    AppLogger.info(
+      'session',
+      'owned sticker packs loaded',
+      data: {'count': ids.length},
+    );
+    notifyListeners();
+    return ids;
+  }
+
+  Future<void> buyStickerPack(String packId) async {
+    final current = _requireSession();
+    final uid = _chatUid();
+    final normalized = packId.trim();
+    if (uid.isEmpty || normalized.isEmpty) {
+      throw ApiException('表情包无效');
+    }
+    await _api.stickerPackBuy(
+      session: current,
+      device: _device,
+      packId: normalized,
+    );
+    _cache.addOwnedStickerPackId(uid: uid, packId: normalized);
+    AppLogger.info(
+      'session',
+      'sticker pack bought',
+      data: {'pack_id': normalized},
+    );
+    notifyListeners();
+  }
+
   Future<void> sendBurnAfterReadState({
     required String channelId,
     required int channelType,
@@ -2204,7 +2299,14 @@ class SessionController extends ChangeNotifier {
 
   List<Map<String, Object?>> _mapListFromPayload(Map<String, Object?> data) {
     Object? list;
-    for (final key in ['list', 'items', 'rows', 'records']) {
+    for (final key in [
+      'list',
+      'items',
+      'rows',
+      'records',
+      'packs',
+      'packages',
+    ]) {
       final value = data[key];
       if (value is List) {
         list = value;
@@ -2225,6 +2327,57 @@ class SessionController extends ChangeNotifier {
         .whereType<Map>()
         .map((item) => item.cast<String, Object?>())
         .toList(growable: false);
+  }
+
+  String _stickerPackId(Map<String, Object?> item) {
+    final sources = <Map<String, Object?>>[
+      item,
+      if (item['pack'] is Map)
+        (item['pack'] as Map).map(
+          (key, value) => MapEntry(key.toString(), value),
+        ),
+    ];
+    for (final source in sources) {
+      for (final key in ['pack_id', 'id', 'package_id', 'sticker_pack_id']) {
+        final value = source[key]?.toString().trim() ?? '';
+        if (value.isNotEmpty) {
+          return value;
+        }
+      }
+    }
+    return '';
+  }
+
+  List<String> _stringListFromPayload(
+    Map<String, Object?> data,
+    List<String> keys,
+  ) {
+    Object? value;
+    for (final key in keys) {
+      final current = data[key];
+      if (current is List || current is String) {
+        value = current;
+        break;
+      }
+    }
+    final nested = data['data'];
+    if (value == null && nested is Map) {
+      return _stringListFromPayload(nested.cast<String, Object?>(), keys);
+    }
+    if (value is List) {
+      return value
+          .map((item) => item.toString().trim())
+          .where((item) => item.isNotEmpty)
+          .toList(growable: false);
+    }
+    if (value is String) {
+      return value
+          .split(',')
+          .map((item) => item.trim())
+          .where((item) => item.isNotEmpty)
+          .toList(growable: false);
+    }
+    return const [];
   }
 
   void _writeFriendCache(List<Map<String, Object?>> friends) {

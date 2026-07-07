@@ -422,7 +422,7 @@ class _ConversationSubtitleText extends StatelessWidget {
         style: const TextStyle(color: _mutedColor, fontSize: 13),
       );
     }
-    final prefix = text.startsWith('[红包]') ? '[红包]' : '[转账]';
+    final prefix = _conversationPrefix(text);
     final suffix = text.substring(prefix.length);
     return Text.rich(
       TextSpan(
@@ -443,6 +443,15 @@ class _ConversationSubtitleText extends StatelessWidget {
       style: const TextStyle(fontSize: 13),
     );
   }
+}
+
+String _conversationPrefix(String text) {
+  for (final prefix in ['[红包]', '[转账]', '[表情]', '[GIF]', '[贴纸]']) {
+    if (text.startsWith(prefix)) {
+      return prefix;
+    }
+  }
+  return '';
 }
 
 class _ContactTile extends StatelessWidget {

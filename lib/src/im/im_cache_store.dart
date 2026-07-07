@@ -20,6 +20,8 @@ class ImCacheStore {
   static const _clearPrefix = 'im_chat_clear_marker';
   static const _deletedPrefix = 'im_deleted_messages';
   static const _historySyncedPrefix = 'im_history_synced';
+  static const _stickerPacksPrefix = 'im_sticker_packs';
+  static const _stickerOwnedPrefix = 'im_sticker_owned';
 
   String readDraft({required String channelId, required int channelType}) {
     return _kv.decodeString(_draftKey(channelId, channelType)) ?? '';
@@ -506,6 +508,54 @@ class ImCacheStore {
     required int channelType,
   }) {
     _kv.removeValue(_historySyncedKey(uid, channelId, channelType));
+  }
+
+  List<Map<String, Object?>> readStickerPacks(String uid) {
+    return _readMapList('$_stickerPacksPrefix:$uid');
+  }
+
+  void writeStickerPacks({
+    required String uid,
+    required List<Map<String, Object?>> packs,
+  }) {
+    _kv.encodeString('$_stickerPacksPrefix:$uid', jsonEncode(packs));
+  }
+
+  Set<String> readOwnedStickerPackIds(String uid) {
+    final raw = _kv.decodeString('$_stickerOwnedPrefix:$uid');
+    if (raw == null || raw.isEmpty) {
+      return const {};
+    }
+    final decoded = jsonDecode(raw);
+    if (decoded is! List) {
+      return const {};
+    }
+    return decoded.map((item) => item.toString()).toSet();
+  }
+
+  void writeOwnedStickerPackIds({
+    required String uid,
+    required Iterable<String> packIds,
+  }) {
+    final normalized = packIds
+        .map((item) => item.trim())
+        .where((item) => item.isNotEmpty)
+        .toSet()
+        .toList(growable: false);
+    if (normalized.isEmpty) {
+      _kv.removeValue('$_stickerOwnedPrefix:$uid');
+      return;
+    }
+    _kv.encodeString('$_stickerOwnedPrefix:$uid', jsonEncode(normalized));
+  }
+
+  void addOwnedStickerPackId({required String uid, required String packId}) {
+    final normalized = packId.trim();
+    if (normalized.isEmpty) {
+      return;
+    }
+    final owned = readOwnedStickerPackIds(uid).toSet()..add(normalized);
+    writeOwnedStickerPackIds(uid: uid, packIds: owned);
   }
 
   String _draftKey(String channelId, int channelType) {

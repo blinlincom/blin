@@ -815,6 +815,45 @@ class ApiClient {
     );
   }
 
+  Future<Map<String, Object?>> stickerPacks({
+    required UserSession session,
+    required String device,
+    int page = 1,
+    int limit = 50,
+  }) {
+    return imBusinessAction(
+      action: 'im_sticker_packs',
+      session: session,
+      device: device,
+      params: {'page': page.toString(), 'limit': limit.toString()},
+    );
+  }
+
+  Future<Map<String, Object?>> stickerMine({
+    required UserSession session,
+    required String device,
+  }) {
+    return imBusinessAction(
+      action: 'im_sticker_mine',
+      session: session,
+      device: device,
+      params: const {},
+    );
+  }
+
+  Future<Map<String, Object?>> stickerPackBuy({
+    required UserSession session,
+    required String device,
+    required String packId,
+  }) {
+    return imBusinessAction(
+      action: 'im_sticker_pack_buy',
+      session: session,
+      device: device,
+      params: {'pack_id': packId},
+    );
+  }
+
   Future<Map<String, Object?>> imBusinessAction({
     required String action,
     required UserSession session,

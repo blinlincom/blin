@@ -17,6 +17,7 @@ class _Composer extends StatelessWidget {
     required this.onEmoji,
     required this.onTools,
     required this.onSend,
+    required this.onContentInserted,
   });
 
   final TextEditingController controller;
@@ -34,6 +35,7 @@ class _Composer extends StatelessWidget {
   final VoidCallback onEmoji;
   final VoidCallback onTools;
   final VoidCallback onSend;
+  final ValueChanged<KeyboardInsertedContent> onContentInserted;
 
   @override
   Widget build(BuildContext context) {
@@ -84,6 +86,16 @@ class _Composer extends StatelessWidget {
                         readOnly: !enabled,
                         enabled: enabled,
                         textInputAction: TextInputAction.send,
+                        contentInsertionConfiguration:
+                            ContentInsertionConfiguration(
+                              allowedMimeTypes: const [
+                                'image/gif',
+                                'image/png',
+                                'image/jpeg',
+                                'image/webp',
+                              ],
+                              onContentInserted: onContentInserted,
+                            ),
                         onSubmitted: (_) {
                           if (enabled) {
                             onSend();

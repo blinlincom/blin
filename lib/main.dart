@@ -1,3 +1,6 @@
+import 'dart:async';
+import 'dart:ui';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -14,25 +17,122 @@ import 'src/im/im_cache_store.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await SystemChrome.setPreferredOrientations([
-    DeviceOrientation.portraitUp,
-    DeviceOrientation.portraitDown,
-  ]);
-  await AppLogger.initialize();
-  final kv = await SecureCache.initialize();
-  final store = SessionStore(kv);
-  final api = ApiClient();
-  final imCache = ImCacheStore(kv);
-  final momentsCache = MomentsCacheStore(kv);
-  final im = BusinessImService(api: api, cache: imCache);
-  final chat = ChatFeatureService(api: api, cache: imCache);
-  final controller = SessionController(
-    api: api,
-    store: store,
-    im: im,
-    chat: chat,
-    cache: imCache,
-    momentsCache: momentsCache,
+  runApp(const _BootstrapApp());
+  FlutterError.onError = (details) {
+    AppLogger.error(
+      'bootstrap',
+      'flutter framework error',
+      error: details.exception,
+      stackTrace: details.stack,
+    );
+  };
+  PlatformDispatcher.instance.onError = (error, stackTrace) {
+    AppLogger.error(
+      'bootstrap',
+      'platform dispatcher error',
+      error: error,
+      stackTrace: stackTrace,
+    );
+    return true;
+  };
+  await runZonedGuarded(_initializeAndRun, (error, stackTrace) {
+    AppLogger.error(
+      'bootstrap',
+      'root zone error',
+      error: error,
+      stackTrace: stackTrace,
+    );
+  });
+}
+
+Future<void> _initializeAndRun() async {
+  unawaited(
+    SystemChrome.setPreferredOrientations([
+      DeviceOrientation.portraitUp,
+      DeviceOrientation.portraitDown,
+    ]),
   );
-  runApp(BimApp(controller: controller));
+  unawaited(
+    Future<void>.delayed(const Duration(seconds: 3), () {
+      AppLogger.warn('bootstrap', 'first frame watchdog still on bootstrap');
+    }),
+  );
+  try {
+    await AppLogger.initialize().timeout(const Duration(seconds: 2));
+    AppLogger.info('bootstrap', 'initialize start');
+    final kv = await SecureCache.initialize().timeout(
+      const Duration(seconds: 5),
+    );
+    final store = SessionStore(kv);
+    final api = ApiClient();
+    final imCache = ImCacheStore(kv);
+    final momentsCache = MomentsCacheStore(kv);
+    final im = BusinessImService(api: api, cache: imCache);
+    final chat = ChatFeatureService(api: api, cache: imCache);
+    final controller = SessionController(
+      api: api,
+      store: store,
+      im: im,
+      chat: chat,
+      cache: imCache,
+      momentsCache: momentsCache,
+    );
+    AppLogger.info('bootstrap', 'controller ready');
+    runApp(BimApp(controller: controller));
+  } catch (error, stackTrace) {
+    AppLogger.error(
+      'bootstrap',
+      'initialize failed',
+      error: error,
+      stackTrace: stackTrace,
+    );
+    runApp(_BootstrapApp(error: error.toString()));
+  }
+}
+
+class _BootstrapApp extends StatelessWidget {
+  const _BootstrapApp({this.error});
+
+  final String? error;
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      home: Scaffold(
+        backgroundColor: Colors.white,
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 32),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text(
+                  'BIM',
+                  style: TextStyle(
+                    color: Color(0xff111827),
+                    fontSize: 24,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0,
+                  ),
+                ),
+                if (error != null) ...[
+                  const SizedBox(height: 16),
+                  const Text(
+                    '启动失败，请查看本地日志',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: Color(0xffdc2626),
+                      fontSize: 14,
+                      height: 1.4,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }

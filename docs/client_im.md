@@ -98,6 +98,40 @@ flutter run \
 - `transfer`：`money`、`asset_type=money|integral`，群聊还必须传 `receiver_id`
 - `red_packet`：`money`、`asset_type=money|integral`，群聊可传 `packet_type=ordinary|luck|specified`、`quantity`、`receiver_id`
 
+### 表情、GIF 和贴纸
+
+聊天输入区内置三栏面板：`表情`、`贴纸`、`商店`。输入法自带 Unicode 表情按普通文本发送；支持富内容输入的系统键盘可插入 `image/gif`、`image/png`、`image/jpeg`、`image/webp`，客户端会写入临时文件后按 `gif` 或 `image` 发送，不再跳转单独页面。
+
+内置默认表情来自 `assets/emoji/emoji.xml` 和 `assets/emoji/default/`，发送 `content_type=emoji`，`secure_payload` 至少包含：
+
+```json
+{
+  "content": "[表情]",
+  "pack_id": "default",
+  "emoji_id": "0_0",
+  "emoji_code": "0_0",
+  "sticker_id": "0_0",
+  "emoji_asset": "assets/emoji/default/0_0.png",
+  "media": {
+    "pack_id": "default",
+    "format": "png",
+    "emoji_code": "0_0",
+    "sticker_id": "0_0",
+    "emoji_asset": "assets/emoji/default/0_0.png"
+  }
+}
+```
+
+动态贴纸按 `content_type=gif` 发送，静态贴纸按 `content_type=sticker` 发送。贴纸消息必须包含稳定的 `pack_id`、`sticker_id`，并包含 `url` 或 `media.url`；本地内置资源只允许 `pack_id=default` 使用 `assets/...`。客户端接收端会优先使用 `emoji_asset/sticker_asset`，其次使用 `url/media.url`，不会把 `[表情]`、`[GIF]`、`[贴纸]` 当成最终展示内容。
+
+表情商店接口必须走密文请求和密文响应：
+
+- `im_sticker_packs`：分页返回可用表情包，支持字段 `list/items/rows/records/packs/packages`。每个包需要 `pack_id`、`title/name`、`cover/cover_url`、`price/price_text`、`items/stickers`；每个贴纸需要 `sticker_id`、`name/title`、`url/file_url/image_url/gif_url`、`format`、`animated`。
+- `im_sticker_mine`：返回当前用户已拥有包，可返回包对象列表，也可返回 `pack_ids/ids/owned_pack_ids`。
+- `im_sticker_pack_buy`：购买或添加表情包，参数 `pack_id`。免费包也必须走该接口写入用户拥有关系，客户端不本地伪造拥有状态。
+
+客户端会把表情包列表和已拥有包 ID 缓存到加密 MMKV。商店接口不可用时，`商店` 页直接显示接口错误；`贴纸` 页只展示已缓存且已拥有的贴纸包，不生成假数据。会话列表摘要中 `[表情]`、`[GIF]`、`[贴纸]` 使用媒体前缀样式显示，聊天气泡内展示真实图片/GIF，并在发送中显示上传进度，失败时点击重发。
+
 客户端生成唯一 `client_msg_no`，格式为 `bim_{userId}_{timestamp随机串}`。同一条消息只生成一次，避免重复文本触发 `client_msg_no已被其它消息内容占用`。
 
 发送时客户端先写入 MMKV 本地“发送中”消息，业务端返回后按同一 `client_msg_no` 合并为“已发送”或“队列中”。网络或超时类错误最多重试 3 次，重试复用同一个 `client_msg_no` 但重新生成 `nonce/sign`；业务拒绝不重试。接收方和发送方的服务端推送都通过实时长连接进入本地缓存。

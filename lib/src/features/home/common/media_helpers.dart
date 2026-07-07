@@ -185,12 +185,6 @@ Future<List<Directory>> _candidateFileDirectories() async {
 List<ActionInputField> _mediaFields(String contentType) {
   final fields = <ActionInputField>[];
   switch (contentType) {
-    case ChatContentTypes.emoji:
-      fields.add(const ActionInputField(id: 'emoji_code', label: '表情编码'));
-      break;
-    case ChatContentTypes.sticker:
-      fields.add(const ActionInputField(id: 'sticker_id', label: '贴纸 ID'));
-      break;
     case ChatContentTypes.video:
       fields.add(
         const ActionInputField(

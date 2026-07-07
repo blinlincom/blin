@@ -269,18 +269,17 @@ class _MessageBubbleContent extends StatelessWidget {
         isGroupMessage: isGroupMessage,
         onRetry: onRetry,
       ),
-      ChatContentTypes.gif => _MediaPreview(
-        icon: Icons.gif_box_outlined,
-        title: content.isEmpty ? 'GIF' : content,
-        subtitle: _value(payload, ['url', 'file_path']),
-        isMe: isMe,
-      ),
-      ChatContentTypes.sticker => _StickerPreview(
-        text: _value(payload, ['sticker_id', 'emoji_code'], fallback: content),
+      ChatContentTypes.gif || ChatContentTypes.sticker => _EmojiMessagePreview(
+        payload: payload,
+        content: content,
+        status: status,
+        onRetry: onRetry,
       ),
       ChatContentTypes.emoji => _EmojiMessagePreview(
         payload: payload,
         content: content,
+        status: status,
+        onRetry: onRetry,
       ),
       ChatContentTypes.voice => _VoicePreview(
         payload: payload,
@@ -461,25 +460,6 @@ class _QuoteMessagePreview extends StatelessWidget {
             ),
           ),
         ),
-      ),
-    );
-  }
-}
-
-class _StickerPreview extends StatelessWidget {
-  const _StickerPreview({required this.text});
-
-  final String text;
-
-  @override
-  Widget build(BuildContext context) {
-    return Text(
-      text.isEmpty ? '[贴纸]' : text,
-      style: const TextStyle(
-        color: _textColor,
-        fontSize: 22,
-        fontWeight: FontWeight.w700,
-        height: 1.25,
       ),
     );
   }

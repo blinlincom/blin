@@ -1,86 +1,72 @@
 part of 'package:bim/src/features/home/home_page.dart';
 
-class _MediaPreview extends StatelessWidget {
-  const _MediaPreview({
-    required this.icon,
-    required this.title,
-    required this.subtitle,
-    required this.isMe,
-  });
-
-  final IconData icon;
-  final String title;
-  final String subtitle;
-  final bool isMe;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Icon(icon, color: _textColor, size: 24),
-        const SizedBox(width: 8),
-        Flexible(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                title,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  color: _textColor,
-                  fontSize: 15,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-              if (subtitle.isNotEmpty)
-                Padding(
-                  padding: const EdgeInsets.only(top: 3),
-                  child: Text(
-                    subtitle,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: isMe
-                          ? const Color(0xff477a35)
-                          : const Color(0xff8b929e),
-                      fontSize: 12,
-                    ),
-                  ),
-                ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-}
-
 class _EmojiMessagePreview extends StatelessWidget {
-  const _EmojiMessagePreview({required this.payload, required this.content});
+  const _EmojiMessagePreview({
+    required this.payload,
+    required this.content,
+    required this.status,
+    required this.onRetry,
+  });
 
   final Map<String, Object?> payload;
   final String content;
+  final String status;
+  final VoidCallback onRetry;
 
   @override
   Widget build(BuildContext context) {
     final asset = _emojiAssetForPayload(payload);
-    if (asset.isNotEmpty) {
-      return SizedBox(
-        width: 42,
-        height: 42,
-        child: Image.asset(
-          asset,
-          fit: BoxFit.contain,
-          gaplessPlayback: true,
-          filterQuality: FilterQuality.none,
-          errorBuilder: (_, __, ___) => _fallbackText,
+    final url = _normalizeAvatarUrl(
+      _value(
+        payload,
+        ['url', 'file_url', 'image_url', 'gif_url'],
+        fallback: _value(_asObjectMap(payload['media']), [
+          'url',
+          'file_url',
+          'image_url',
+          'gif_url',
+        ]),
+      ),
+    );
+    final image = asset.isNotEmpty
+        ? Image.asset(
+            asset,
+            fit: BoxFit.contain,
+            gaplessPlayback: true,
+            filterQuality: FilterQuality.medium,
+            errorBuilder: (_, __, ___) => _fallbackText,
+          )
+        : url.isNotEmpty
+        ? Image.network(
+            url,
+            fit: BoxFit.contain,
+            gaplessPlayback: true,
+            filterQuality: FilterQuality.medium,
+            loadingBuilder: _mediaLoadingBuilder,
+            errorBuilder: (_, __, ___) => _fallbackText,
+          )
+        : _fallbackText;
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(8),
+      child: SizedBox(
+        width: 96,
+        height: 96,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            DecoratedBox(
+              decoration: const BoxDecoration(color: Color(0xfff4f5f7)),
+              child: Center(child: image),
+            ),
+            _MediaUploadOverlay(
+              status: status,
+              progress: _uploadProgress(payload),
+              onRetry: onRetry,
+            ),
+          ],
         ),
-      );
-    }
-    return _fallbackText;
+      ),
+    );
   }
 
   Widget get _fallbackText {

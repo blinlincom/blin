@@ -33,6 +33,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   final Map<String, GlobalKey> _messageRowKeys = <String, GlobalKey>{};
   bool _toolsOpen = false;
   bool _emojiOpen = false;
+  int _emojiInitialTab = 0;
   bool _voiceMode = false;
   bool _voiceRecording = false;
   bool _voiceStartPending = false;
@@ -1592,19 +1593,20 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     }
   }
 
-  void _toggleEmojiPanel() {
+  void _toggleEmojiPanel({int initialTab = 0}) {
     if (!_composerEnabled) {
       setState(() => _message = _groupMuteText(_groupMuteState));
       return;
     }
-    final opening = !_emojiOpen;
+    final opening = !_emojiOpen || _emojiInitialTab != initialTab;
     if (opening) {
       FocusScope.of(context).unfocus();
     }
     _clearSelectedMessageMenu();
     setState(() {
+      _emojiInitialTab = initialTab;
       _emojiOpen = opening;
-      if (opening) {
+      if (_emojiOpen) {
         _toolsOpen = false;
         _voiceMode = false;
       }
@@ -1775,9 +1777,13 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                           onEmoji: _toggleEmojiPanel,
                           onTools: _toggleTools,
                           onSend: _sendText,
+                          onContentInserted: _handleKeyboardInsertedContent,
                         ),
                         if (_emojiOpen)
                           _EmojiPanel(
+                            key: ValueKey(_emojiInitialTab),
+                            controller: widget.controller,
+                            initialTab: _emojiInitialTab,
                             onSelected: (payload) =>
                                 unawaited(_sendEmoji(payload)),
                           ),
@@ -1786,9 +1792,8 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                             isGroup: _isGroup,
                             onTextOption: _openTextOptions,
                             onImage: () => _sendMedia(ChatContentTypes.image),
-                            onEmoji: _toggleEmojiPanel,
-                            onSticker: () =>
-                                _sendMedia(ChatContentTypes.sticker),
+                            onEmoji: () => _toggleEmojiPanel(initialTab: 0),
+                            onSticker: () => _toggleEmojiPanel(initialTab: 1),
                             onVideo: () => _sendMedia(ChatContentTypes.video),
                             onFile: () => _sendMedia(ChatContentTypes.file),
                             onContactCard: _sendContactCard,
@@ -2156,6 +2161,62 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     }
   }
 
+  Future<void> _handleKeyboardInsertedContent(
+    KeyboardInsertedContent content,
+  ) async {
+    if (!_composerEnabled) {
+      setState(() => _message = _groupMuteText(_groupMuteState));
+      return;
+    }
+    final mime = content.mimeType.toLowerCase();
+    AppLogger.info(
+      'ui',
+      'keyboard content inserted',
+      data: {
+        'mime': mime,
+        'uri_len': content.uri.length,
+        'has_data': content.hasData,
+        'data_len': content.data?.length ?? 0,
+      },
+    );
+    final bytes = content.data;
+    if (bytes == null || bytes.isEmpty) {
+      setState(() => _error = '输入法内容无法读取');
+      return;
+    }
+    final contentType = mime.contains('gif')
+        ? ChatContentTypes.gif
+        : ChatContentTypes.image;
+    final ext = _keyboardContentExtension(mime);
+    final dir = await getTemporaryDirectory();
+    final file = File(
+      '${dir.path}/bim_keyboard_${DateTime.now().microsecondsSinceEpoch}$ext',
+    );
+    await file.writeAsBytes(bytes, flush: true);
+    await _sendMediaPayload(contentType, <String, String>{
+      'file_path': file.path,
+      'mime': mime,
+      'name': file.uri.pathSegments.isEmpty
+          ? 'keyboard$ext'
+          : file.uri.pathSegments.last,
+      'source': 'keyboard',
+      'content': contentType == ChatContentTypes.gif ? '[GIF]' : '[图片]',
+    });
+  }
+
+  String _keyboardContentExtension(String mime) {
+    if (mime.contains('gif')) {
+      return '.gif';
+    }
+    if (mime.contains('webp')) {
+      return '.webp';
+    }
+    if (mime.contains('png')) {
+      return '.png';
+    }
+    return '.jpg';
+  }
+
   List<Map<String, String>> _mediaPayloadBatch(Map<String, String> data) {
     final batchJson = data['batch_json'];
     if (batchJson == null || batchJson.isEmpty) {
@@ -2230,17 +2291,58 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       setState(() => _message = _groupMuteText(_groupMuteState));
       return;
     }
+    final kind = (data['kind'] ?? ChatContentTypes.emoji).trim();
+    final contentType = switch (kind) {
+      ChatContentTypes.gif => ChatContentTypes.gif,
+      ChatContentTypes.sticker => ChatContentTypes.sticker,
+      _ => ChatContentTypes.emoji,
+    };
     final emojiId = (data['emoji_id'] ?? '').trim();
-    final emojiAsset = (data['emoji_asset'] ?? '').trim();
-    if (emojiId.isEmpty || emojiAsset.isEmpty) {
+    final stickerId = (data['sticker_id'] ?? emojiId).trim();
+    final itemId = stickerId.isNotEmpty ? stickerId : emojiId;
+    final emojiAsset = (data['emoji_asset'] ?? data['sticker_asset'] ?? '')
+        .trim();
+    final url = (data['url'] ?? '').trim();
+    if (itemId.isEmpty || (emojiAsset.isEmpty && url.isEmpty)) {
       setState(() => _error = '表情数据无效');
       return;
     }
+    final packId = (data['pack_id'] ?? 'default').trim();
+    final format = (data['format'] ?? '').trim();
+    final animated =
+        data['animated'] == '1' ||
+        data['animated']?.toLowerCase() == 'true' ||
+        contentType == ChatContentTypes.gif ||
+        format.toLowerCase() == 'gif' ||
+        format.toLowerCase() == 'webp';
+    final content = switch (contentType) {
+      ChatContentTypes.gif => '[GIF]',
+      ChatContentTypes.sticker => '[贴纸]',
+      _ => '[表情]',
+    };
     final params = <String, Object?>{
-      'emoji_id': emojiId,
-      'emoji_code': emojiId,
+      'pack_id': packId.isEmpty ? 'default' : packId,
+      if (format.isNotEmpty) 'format': format,
+      'animated': animated ? '1' : '0',
+      if (emojiId.isNotEmpty) 'emoji_id': emojiId,
+      'emoji_code': itemId,
+      'sticker_id': itemId,
       'emoji_asset': emojiAsset,
-      'content': '[表情]',
+      'sticker_asset': emojiAsset,
+      if (url.isNotEmpty) 'url': url,
+      'content': content,
+      'media': {
+        'pack_id': packId.isEmpty ? 'default' : packId,
+        if (format.isNotEmpty) 'format': format,
+        'animated': animated ? 1 : 0,
+        if (emojiId.isNotEmpty) 'emoji_id': emojiId,
+        'emoji_code': itemId,
+        'sticker_id': itemId,
+        if (emojiAsset.isNotEmpty) 'emoji_asset': emojiAsset,
+        if (emojiAsset.isNotEmpty) 'sticker_asset': emojiAsset,
+        if (url.isNotEmpty) 'url': url,
+        'asset': emojiAsset,
+      },
     };
     if (_replyQuote.isNotEmpty) {
       params['quote'] = Map<String, Object?>.from(_replyQuote);
@@ -2260,8 +2362,12 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       data: {
         'channel_id': widget.channelId,
         'channel_type': widget.channelType,
+        'content_type': contentType,
         'emoji_id': emojiId,
+        'sticker_id': itemId,
+        'animated': animated,
         'emoji_asset': emojiAsset,
+        'has_url': url.isNotEmpty,
       },
     );
     await _runSending(
@@ -2270,13 +2376,13 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
           await widget.controller.sendGroupMedia(
             groupId: _groupId,
             channelId: widget.channelId,
-            contentType: ChatContentTypes.emoji,
+            contentType: contentType,
             params: params,
           );
         } else {
           await widget.controller.sendPrivateMedia(
             receiverId: _receiverId,
-            contentType: ChatContentTypes.emoji,
+            contentType: contentType,
             params: params,
           );
         }
@@ -2555,7 +2661,12 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       return Future.value(null);
     }
     if (contentType == ChatContentTypes.emoji) {
-      _toggleEmojiPanel();
+      _toggleEmojiPanel(initialTab: 0);
+      return Future.value(null);
+    }
+    if (contentType == ChatContentTypes.sticker ||
+        contentType == ChatContentTypes.gif) {
+      _toggleEmojiPanel(initialTab: 1);
       return Future.value(null);
     }
     if (contentType == ChatContentTypes.image ||
@@ -2653,6 +2764,9 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       return () => _redialFromCallMessage(item);
     }
     if (contentType == ChatContentTypes.image ||
+        contentType == ChatContentTypes.emoji ||
+        contentType == ChatContentTypes.gif ||
+        contentType == ChatContentTypes.sticker ||
         contentType == ChatContentTypes.video ||
         contentType == ChatContentTypes.file) {
       return () => _openMediaMessage(item);

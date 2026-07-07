@@ -49,11 +49,17 @@ class _ChatMediaItem {
   }
 
   bool get isImage => contentType == ChatContentTypes.image;
+  bool get isImageLike =>
+      contentType == ChatContentTypes.image ||
+      contentType == ChatContentTypes.emoji ||
+      contentType == ChatContentTypes.gif ||
+      contentType == ChatContentTypes.sticker;
   bool get isVideo => contentType == ChatContentTypes.video;
   bool get isFile => contentType == ChatContentTypes.file;
+  bool get isAsset => localPath.startsWith('assets/');
   bool get hasRemote => url.isNotEmpty;
   String get existingLocalPath {
-    if (localPath.isEmpty) {
+    if (localPath.isEmpty || isAsset) {
       return '';
     }
     try {
@@ -63,7 +69,7 @@ class _ChatMediaItem {
     }
   }
 
-  bool get hasSource => existingLocalPath.isNotEmpty || hasRemote;
+  bool get hasSource => isAsset || existingLocalPath.isNotEmpty || hasRemote;
 
   String get displaySize => _fileSizeLabel(size);
   String get displayDuration =>
@@ -77,7 +83,7 @@ class _MediaViewerPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (media.isImage) {
+    if (media.isImageLike) {
       return _ImageMediaViewerPage(media: media);
     }
     if (media.isVideo) {
@@ -127,7 +133,15 @@ class _ImageMediaViewerPageState extends State<_ImageMediaViewerPage> {
   @override
   Widget build(BuildContext context) {
     final localPath = widget.media.existingLocalPath;
-    final image = localPath.isNotEmpty
+    final image = widget.media.isAsset
+        ? Image.asset(
+            widget.media.localPath,
+            fit: BoxFit.contain,
+            gaplessPlayback: true,
+            errorBuilder: (_, __, ___) =>
+                const _FullScreenMediaError(text: '图片无法显示'),
+          )
+        : localPath.isNotEmpty
         ? Image.file(
             File(localPath),
             fit: BoxFit.contain,
@@ -863,12 +877,25 @@ String _mediaLocalPath(
   final keys = switch (contentType) {
     ChatContentTypes.video => ['file_path', 'video_file_path', 'local_path'],
     ChatContentTypes.file => ['file_path', 'local_path', 'path'],
+    ChatContentTypes.emoji ||
+    ChatContentTypes.gif ||
+    ChatContentTypes.sticker => [
+      'file_path',
+      'image_file_path',
+      'local_path',
+      'emoji_asset',
+      'sticker_asset',
+      'asset',
+    ],
     _ => ['file_path', 'image_file_path', 'local_path'],
   };
   for (final key in keys) {
     final value = _value(payload, [key], fallback: _value(media, [key]));
     if (value.isEmpty || _isRemoteResource(value)) {
       continue;
+    }
+    if (value.startsWith('assets/')) {
+      return value;
     }
     if (_isLikelyLocalPath(value)) {
       return value;
@@ -891,6 +918,17 @@ String _mediaRemoteUrl(
       'file_path',
     ],
     ChatContentTypes.file => ['file_url', 'url', 'file_path', 'path'],
+    ChatContentTypes.emoji ||
+    ChatContentTypes.gif ||
+    ChatContentTypes.sticker => [
+      'url',
+      'file_url',
+      'image_url',
+      'gif_url',
+      'emoji_url',
+      'sticker_url',
+      'path',
+    ],
     _ => ['image_url', 'url', 'image_path', 'file_url', 'file_path'],
   };
   for (final key in keys) {
@@ -1003,7 +1041,10 @@ Future<List<Directory>> _mediaDownloadDirectories(String contentType) async {
   }
 
   final child = switch (contentType) {
-    ChatContentTypes.image => 'Images',
+    ChatContentTypes.image ||
+    ChatContentTypes.emoji ||
+    ChatContentTypes.gif ||
+    ChatContentTypes.sticker => 'Images',
     ChatContentTypes.video => 'Videos',
     ChatContentTypes.file => 'Files',
     _ => 'Media',
@@ -1039,6 +1080,9 @@ String _safeDownloadFileName(_ChatMediaItem media) {
   if (name.isEmpty || name == '[图片]' || name == '[视频]' || name == '[文件]') {
     name = switch (media.contentType) {
       ChatContentTypes.image => 'image',
+      ChatContentTypes.emoji => 'emoji',
+      ChatContentTypes.gif => 'gif',
+      ChatContentTypes.sticker => 'sticker',
       ChatContentTypes.video => 'video',
       ChatContentTypes.file => 'file',
       _ => 'media',

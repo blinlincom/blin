@@ -78,6 +78,7 @@ class BusinessImService extends ChangeNotifier {
   bool _connecting = false;
   bool _foreground = true;
   bool _backgroundKeepAliveEnabled = true;
+  bool _authInvalid = false;
   bool _gatewayAckDraining = false;
   int _reconnectAttempt = 0;
   int _conversationVersion = 0;
@@ -229,6 +230,7 @@ class BusinessImService extends ChangeNotifier {
     }
     _manualStop = false;
     _started = true;
+    _authInvalid = false;
     _backgroundKeepAliveEnabled = backgroundKeepAliveEnabled;
     _session = session;
     _device = device;
@@ -289,6 +291,7 @@ class BusinessImService extends ChangeNotifier {
     _manualStop = true;
     _started = false;
     _connecting = false;
+    _authInvalid = false;
     _reconnectTimer?.cancel();
     _reconnectTimer = null;
     final gatewayStream = _gatewayStream;
@@ -357,7 +360,16 @@ class BusinessImService extends ChangeNotifier {
   }
 
   void resumeConnection() {
-    if (!_started || _session == null) {
+    if (!_started || _authInvalid || _session == null) {
+      AppLogger.info(
+        'im',
+        'resume realtime skipped',
+        data: {
+          'started': _started,
+          'auth_invalid': _authInvalid,
+          'has_session': _session != null,
+        },
+      );
       return;
     }
     _foreground = true;
@@ -2643,8 +2655,6 @@ class BusinessImService extends ChangeNotifier {
     } catch (error, stackTrace) {
       _connecting = false;
       await _closeRealtimeOnly();
-      _lastError = error.toString();
-      _setStatus('连接失败');
       AppLogger.error(
         'im',
         'gateway stream connect failed',
@@ -2652,12 +2662,12 @@ class BusinessImService extends ChangeNotifier {
         stackTrace: stackTrace,
       );
       if (error is ApiException && (error.code == 401 || error.code == 403)) {
-        AppLogger.warn(
-          'im',
-          'gateway auth refresh failed, keep session alive',
-          data: {'code': error.code, 'message': error.message},
-        );
+        _lastError = null;
+        _markRealtimeAuthInvalid(error, 'connect_failed');
+        return;
       }
+      _lastError = error.toString();
+      _setStatus('连接失败');
       _scheduleReconnect('connect_failed');
     }
   }
@@ -3385,16 +3395,11 @@ class BusinessImService extends ChangeNotifier {
           clientMsgNos: clientMsgNos,
         );
       } on ApiException catch (error) {
-        if (error.code != 401) {
+        if (error.code != 401 && error.code != 403) {
           rethrow;
         }
-        ticket = await _ensureGatewayAckTicket(force: true);
-        await _api.ackGatewayCursor(
-          ackUrl: _gatewayAckUrl,
-          ticket: ticket,
-          lastCursor: frame.cursor,
-          clientMsgNos: clientMsgNos,
-        );
+        _markRealtimeAuthInvalid(error, 'gateway_ack');
+        return false;
       }
       _cache.writeGatewayCursor(
         uid: chat.uid,
@@ -3426,6 +3431,25 @@ class BusinessImService extends ChangeNotifier {
       );
       return false;
     }
+  }
+
+  void _markRealtimeAuthInvalid(ApiException error, String source) {
+    _authInvalid = true;
+    _started = false;
+    _manualStop = true;
+    _connecting = false;
+    _reconnectTimer?.cancel();
+    _reconnectTimer = null;
+    _gatewayAckQueue.clear();
+    _gatewayAckDraining = false;
+    _lastError = null;
+    _setStatus('未登录');
+    unawaited(_closeRealtimeOnly());
+    AppLogger.warn(
+      'im',
+      'gateway auth invalid, stop realtime reconnect',
+      data: {'source': source, 'code': error.code, 'message': error.message},
+    );
   }
 
   Future<String> _ensureGatewayAckTicket({bool force = false}) async {
@@ -3474,14 +3498,18 @@ class BusinessImService extends ChangeNotifier {
   void _scheduleReconnect(String source) {
     if (!_started ||
         _manualStop ||
+        _authInvalid ||
         (!_foreground && !_backgroundKeepAliveEnabled)) {
       AppLogger.info(
         'im',
-        'skip gateway reconnect while backgrounded',
+        'skip gateway reconnect',
         data: {
           'source': source,
           'foreground': _foreground,
           'background_keep_alive_enabled': _backgroundKeepAliveEnabled,
+          'auth_invalid': _authInvalid,
+          'started': _started,
+          'manual_stop': _manualStop,
         },
       );
       return;
@@ -5450,14 +5478,20 @@ class BusinessImService extends ChangeNotifier {
         channelId: channelId,
         channelType: channelType,
         message: updated,
+        includeConversation: false,
       );
       handled = true;
     }
     if (handled) {
-      _markMessageChannel(
-        source: source,
-        channelId: channelId,
-        channelType: channelType,
+      AppLogger.info(
+        'im',
+        'read receipt applied without channel reload',
+        data: {
+          'source': source,
+          'channel_id': channelId,
+          'channel_type': channelType,
+          'target_count': targets.length,
+        },
       );
     }
     return handled;
@@ -5749,11 +5783,14 @@ class BusinessImService extends ChangeNotifier {
     required String channelId,
     required int channelType,
     required Map<String, Object?> message,
+    bool includeConversation = true,
   }) {
     if (_messageEvents.isClosed) {
       return;
     }
-    final conversation = _conversationForChannel(channelId, channelType);
+    final conversation = includeConversation
+        ? _conversationForChannel(channelId, channelType)
+        : const <String, Object?>{};
     AppLogger.info(
       'im',
       'message event published',
@@ -5761,6 +5798,7 @@ class BusinessImService extends ChangeNotifier {
         'source': source,
         'channel_id': channelId,
         'channel_type': channelType,
+        'include_conversation': includeConversation,
         'has_conversation': conversation.isNotEmpty,
         'message': _messageLogSummary(message),
       },
@@ -6834,7 +6872,9 @@ class BusinessImService extends ChangeNotifier {
     Map<String, Object?> payload,
   ) {
     final normalized = Map<String, Object?>.from(payload);
-    if (contentType != ChatContentTypes.emoji) {
+    if (contentType != ChatContentTypes.emoji &&
+        contentType != ChatContentTypes.gif &&
+        contentType != ChatContentTypes.sticker) {
       return normalized;
     }
     final media = _asMap(normalized['media']);
@@ -6843,36 +6883,69 @@ class BusinessImService extends ChangeNotifier {
       'emoji_code',
       'sticker_id',
     ], fallback: _value(media, ['emoji_id', 'emoji_code', 'sticker_id']));
-    final emojiAsset = _value(normalized, [
-      'emoji_asset',
-      'asset',
-      'emoji_path',
-    ], fallback: _value(media, ['emoji_asset', 'asset', 'emoji_path']));
+    final emojiAsset = _value(
+      normalized,
+      ['emoji_asset', 'asset', 'emoji_path', 'sticker_asset'],
+      fallback: _value(media, [
+        'emoji_asset',
+        'asset',
+        'emoji_path',
+        'sticker_asset',
+      ]),
+    );
+    final url = _value(normalized, [
+      'url',
+      'file_url',
+      'image_url',
+      'gif_url',
+    ], fallback: _value(media, ['url', 'file_url', 'image_url', 'gif_url']));
+    final content = switch (contentType) {
+      ChatContentTypes.gif => '[GIF]',
+      ChatContentTypes.sticker => '[贴纸]',
+      _ => '[表情]',
+    };
     normalized
-      ..['content'] = '[表情]'
+      ..['content'] = content
       ..remove('text')
       ..remove('emoji_label')
       ..remove('content_preview');
     if (emojiId.isNotEmpty) {
       normalized
         ..['emoji_id'] = emojiId
-        ..['emoji_code'] = emojiId;
+        ..['emoji_code'] = emojiId
+        ..['sticker_id'] = _value(normalized, [
+          'sticker_id',
+        ], fallback: emojiId);
     }
     if (emojiAsset.isNotEmpty) {
-      normalized['emoji_asset'] = emojiAsset;
+      normalized
+        ..['emoji_asset'] = emojiAsset
+        ..['sticker_asset'] = emojiAsset;
     }
-    if (media.isNotEmpty) {
-      final nextMedia = Map<String, Object?>.from(media);
-      if (emojiId.isNotEmpty) {
-        nextMedia
-          ..['emoji_id'] = emojiId
-          ..['emoji_code'] = emojiId;
-      }
-      if (emojiAsset.isNotEmpty) {
-        nextMedia['emoji_asset'] = emojiAsset;
-      }
-      normalized['media'] = nextMedia;
+    if (url.isNotEmpty) {
+      normalized['url'] = url;
     }
+    normalized.putIfAbsent('pack_id', () => _value(media, ['pack_id']));
+    normalized.putIfAbsent('format', () => _value(media, ['format']));
+    final nextMedia = Map<String, Object?>.from(media);
+    if (emojiId.isNotEmpty) {
+      nextMedia
+        ..['emoji_id'] = emojiId
+        ..['emoji_code'] = emojiId
+        ..['sticker_id'] = _value(nextMedia, ['sticker_id'], fallback: emojiId);
+    }
+    if (emojiAsset.isNotEmpty) {
+      nextMedia
+        ..['emoji_asset'] = emojiAsset
+        ..['sticker_asset'] = emojiAsset
+        ..['asset'] = emojiAsset;
+    }
+    if (url.isNotEmpty) {
+      nextMedia['url'] = url;
+    }
+    nextMedia.putIfAbsent('pack_id', () => _value(normalized, ['pack_id']));
+    nextMedia.putIfAbsent('format', () => _value(normalized, ['format']));
+    normalized['media'] = nextMedia;
     return normalized;
   }
 
