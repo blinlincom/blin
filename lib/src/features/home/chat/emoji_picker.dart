@@ -44,21 +44,32 @@ String _decodeXmlAttribute(String value) {
 }
 
 String _emojiAssetForPayload(Map<String, Object?> payload) {
-  return _value(
+  final asset = _value(
     payload,
     ['emoji_asset', 'asset', 'emoji_path'],
     fallback: _value(_asObjectMap(payload['media']), ['emoji_asset', 'asset']),
   );
+  if (asset.isNotEmpty) {
+    return asset;
+  }
+  final id = _value(payload, ['emoji_id']);
+  if (RegExp(r'^[a-zA-Z0-9_./-]+$').hasMatch(id)) {
+    final file = id.endsWith('.png') ? id : '$id.png';
+    return '$_emojiAssetRoot/$file';
+  }
+  return '';
 }
 
-class _EmojiPickerPage extends StatefulWidget {
-  const _EmojiPickerPage();
+class _EmojiPanel extends StatefulWidget {
+  const _EmojiPanel({required this.onSelected});
 
   @override
-  State<_EmojiPickerPage> createState() => _EmojiPickerPageState();
+  State<_EmojiPanel> createState() => _EmojiPanelState();
+
+  final ValueChanged<Map<String, String>> onSelected;
 }
 
-class _EmojiPickerPageState extends State<_EmojiPickerPage> {
+class _EmojiPanelState extends State<_EmojiPanel> {
   late final Future<List<_EmojiAsset>> _future;
 
   @override
@@ -69,14 +80,31 @@ class _EmojiPickerPageState extends State<_EmojiPickerPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('选择表情')),
-      body: SafeArea(
+    final width = MediaQuery.sizeOf(context).width;
+    final columns = width >= 700
+        ? 10
+        : width >= 520
+        ? 8
+        : 7;
+    return Container(
+      height: BimDimensions.chatToolsPanel,
+      decoration: const BoxDecoration(
+        color: _surfaceColor,
+        border: Border(top: BorderSide(color: _lightBorderColor)),
+      ),
+      child: SafeArea(
+        top: false,
         child: FutureBuilder<List<_EmojiAsset>>(
           future: _future,
           builder: (context, snapshot) {
             if (snapshot.connectionState != ConnectionState.done) {
-              return const Center(child: CircularProgressIndicator());
+              return const Center(
+                child: SizedBox(
+                  width: 22,
+                  height: 22,
+                  child: CircularProgressIndicator(strokeWidth: 2.2),
+                ),
+              );
             }
             if (snapshot.hasError) {
               return _ErrorState(text: snapshot.error.toString());
@@ -86,9 +114,10 @@ class _EmojiPickerPageState extends State<_EmojiPickerPage> {
               return const _EmptyRow(text: '暂无表情');
             }
             return GridView.builder(
-              padding: const EdgeInsets.fromLTRB(12, 12, 12, 24),
-              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 7,
+              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+              padding: const EdgeInsets.fromLTRB(12, 12, 12, 18),
+              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: columns,
                 mainAxisSpacing: 8,
                 crossAxisSpacing: 8,
                 childAspectRatio: 1,
@@ -98,21 +127,21 @@ class _EmojiPickerPageState extends State<_EmojiPickerPage> {
                 final item = items[index];
                 return Semantics(
                   button: true,
-                  label: '发送表情 ${item.tag}',
+                  label: '发送表情 ${item.id}',
                   child: InkWell(
-                    onTap: () => Navigator.of(context).pop(<String, String>{
+                    onTap: () => widget.onSelected(<String, String>{
                       'emoji_id': item.id,
-                      'emoji_code': item.tag,
                       'emoji_asset': item.asset,
-                      'content': item.tag,
+                      'content': '[表情]',
                     }),
                     borderRadius: BorderRadius.circular(BimRadius.sm),
                     child: Padding(
-                      padding: const EdgeInsets.all(6),
+                      padding: const EdgeInsets.all(7),
                       child: Image.asset(
                         item.asset,
                         fit: BoxFit.contain,
                         gaplessPlayback: true,
+                        filterQuality: FilterQuality.none,
                         errorBuilder: (_, __, ___) => Center(
                           child: Text(
                             item.tag,

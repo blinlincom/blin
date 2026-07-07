@@ -14,6 +14,11 @@ Future<Map<String, String>?> _openInput(
 
 Future<void> _push(BuildContext context, Widget page) async {
   if (page is LiveKitCallPage) {
+    final host = CallHostScope.maybeOf(context);
+    if (host != null) {
+      host.showCall(page);
+      return;
+    }
     await Navigator.of(context).push(_callPageRoute(page));
     return;
   }

@@ -7,6 +7,7 @@ class _Composer extends StatelessWidget {
     required this.enabled,
     required this.disabledText,
     required this.toolsOpen,
+    required this.emojiOpen,
     required this.voiceMode,
     required this.recording,
     required this.onVoice,
@@ -23,6 +24,7 @@ class _Composer extends StatelessWidget {
   final bool enabled;
   final String disabledText;
   final bool toolsOpen;
+  final bool emojiOpen;
   final bool voiceMode;
   final bool recording;
   final VoidCallback onVoice;
@@ -124,8 +126,10 @@ class _Composer extends StatelessWidget {
             ),
             const SizedBox(width: 6),
             _ComposerIconButton(
-              tooltip: '表情',
-              icon: Icons.sentiment_satisfied_alt,
+              tooltip: emojiOpen ? '键盘' : '表情',
+              icon: emojiOpen
+                  ? Icons.keyboard_alt_outlined
+                  : Icons.sentiment_satisfied_alt,
               onPressed: !enabled ? null : onEmoji,
             ),
             const SizedBox(width: 4),
@@ -202,8 +206,36 @@ class _VoiceRecordButton extends StatefulWidget {
   State<_VoiceRecordButton> createState() => _VoiceRecordButtonState();
 }
 
-class _VoiceRecordButtonState extends State<_VoiceRecordButton> {
+class _VoiceRecordButtonState extends State<_VoiceRecordButton>
+    with SingleTickerProviderStateMixin {
   bool _canceling = false;
+  late final AnimationController _waveController;
+
+  @override
+  void initState() {
+    super.initState();
+    _waveController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 900),
+    );
+  }
+
+  @override
+  void didUpdateWidget(covariant _VoiceRecordButton oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.recording && !_waveController.isAnimating) {
+      _waveController.repeat();
+    } else if (!widget.recording && _waveController.isAnimating) {
+      _waveController.stop();
+      _waveController.reset();
+    }
+  }
+
+  @override
+  void dispose() {
+    _waveController.dispose();
+    super.dispose();
+  }
 
   void _updateCancel(Offset globalPosition) {
     final box = context.findRenderObject() as RenderBox?;
@@ -217,6 +249,7 @@ class _VoiceRecordButtonState extends State<_VoiceRecordButton> {
         local.dx > box.size.width + 18 ||
         local.dy > box.size.height + 24;
     if (next != _canceling && mounted) {
+      HapticFeedback.selectionClick();
       setState(() => _canceling = next);
     }
   }
@@ -243,6 +276,7 @@ class _VoiceRecordButtonState extends State<_VoiceRecordButton> {
       behavior: HitTestBehavior.opaque,
       onLongPressStart: widget.enabled
           ? (details) {
+              HapticFeedback.lightImpact();
               setState(() => _canceling = false);
               widget.onStart();
             }
@@ -270,22 +304,78 @@ class _VoiceRecordButtonState extends State<_VoiceRecordButton> {
                 : Colors.transparent,
           ),
         ),
-        child: Text(
-          label,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(
-            color: !widget.enabled
-                ? _mutedColor
-                : _canceling
-                ? BimColors.redPacket
-                : _textColor,
-            fontSize: 15,
-            fontWeight: FontWeight.w700,
-          ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            if (widget.recording) ...[
+              _VoiceWaveIndicator(
+                controller: _waveController,
+                color: _canceling ? BimColors.redPacket : _chatAckColor,
+              ),
+              const SizedBox(width: 8),
+            ],
+            Flexible(
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: !widget.enabled
+                      ? _mutedColor
+                      : _canceling
+                      ? BimColors.redPacket
+                      : _textColor,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );
+  }
+}
+
+class _VoiceWaveIndicator extends StatelessWidget {
+  const _VoiceWaveIndicator({required this.controller, required this.color});
+
+  final AnimationController controller;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: controller,
+      builder: (context, _) {
+        return Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (var index = 0; index < 5; index++)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 1.5),
+                child: Transform.scale(
+                  alignment: Alignment.center,
+                  scaleY: _barScale(controller.value, index),
+                  child: Container(
+                    width: 3,
+                    height: 18,
+                    decoration: BoxDecoration(
+                      color: color,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        );
+      },
+    );
+  }
+
+  double _barScale(double value, int index) {
+    final phase = (value + index * 0.16) % 1;
+    return 0.45 + sin(phase * pi * 2).abs() * 0.65;
   }
 }
 

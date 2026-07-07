@@ -69,12 +69,13 @@ class _EmojiMessagePreview extends StatelessWidget {
     final asset = _emojiAssetForPayload(payload);
     if (asset.isNotEmpty) {
       return SizedBox(
-        width: 64,
-        height: 64,
+        width: 42,
+        height: 42,
         child: Image.asset(
           asset,
           fit: BoxFit.contain,
           gaplessPlayback: true,
+          filterQuality: FilterQuality.none,
           errorBuilder: (_, __, ___) => _fallbackText,
         ),
       );
@@ -83,12 +84,7 @@ class _EmojiMessagePreview extends StatelessWidget {
   }
 
   Widget get _fallbackText {
-    return Text(
-      _value(payload, [
-        'emoji_code',
-      ], fallback: content.isEmpty ? '[表情]' : content),
-      style: const TextStyle(fontSize: 24, height: 1.2),
-    );
+    return const Text('[表情]', style: TextStyle(fontSize: 14, height: 1.2));
   }
 }
 

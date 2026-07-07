@@ -3,7 +3,7 @@ part of 'package:bim/src/features/home/home_page.dart';
 const _privateCallVideoDimensions = lk.VideoDimensions(1920, 1080);
 const _groupCallVideoDimensions = lk.VideoDimensions(1280, 720);
 const _privateCallVideoEncoding = lk.VideoEncoding(
-  maxBitrate: 3600 * 1000,
+  maxBitrate: 5200 * 1000,
   maxFramerate: 30,
 );
 const _groupCallVideoEncoding = lk.VideoEncoding(
@@ -36,7 +36,7 @@ lk.CameraCaptureOptions _callCameraCaptureOptions(LiveKitCallInfo? call) {
 lk.VideoPublishOptions _callVideoPublishOptions(LiveKitCallInfo? call) {
   return lk.VideoPublishOptions(
     videoEncoding: _callVideoEncoding(call),
-    simulcast: true,
+    simulcast: !(call?.isPrivate ?? true),
     videoSimulcastLayers: _callVideoSimulcastLayers(call),
     degradationPreference: lk.DegradationPreference.maintainResolution,
   );
@@ -68,6 +68,10 @@ List<lk.VideoParameters> _callVideoSimulcastLayers(LiveKitCallInfo? call) {
       lk.VideoParameters(
         dimensions: lk.VideoDimensions(1280, 720),
         encoding: lk.VideoEncoding(maxBitrate: 1800 * 1000, maxFramerate: 30),
+      ),
+      lk.VideoParameters(
+        dimensions: lk.VideoDimensions(1920, 1080),
+        encoding: lk.VideoEncoding(maxBitrate: 3600 * 1000, maxFramerate: 30),
       ),
     ];
   }
@@ -176,6 +180,7 @@ class LiveKitCallPage extends StatefulWidget {
     this.groupId = '',
     this.title = '',
     this.inviteUserIds = const [],
+    this.onClosed,
     super.key,
   }) : initialCall = null,
        incoming = false;
@@ -183,6 +188,7 @@ class LiveKitCallPage extends StatefulWidget {
   const LiveKitCallPage.incoming({
     required this.controller,
     required LiveKitCallInfo this.initialCall,
+    this.onClosed,
     super.key,
   }) : callType = '',
        mediaType = '',
@@ -201,18 +207,50 @@ class LiveKitCallPage extends StatefulWidget {
   final List<String> inviteUserIds;
   final LiveKitCallInfo? initialCall;
   final bool incoming;
+  final ValueChanged<int>? onClosed;
+
+  LiveKitCallPage withHost({
+    required GlobalKey<LiveKitCallPageState> key,
+    required ValueChanged<int> onClosed,
+  }) {
+    if (incoming) {
+      return LiveKitCallPage.incoming(
+        key: key,
+        controller: controller,
+        initialCall: initialCall!,
+        onClosed: onClosed,
+      );
+    }
+    return LiveKitCallPage.create(
+      key: key,
+      controller: controller,
+      callType: callType,
+      mediaType: mediaType,
+      receiverId: receiverId,
+      groupId: groupId,
+      title: title,
+      inviteUserIds: inviteUserIds,
+      onClosed: onClosed,
+    );
+  }
 
   @override
-  State<LiveKitCallPage> createState() => _LiveKitCallPageState();
+  State<LiveKitCallPage> createState() => LiveKitCallPageState();
 }
 
-class _LiveKitCallPageState extends State<LiveKitCallPage> {
+class LiveKitCallPageState extends State<LiveKitCallPage> {
   LiveKitCallInfo? _call;
   lk.Room? _room;
   lk.EventsListener<lk.RoomEvent>? _listener;
+  lk.EventsListener<lk.TrackEvent>? _localVideoStatsListener;
+  lk.LocalVideoTrack? _localVideoStatsTrack;
+  final Map<String, lk.EventsListener<lk.TrackEvent>>
+  _remoteVideoStatsListeners = <String, lk.EventsListener<lk.TrackEvent>>{};
   StreamSubscription<BusinessImCallEvent>? _callSub;
   late final _sound = _CallSoundController();
   Timer? _durationTimer;
+  DateTime? _lastLocalQualityLogAt;
+  DateTime? _lastRemoteQualityLogAt;
   DateTime? _connectedAt;
   var _statusText = '正在准备通话';
   var _connecting = false;
@@ -264,13 +302,22 @@ class _LiveKitCallPageState extends State<LiveKitCallPage> {
     unawaited(_sound.dispose());
     _room?.removeListener(_onRoomChanged);
     unawaited(_listener?.dispose());
-    final room = _room;
-    if (room != null && !_ending) {
-      unawaited(room.disconnect());
-      final callId = _call?.callId ?? 0;
-      if (callId > 0) {
-        unawaited(widget.controller.hangupLiveKitCall(callId));
-      }
+    unawaited(_disposeVideoStatsListeners());
+    if (_room != null && !_ending && !_pageClosing) {
+      AppLogger.warn(
+        'call',
+        'call page disposed while call is still active',
+        data: {'call_id': _call?.callId, 'minimized': _minimized},
+      );
+      unawaited(
+        _room?.disconnect().catchError((Object error) {
+          AppLogger.warn(
+            'call',
+            'room disconnected on active page dispose failed',
+            data: {'call_id': _call?.callId, 'error': '$error'},
+          );
+        }),
+      );
     }
     super.dispose();
   }
@@ -419,9 +466,15 @@ class _LiveKitCallPageState extends State<LiveKitCallPage> {
       })
       ..on<lk.TrackSubscribedEvent>((_) {
         _onRoomChanged();
+        _syncVideoStatsListeners();
         unawaited(_preferHighQualityRemoteVideo(source: 'subscribed'));
       })
-      ..on<lk.TrackUnsubscribedEvent>((_) => _onRoomChanged())
+      ..on<lk.TrackUnsubscribedEvent>((_) {
+        _onRoomChanged();
+        _syncVideoStatsListeners();
+      })
+      ..on<lk.LocalTrackPublishedEvent>((_) => _syncVideoStatsListeners())
+      ..on<lk.LocalTrackUnpublishedEvent>((_) => _syncVideoStatsListeners())
       ..on<lk.TrackMutedEvent>((_) => _onRoomChanged())
       ..on<lk.TrackUnmutedEvent>((_) => _onRoomChanged())
       ..on<lk.RoomDisconnectedEvent>((_) {
@@ -462,6 +515,7 @@ class _LiveKitCallPageState extends State<LiveKitCallPage> {
         'dynacast': !call.isPrivate,
       },
     );
+    _syncVideoStatsListeners();
     await room.setSpeakerOn(true, forceSpeakerOutput: false).catchError((
       Object error,
     ) {
@@ -511,6 +565,153 @@ class _LiveKitCallPageState extends State<LiveKitCallPage> {
         }
       }
     }
+  }
+
+  void _syncVideoStatsListeners() {
+    final room = _room;
+    if (room == null || !_videoCall) {
+      return;
+    }
+    _bindLocalVideoStats(room.localParticipant);
+    final activeRemoteKeys = <String>{};
+    for (final participant in room.remoteParticipants.values) {
+      for (final publication in participant.videoTrackPublications) {
+        final track = publication.track;
+        if (track is! lk.RemoteVideoTrack) {
+          continue;
+        }
+        final key = '${participant.sid}:${publication.sid}';
+        activeRemoteKeys.add(key);
+        _remoteVideoStatsListeners.putIfAbsent(key, () {
+          AppLogger.info(
+            'call',
+            'remote video stats monitor attached',
+            data: {
+              'call_id': _call?.callId,
+              'participant': participant.identity,
+              'track_sid': publication.sid,
+            },
+          );
+          return track.createListener()..on<lk.VideoReceiverStatsEvent>(
+            (event) => _logRemoteVideoStats(
+              event,
+              participant: participant,
+              trackSid: publication.sid,
+            ),
+          );
+        });
+      }
+    }
+    final staleKeys = _remoteVideoStatsListeners.keys
+        .where((key) => !activeRemoteKeys.contains(key))
+        .toList(growable: false);
+    for (final key in staleKeys) {
+      unawaited(_remoteVideoStatsListeners.remove(key)?.dispose());
+    }
+  }
+
+  void _bindLocalVideoStats(lk.LocalParticipant? participant) {
+    if (participant == null) {
+      return;
+    }
+    lk.LocalVideoTrack? activeTrack;
+    String activeTrackSid = '';
+    for (final publication in participant.videoTrackPublications) {
+      final track = publication.track;
+      if (track is lk.LocalVideoTrack) {
+        activeTrack = track;
+        activeTrackSid = publication.sid;
+        break;
+      }
+    }
+    if (activeTrack == null) {
+      final oldListener = _localVideoStatsListener;
+      _localVideoStatsListener = null;
+      _localVideoStatsTrack = null;
+      if (oldListener != null) {
+        unawaited(_disposeTrackListener(oldListener));
+      }
+      return;
+    }
+    if (_localVideoStatsTrack == activeTrack &&
+        _localVideoStatsListener != null) {
+      return;
+    }
+    final oldListener = _localVideoStatsListener;
+    if (oldListener != null) {
+      unawaited(_disposeTrackListener(oldListener));
+    }
+    _localVideoStatsTrack = activeTrack;
+    _localVideoStatsListener = activeTrack.createListener()
+      ..on<lk.VideoSenderStatsEvent>(_logLocalVideoStats);
+    AppLogger.info(
+      'call',
+      'local video stats monitor attached',
+      data: {'call_id': _call?.callId, 'track_sid': activeTrackSid},
+    );
+  }
+
+  void _logLocalVideoStats(lk.VideoSenderStatsEvent event) {
+    if (!_shouldLogVideoQuality(local: true)) {
+      return;
+    }
+    final first = event.stats.values.isEmpty ? null : event.stats.values.first;
+    AppLogger.info(
+      'call',
+      'local video quality stats',
+      data: {
+        'call_id': _call?.callId,
+        'bitrate_bps': event.currentBitrate.round(),
+        'layers': event.bitrateForLayers,
+        'frame_width': first?.frameWidth,
+        'frame_height': first?.frameHeight,
+        'fps': first?.framesPerSecond,
+        'quality_limited_by': first?.qualityLimitationReason,
+        'rtt': first?.roundTripTime,
+        'codec': first?.mimeType,
+      },
+    );
+  }
+
+  void _logRemoteVideoStats(
+    lk.VideoReceiverStatsEvent event, {
+    required lk.RemoteParticipant participant,
+    required String trackSid,
+  }) {
+    if (!_shouldLogVideoQuality(local: false)) {
+      return;
+    }
+    AppLogger.info(
+      'call',
+      'remote video quality stats',
+      data: {
+        'call_id': _call?.callId,
+        'participant': participant.identity,
+        'track_sid': trackSid,
+        'bitrate_bps': event.currentBitrate.round(),
+        'frame_width': event.stats.frameWidth,
+        'frame_height': event.stats.frameHeight,
+        'fps': event.stats.framesPerSecond,
+        'frames_dropped': event.stats.framesDropped,
+        'packets_lost': event.stats.packetsLost,
+        'jitter': event.stats.jitter,
+        'codec': event.stats.mimeType,
+      },
+    );
+  }
+
+  bool _shouldLogVideoQuality({required bool local}) {
+    final now = DateTime.now();
+    final last = local ? _lastLocalQualityLogAt : _lastRemoteQualityLogAt;
+    if (last != null && now.difference(last) < const Duration(seconds: 6)) {
+      return false;
+    }
+    if (local) {
+      _lastLocalQualityLogAt = now;
+    } else {
+      _lastRemoteQualityLogAt = now;
+    }
+    return true;
   }
 
   void _onRoomConnected() {
@@ -667,6 +868,9 @@ class _LiveKitCallPageState extends State<LiveKitCallPage> {
       next,
       cameraCaptureOptions: _callCameraCaptureOptions(_call),
     );
+    if (next) {
+      await _preferHighQualityRemoteVideo(source: 'camera_enabled');
+    }
     if (mounted) {
       setState(() => _cameraEnabled = next);
     }
@@ -721,6 +925,26 @@ class _LiveKitCallPageState extends State<LiveKitCallPage> {
     });
     _sendEndRequestInBackground(call);
     await _finishAndClose(playEndTone: true);
+  }
+
+  void _leaveCallPage() {
+    if (_canMinimize) {
+      _minimizeCallPage();
+      return;
+    }
+    if (_incomingWaiting) {
+      unawaited(_reject());
+      return;
+    }
+    unawaited(_hangup());
+  }
+
+  bool handleSystemBack() {
+    if (_minimized) {
+      return false;
+    }
+    _leaveCallPage();
+    return true;
   }
 
   void _sendEndRequestInBackground(LiveKitCallInfo? call) {
@@ -788,7 +1012,13 @@ class _LiveKitCallPageState extends State<LiveKitCallPage> {
       return;
     }
     _pageClosing = true;
-    Navigator.of(context).pop(_call?.callId ?? 0);
+    final callId = _call?.callId ?? 0;
+    final onClosed = widget.onClosed;
+    if (onClosed != null) {
+      onClosed(callId);
+      return;
+    }
+    Navigator.of(context).pop(callId);
   }
 
   Future<void> _disconnectRoom() async {
@@ -796,6 +1026,7 @@ class _LiveKitCallPageState extends State<LiveKitCallPage> {
     if (room == null) {
       return;
     }
+    await _disposeVideoStatsListeners();
     await room.disconnect().catchError((Object error) {
       AppLogger.warn(
         'call',
@@ -813,45 +1044,64 @@ class _LiveKitCallPageState extends State<LiveKitCallPage> {
     }
   }
 
+  Future<void> _disposeVideoStatsListeners() async {
+    final local = _localVideoStatsListener;
+    _localVideoStatsListener = null;
+    _localVideoStatsTrack = null;
+    final remote = _remoteVideoStatsListeners.values.toList(growable: false);
+    _remoteVideoStatsListeners.clear();
+    await Future.wait([
+      if (local != null) _disposeTrackListener(local),
+      for (final listener in remote) _disposeTrackListener(listener),
+    ]);
+  }
+
+  Future<void> _disposeTrackListener(
+    lk.EventsListener<lk.TrackEvent> listener,
+  ) async {
+    try {
+      await listener.dispose();
+    } catch (_) {
+      // Listener cleanup must not block call teardown.
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    if (_minimized) {
+      return PopScope(
+        canPop: false,
+        onPopInvokedWithResult: (didPop, _) {
+          if (!didPop) {
+            _restoreCallPage();
+          }
+        },
+        child: LayoutBuilder(
+          builder: (context, constraints) =>
+              _buildMinimizedOverlay(constraints),
+        ),
+      );
+    }
     return AnnotatedRegion<SystemUiOverlayStyle>(
-      value: _minimized
-          ? const SystemUiOverlayStyle(
-              statusBarColor: Colors.transparent,
-              statusBarIconBrightness: Brightness.dark,
-              statusBarBrightness: Brightness.light,
-              systemNavigationBarColor: Colors.transparent,
-              systemNavigationBarIconBrightness: Brightness.dark,
-            )
-          : const SystemUiOverlayStyle(
-              statusBarColor: Color(0xff08090c),
-              statusBarIconBrightness: Brightness.light,
-              statusBarBrightness: Brightness.dark,
-              systemNavigationBarColor: Color(0xff08090c),
-              systemNavigationBarIconBrightness: Brightness.light,
-            ),
+      value: const SystemUiOverlayStyle(
+        statusBarColor: Color(0xff08090c),
+        statusBarIconBrightness: Brightness.light,
+        statusBarBrightness: Brightness.dark,
+        systemNavigationBarColor: Color(0xff08090c),
+        systemNavigationBarIconBrightness: Brightness.light,
+      ),
       child: PopScope(
         canPop: false,
         onPopInvokedWithResult: (didPop, _) {
           if (!didPop) {
-            if (_minimized) {
-              _restoreCallPage();
-            } else {
-              unawaited(_hangup());
-            }
+            _leaveCallPage();
           }
         },
         child: Scaffold(
-          backgroundColor: _minimized
-              ? Colors.transparent
-              : const Color(0xff08090c),
+          backgroundColor: const Color(0xff08090c),
           body: SafeArea(
             child: LayoutBuilder(
               builder: (context, constraints) {
-                if (_minimized) {
-                  return _buildMinimizedOverlay(constraints);
-                }
                 return Stack(
                   children: [
                     Positioned.fill(child: _buildStage(constraints)),
@@ -863,7 +1113,7 @@ class _LiveKitCallPageState extends State<LiveKitCallPage> {
                         title: _callTitle,
                         subtitle: _connected ? _durationLabel : _statusText,
                         canMinimize: _canMinimize,
-                        onBack: _hangup,
+                        onBack: _leaveCallPage,
                         onMinimize: _minimizeCallPage,
                       ),
                     ),
@@ -939,6 +1189,7 @@ class _LiveKitCallPageState extends State<LiveKitCallPage> {
   Widget _buildMinimizedOverlay(BoxConstraints constraints) {
     final position = _floatingOffset ?? _defaultFloatingOffset(constraints);
     return Stack(
+      clipBehavior: Clip.none,
       children: [
         Positioned(
           left: position.dx,

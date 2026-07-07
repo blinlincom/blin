@@ -11,12 +11,13 @@ class _InAppMediaPickerPage extends StatefulWidget {
 
 class _InAppMediaPickerPageState extends State<_InAppMediaPickerPage> {
   static const _pageSize = 120;
+  static const _maxImageSelection = 20;
 
   final ScrollController _gridController = ScrollController();
   List<AssetPathEntity> _albums = const [];
   List<AssetEntity> _assets = const [];
   AssetPathEntity? _selectedAlbum;
-  AssetEntity? _selectedAsset;
+  List<AssetEntity> _selectedAssets = const [];
   bool _loading = true;
   bool _loadingAssets = false;
   bool _loadingMore = false;
@@ -26,6 +27,9 @@ class _InAppMediaPickerPageState extends State<_InAppMediaPickerPage> {
   String _selectingAssetId = '';
 
   bool get _isVideo => widget.contentType == ChatContentTypes.video;
+  AssetEntity? get _selectedAsset =>
+      _selectedAssets.isEmpty ? null : _selectedAssets.last;
+  int get _selectedCount => _selectedAssets.length;
 
   @override
   void initState() {
@@ -59,7 +63,7 @@ class _InAppMediaPickerPageState extends State<_InAppMediaPickerPage> {
     setState(() {
       _loading = true;
       _error = '';
-      _selectedAsset = null;
+      _selectedAssets = const [];
     });
     try {
       final permission = await PhotoManager.requestPermissionExtend();
@@ -129,7 +133,7 @@ class _InAppMediaPickerPageState extends State<_InAppMediaPickerPage> {
       setState(() {
         _loadingAssets = true;
         _error = '';
-        _selectedAsset = null;
+        _selectedAssets = const [];
       });
     }
     try {
@@ -140,7 +144,7 @@ class _InAppMediaPickerPageState extends State<_InAppMediaPickerPage> {
       setState(() {
         _selectedAlbum = album;
         _assets = assets;
-        _selectedAsset = null;
+        _selectedAssets = const [];
         _page = 0;
         _hasMore = assets.length >= _pageSize;
         _loading = false;
@@ -226,29 +230,52 @@ class _InAppMediaPickerPageState extends State<_InAppMediaPickerPage> {
       ),
     );
     if (selected != null && mounted) {
-      setState(() => _selectedAsset = selected);
+      setState(() => _addSelectedAsset(selected));
     }
   }
 
   Future<void> _sendSelectedAsset() async {
-    final asset = _selectedAsset;
-    if (asset == null || _selectingAssetId.isNotEmpty) {
+    final selected = List<AssetEntity>.from(_selectedAssets);
+    if (selected.isEmpty || _selectingAssetId.isNotEmpty) {
       return;
     }
-    setState(() => _selectingAssetId = asset.id);
+    setState(
+      () => _selectingAssetId = selected.length == 1
+          ? selected.first.id
+          : 'batch',
+    );
     try {
-      final payload = await _mediaAssetPayload(asset, widget.contentType);
+      final payloads = <Map<String, String>>[];
+      for (final asset in selected) {
+        payloads.add(await _mediaAssetPayload(asset, widget.contentType));
+      }
       if (!mounted) {
         return;
       }
-      Navigator.of(context).pop(payload);
+      AppLogger.info(
+        'chat',
+        'media assets selected for send',
+        data: {
+          'content_type': widget.contentType,
+          'count': payloads.length,
+          'asset_ids': selected.map((item) => item.id).take(30).toList(),
+        },
+      );
+      Navigator.of(context).pop(
+        payloads.length == 1
+            ? payloads.first
+            : <String, String>{'batch_json': jsonEncode(payloads)},
+      );
     } catch (error, stackTrace) {
       AppLogger.error(
         'chat',
         'select media asset failed',
         error: error,
         stackTrace: stackTrace,
-        data: {'asset_id': asset.id},
+        data: {
+          'content_type': widget.contentType,
+          'asset_ids': selected.map((item) => item.id).take(30).toList(),
+        },
       );
       if (!mounted) {
         return;
@@ -262,12 +289,51 @@ class _InAppMediaPickerPageState extends State<_InAppMediaPickerPage> {
     if (_selectingAssetId.isNotEmpty) {
       return;
     }
-    final selected = _selectedAsset?.id == asset.id;
-    if (selected) {
-      unawaited(_openPreview(asset));
+    final current = _selectedAssets.indexWhere((item) => item.id == asset.id);
+    if (current >= 0) {
+      setState(() {
+        final next = List<AssetEntity>.from(_selectedAssets)..removeAt(current);
+        _selectedAssets = next;
+      });
       return;
     }
-    setState(() => _selectedAsset = asset);
+    if (_isVideo) {
+      setState(() => _selectedAssets = [asset]);
+      return;
+    }
+    if (_selectedAssets.length >= _maxImageSelection) {
+      _showChatSnack(context, '一次最多选择 $_maxImageSelection 张图片', error: true);
+      return;
+    }
+    setState(() => _selectedAssets = [..._selectedAssets, asset]);
+  }
+
+  void _addSelectedAsset(AssetEntity asset) {
+    final existing = _selectedAssets.indexWhere((item) => item.id == asset.id);
+    if (existing >= 0) {
+      return;
+    }
+    if (_isVideo) {
+      _selectedAssets = [asset];
+      return;
+    }
+    if (_selectedAssets.length >= _maxImageSelection) {
+      _showChatSnack(context, '一次最多选择 $_maxImageSelection 张图片', error: true);
+      return;
+    }
+    _selectedAssets = [..._selectedAssets, asset];
+  }
+
+  void _clearSelection() {
+    if (_selectingAssetId.isNotEmpty || _selectedAssets.isEmpty) {
+      return;
+    }
+    setState(() => _selectedAssets = const []);
+  }
+
+  int _selectionIndex(AssetEntity asset) {
+    final index = _selectedAssets.indexWhere((item) => item.id == asset.id);
+    return index < 0 ? 0 : index + 1;
   }
 
   @override
@@ -291,10 +357,12 @@ class _InAppMediaPickerPageState extends State<_InAppMediaPickerPage> {
               ),
             Expanded(child: _buildBody()),
             _MediaPickerFooter(
-              selected: _selectedAsset,
+              selectedCount: _selectedCount,
+              maxSelection: _isVideo ? 1 : _maxImageSelection,
               sending: _selectingAssetId.isNotEmpty,
+              onClear: _selectedCount == 0 ? null : _clearSelection,
               onPreview: _selectedAsset == null ? null : _openPreview,
-              onSend: _selectedAsset == null ? null : _sendSelectedAsset,
+              onSend: _selectedCount == 0 ? null : _sendSelectedAsset,
             ),
           ],
         ),
@@ -346,10 +414,14 @@ class _InAppMediaPickerPageState extends State<_InAppMediaPickerPage> {
                       return const _MediaSkeletonTile();
                     }
                     final asset = _assets[index];
+                    final selectionIndex = _selectionIndex(asset);
                     return _MediaAssetTile(
                       asset: asset,
-                      selected: _selectedAsset?.id == asset.id,
-                      sending: _selectingAssetId == asset.id,
+                      selected: selectionIndex > 0,
+                      selectionIndex: selectionIndex,
+                      sending:
+                          _selectingAssetId == asset.id ||
+                          (_selectingAssetId == 'batch' && selectionIndex > 0),
                       onTap: () => _toggleAsset(asset),
                       onLongPress: () => _openPreview(asset),
                     );
@@ -536,7 +608,15 @@ class _InAppFilePickerPageState extends State<_InAppFilePickerPage> {
     if (_selectingPath.isNotEmpty) {
       return;
     }
-    setState(() => _selectedFile = file);
+    final selected = _selectedFile?.path == file.path;
+    setState(() => _selectedFile = selected ? null : file);
+  }
+
+  void _clearSelectedFile() {
+    if (_selectingPath.isNotEmpty || _selectedFile == null) {
+      return;
+    }
+    setState(() => _selectedFile = null);
   }
 
   void _onSearchChanged(String value) {
@@ -599,6 +679,7 @@ class _InAppFilePickerPageState extends State<_InAppFilePickerPage> {
             _FilePickerFooter(
               selected: _selectedFile,
               sending: _selectingPath.isNotEmpty,
+              onClear: _selectedFile == null ? null : _clearSelectedFile,
               onSend: _selectedFile == null ? null : _sendSelectedFile,
             ),
           ],
@@ -708,6 +789,7 @@ class _MediaAssetTile extends StatelessWidget {
   const _MediaAssetTile({
     required this.asset,
     required this.selected,
+    required this.selectionIndex,
     required this.sending,
     required this.onTap,
     required this.onLongPress,
@@ -715,6 +797,7 @@ class _MediaAssetTile extends StatelessWidget {
 
   final AssetEntity asset;
   final bool selected;
+  final int selectionIndex;
   final bool sending;
   final VoidCallback onTap;
   final VoidCallback onLongPress;
@@ -773,7 +856,11 @@ class _MediaAssetTile extends StatelessWidget {
               Positioned(
                 top: 6,
                 right: 6,
-                child: _SelectionMark(selected: selected, busy: sending),
+                child: _SelectionMark(
+                  selected: selected,
+                  busy: sending,
+                  label: selectionIndex > 0 ? selectionIndex.toString() : '',
+                ),
               ),
             ],
           ),
@@ -1261,23 +1348,27 @@ class _FilePickerTile extends StatelessWidget {
 
 class _MediaPickerFooter extends StatelessWidget {
   const _MediaPickerFooter({
-    required this.selected,
+    required this.selectedCount,
+    required this.maxSelection,
     required this.sending,
+    required this.onClear,
     required this.onPreview,
     required this.onSend,
   });
 
-  final AssetEntity? selected;
+  final int selectedCount;
+  final int maxSelection;
   final bool sending;
+  final VoidCallback? onClear;
   final VoidCallback? onPreview;
   final VoidCallback? onSend;
 
   @override
   Widget build(BuildContext context) {
-    final enabled = selected != null && !sending;
+    final enabled = selectedCount > 0 && !sending;
     return _PickerFooterShell(
       leading: Text(
-        selected == null ? '未选择' : '已选择 1 项',
+        selectedCount == 0 ? '未选择' : '已选择 $selectedCount/$maxSelection 项',
         style: const TextStyle(
           color: _secondaryTextColor,
           fontSize: 13,
@@ -1285,6 +1376,10 @@ class _MediaPickerFooter extends StatelessWidget {
         ),
       ),
       actions: [
+        _PickerSecondaryButton(
+          label: '清空',
+          onPressed: enabled ? onClear : null,
+        ),
         _PickerSecondaryButton(
           label: '预览',
           onPressed: enabled ? onPreview : null,
@@ -1299,11 +1394,13 @@ class _FilePickerFooter extends StatelessWidget {
   const _FilePickerFooter({
     required this.selected,
     required this.sending,
+    required this.onClear,
     required this.onSend,
   });
 
   final _LocalFileItem? selected;
   final bool sending;
+  final VoidCallback? onClear;
   final VoidCallback? onSend;
 
   @override
@@ -1323,6 +1420,10 @@ class _FilePickerFooter extends StatelessWidget {
         ),
       ),
       actions: [
+        _PickerSecondaryButton(
+          label: '清空',
+          onPressed: enabled ? onClear : null,
+        ),
         _PickerSendButton(onPressed: enabled ? onSend : null, sending: sending),
       ],
     );
@@ -1510,10 +1611,15 @@ class _PickerFilterButton extends StatelessWidget {
 }
 
 class _SelectionMark extends StatelessWidget {
-  const _SelectionMark({required this.selected, required this.busy});
+  const _SelectionMark({
+    required this.selected,
+    required this.busy,
+    this.label = '',
+  });
 
   final bool selected;
   final bool busy;
+  final String label;
 
   @override
   Widget build(BuildContext context) {
@@ -1534,7 +1640,16 @@ class _SelectionMark extends StatelessWidget {
         border: Border.all(color: Colors.white, width: 1.4),
       ),
       child: selected
-          ? const Icon(Icons.check, color: Colors.white, size: 16)
+          ? label.isEmpty
+                ? const Icon(Icons.check, color: Colors.white, size: 16)
+                : Text(
+                    label,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  )
           : const SizedBox.shrink(),
     );
   }

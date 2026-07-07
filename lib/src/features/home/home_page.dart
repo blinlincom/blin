@@ -75,6 +75,96 @@ const _chatAckColor = BimColors.ack;
 const _privateChannelType = 1;
 const _groupChannelType = 2;
 
+class CallOverlayHost extends StatefulWidget {
+  const CallOverlayHost({required this.child, super.key});
+
+  final Widget child;
+
+  @override
+  State<CallOverlayHost> createState() => CallOverlayHostState();
+}
+
+class CallOverlayHostState extends State<CallOverlayHost> {
+  LiveKitCallPage? _activeCallPage;
+
+  bool handleSystemBack() {
+    final page = _activeCallPage;
+    if (page == null) {
+      return false;
+    }
+    return _callPageKey(page)?.currentState?.handleSystemBack() ?? false;
+  }
+
+  bool showCall(LiveKitCallPage page, {ValueChanged<int>? onClosed}) {
+    if (_activeCallPage != null) {
+      AppLogger.warn(
+        'call',
+        'call overlay ignored new call because one call is already active',
+        data: {
+          'incoming': page.incoming,
+          'call_id': page.initialCall?.callId,
+          'call_type': page.callType,
+          'media_type': page.mediaType,
+        },
+      );
+      return false;
+    }
+    final hostedPage = page.withHost(
+      key: GlobalKey<LiveKitCallPageState>(),
+      onClosed: (callId) {
+        onClosed?.call(callId);
+        if (!mounted) {
+          return;
+        }
+        setState(() => _activeCallPage = null);
+      },
+    );
+    setState(() => _activeCallPage = hostedPage);
+    return true;
+  }
+
+  GlobalKey<LiveKitCallPageState>? _callPageKey(LiveKitCallPage page) {
+    final key = page.key;
+    if (key is GlobalKey<LiveKitCallPageState>) {
+      return key;
+    }
+    return null;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return CallHostScope(
+      showCall: showCall,
+      child: Stack(
+        children: [
+          widget.child,
+          if (_activeCallPage != null) Positioned.fill(child: _activeCallPage!),
+        ],
+      ),
+    );
+  }
+}
+
+class CallHostScope extends InheritedWidget {
+  const CallHostScope({
+    required this.showCall,
+    required super.child,
+    super.key,
+  });
+
+  final bool Function(LiveKitCallPage page, {ValueChanged<int>? onClosed})
+  showCall;
+
+  static CallHostScope? maybeOf(BuildContext context) {
+    return context.dependOnInheritedWidgetOfExactType<CallHostScope>();
+  }
+
+  @override
+  bool updateShouldNotify(CallHostScope oldWidget) {
+    return showCall != oldWidget.showCall;
+  }
+}
+
 class HomePage extends StatefulWidget {
   const HomePage({required this.controller, super.key});
 
@@ -89,9 +179,6 @@ class _HomePageState extends State<HomePage> {
   int _totalUnread = 0;
   bool _initialSyncOverlayVisible = false;
   Timer? _initialSyncOverlayHideTimer;
-  final Set<int> _activeIncomingCallIds = <int>{};
-  final Map<int, DateTime> _recentEndedCallIds = <int, DateTime>{};
-  StreamSubscription<BusinessImCallEvent>? _callSub;
 
   @override
   void initState() {
@@ -102,7 +189,6 @@ class _HomePageState extends State<HomePage> {
     _initialSyncOverlayVisible =
         widget.controller.initialHistorySyncState.blocked;
     widget.controller.addListener(_onControllerChanged);
-    _callSub = widget.controller.callEvents.listen(_onCallEvent);
   }
 
   @override
@@ -110,9 +196,7 @@ class _HomePageState extends State<HomePage> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.controller != widget.controller) {
       oldWidget.controller.removeListener(_onControllerChanged);
-      _callSub?.cancel();
       widget.controller.addListener(_onControllerChanged);
-      _callSub = widget.controller.callEvents.listen(_onCallEvent);
       _totalUnread = _conversationUnreadTotal(
         widget.controller.cachedConversations(),
       );
@@ -126,142 +210,8 @@ class _HomePageState extends State<HomePage> {
   @override
   void dispose() {
     _initialSyncOverlayHideTimer?.cancel();
-    _callSub?.cancel();
     widget.controller.removeListener(_onControllerChanged);
     super.dispose();
-  }
-
-  void _onCallEvent(BusinessImCallEvent event) {
-    final callEvent = event.event;
-    final call = callEvent.call;
-    final currentUserId = widget.controller.session?.userId ?? 0;
-    if (_isTerminalCallEvent(callEvent)) {
-      _rememberEndedCall(call.callId);
-    }
-    if (!callEvent.isInvite ||
-        call.callId <= 0 ||
-        call.isEnded ||
-        call.creatorId == currentUserId ||
-        callEvent.operatorId == currentUserId ||
-        _recentEndedCallIds.containsKey(call.callId) ||
-        _activeIncomingCallIds.contains(call.callId)) {
-      return;
-    }
-    _activeIncomingCallIds.add(call.callId);
-    WidgetsBinding.instance.addPostFrameCallback((_) async {
-      if (!mounted) {
-        _activeIncomingCallIds.remove(call.callId);
-        return;
-      }
-      try {
-        final latestCall = await _confirmIncomingCall(call);
-        if (!mounted || latestCall == null) {
-          return;
-        }
-        final closedCallId = await Navigator.of(context).push<int>(
-          _callPageRoute(
-            LiveKitCallPage.incoming(
-              controller: widget.controller,
-              initialCall: latestCall,
-            ),
-          ),
-        );
-        if (closedCallId != null && closedCallId > 0) {
-          _rememberEndedCall(closedCallId);
-        }
-      } finally {
-        _activeIncomingCallIds.remove(call.callId);
-      }
-    });
-  }
-
-  bool _isTerminalCallEvent(LiveKitCallEvent event) {
-    return event.call.isEnded ||
-        event.isCancel ||
-        event.isReject ||
-        event.isHangup;
-  }
-
-  Future<LiveKitCallInfo?> _confirmIncomingCall(LiveKitCallInfo call) async {
-    if (_recentEndedCallIds.containsKey(call.callId)) {
-      return null;
-    }
-    try {
-      final latest = await widget.controller
-          .liveKitCallToken(call.callId)
-          .timeout(const Duration(seconds: 6));
-      final resolved = latest.withConnectionFrom(call);
-      if (_recentEndedCallIds.containsKey(call.callId)) {
-        AppLogger.info(
-          'call',
-          'incoming call ignored because terminal event arrived while checking',
-          data: {'call_id': call.callId},
-        );
-        return null;
-      }
-      if (_isUnavailableIncomingCall(resolved)) {
-        _rememberEndedCall(call.callId);
-        AppLogger.info(
-          'call',
-          'incoming call ignored because server state is terminal',
-          data: {
-            'call_id': call.callId,
-            'status': resolved.status,
-            'status_text': resolved.statusText,
-          },
-        );
-        return null;
-      }
-      AppLogger.info(
-        'call',
-        'incoming call confirmed before showing page',
-        data: {
-          'call_id': resolved.callId,
-          'status': resolved.status,
-          'status_text': resolved.statusText,
-        },
-      );
-      return resolved;
-    } catch (error, stackTrace) {
-      _rememberEndedCall(call.callId);
-      AppLogger.warn(
-        'call',
-        'incoming call ignored because server confirmation failed',
-        data: {
-          'call_id': call.callId,
-          'error': error.toString(),
-          'stack': stackTrace.toString().split('\n').take(3).join('\n'),
-        },
-      );
-      return null;
-    }
-  }
-
-  bool _isUnavailableIncomingCall(LiveKitCallInfo call) {
-    final statusText = call.statusText.toLowerCase();
-    return call.callId <= 0 ||
-        call.isEnded ||
-        statusText.contains('取消') ||
-        statusText.contains('拒') ||
-        statusText.contains('挂断') ||
-        statusText.contains('结束') ||
-        statusText.contains('超时') ||
-        statusText.contains('cancel') ||
-        statusText.contains('reject') ||
-        statusText.contains('hangup') ||
-        statusText.contains('end') ||
-        statusText.contains('timeout');
-  }
-
-  void _rememberEndedCall(int callId) {
-    if (callId <= 0) {
-      return;
-    }
-    final now = DateTime.now();
-    _recentEndedCallIds.removeWhere(
-      (_, value) => now.difference(value).inMinutes >= 10,
-    );
-    _recentEndedCallIds[callId] = now;
   }
 
   void _onControllerChanged() {

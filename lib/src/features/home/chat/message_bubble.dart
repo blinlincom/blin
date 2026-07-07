@@ -29,6 +29,7 @@ class _MessageBubble extends StatelessWidget {
         _intValue(item, ['channel_type']) == _groupChannelType;
     final isImageLike =
         contentType == ChatContentTypes.image ||
+        contentType == ChatContentTypes.emoji ||
         contentType == ChatContentTypes.gif ||
         contentType == ChatContentTypes.sticker ||
         contentType == ChatContentTypes.video;
@@ -74,6 +75,8 @@ class _MessageBubble extends StatelessWidget {
 
   Color _bubbleColor(String contentType) {
     if (contentType == ChatContentTypes.redPacket ||
+        contentType == ChatContentTypes.emoji ||
+        contentType == ChatContentTypes.sticker ||
         contentType == ChatContentTypes.video) {
       return Colors.transparent;
     }
@@ -84,6 +87,7 @@ class _MessageBubble extends StatelessWidget {
     return switch (contentType) {
       ChatContentTypes.redPacket => EdgeInsets.zero,
       ChatContentTypes.image ||
+      ChatContentTypes.emoji ||
       ChatContentTypes.gif ||
       ChatContentTypes.sticker ||
       ChatContentTypes.video => const EdgeInsets.all(0),
@@ -111,6 +115,7 @@ class _MessageBubble extends StatelessWidget {
       ChatContentTypes.transfer => width * 0.62,
       ChatContentTypes.voice => width * 0.46,
       ChatContentTypes.image ||
+      ChatContentTypes.emoji ||
       ChatContentTypes.gif ||
       ChatContentTypes.sticker => width * 0.62,
       _ => width * 0.58,

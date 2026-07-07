@@ -2158,10 +2158,11 @@ class BusinessImService extends ChangeNotifier {
       }
     }
     final clientMsgNo = newClientMsgNo();
+    final normalizedPayload = _normalizeOutgoingPayload(contentType, payload);
     final senderPayload = <String, Object?>{
       'sender_id': session.userId.toString(),
       'sender_uid': chat.uid,
-      ...payload,
+      ...normalizedPayload,
     };
     final serverPayload = Map<String, Object?>.from(senderPayload)
       ..remove('file_path');
@@ -2373,11 +2374,14 @@ class BusinessImService extends ChangeNotifier {
         throw ApiException(muteNotice);
       }
     }
-    final payload = _cleanPayload({
-      ..._asMap(failedMessage['payload']),
-      'client_msg_no': clientMsgNo,
-      if (contentType.isNotEmpty) 'content_type': contentType,
-    });
+    final payload = _normalizeOutgoingPayload(
+      contentType,
+      _cleanPayload({
+        ..._asMap(failedMessage['payload']),
+        'client_msg_no': clientMsgNo,
+        if (contentType.isNotEmpty) 'content_type': contentType,
+      }),
+    );
     final filePath = _value(payload, ['file_path']);
     final serverPayload = Map<String, Object?>.from(payload)
       ..remove('file_path');
@@ -6823,6 +6827,53 @@ class BusinessImService extends ChangeNotifier {
         (entry) => entry.value != null && entry.value.toString().isNotEmpty,
       ),
     );
+  }
+
+  Map<String, Object?> _normalizeOutgoingPayload(
+    String contentType,
+    Map<String, Object?> payload,
+  ) {
+    final normalized = Map<String, Object?>.from(payload);
+    if (contentType != ChatContentTypes.emoji) {
+      return normalized;
+    }
+    final media = _asMap(normalized['media']);
+    final emojiId = _value(normalized, [
+      'emoji_id',
+      'emoji_code',
+      'sticker_id',
+    ], fallback: _value(media, ['emoji_id', 'emoji_code', 'sticker_id']));
+    final emojiAsset = _value(normalized, [
+      'emoji_asset',
+      'asset',
+      'emoji_path',
+    ], fallback: _value(media, ['emoji_asset', 'asset', 'emoji_path']));
+    normalized
+      ..['content'] = '[表情]'
+      ..remove('text')
+      ..remove('emoji_label')
+      ..remove('content_preview');
+    if (emojiId.isNotEmpty) {
+      normalized
+        ..['emoji_id'] = emojiId
+        ..['emoji_code'] = emojiId;
+    }
+    if (emojiAsset.isNotEmpty) {
+      normalized['emoji_asset'] = emojiAsset;
+    }
+    if (media.isNotEmpty) {
+      final nextMedia = Map<String, Object?>.from(media);
+      if (emojiId.isNotEmpty) {
+        nextMedia
+          ..['emoji_id'] = emojiId
+          ..['emoji_code'] = emojiId;
+      }
+      if (emojiAsset.isNotEmpty) {
+        nextMedia['emoji_asset'] = emojiAsset;
+      }
+      normalized['media'] = nextMedia;
+    }
+    return normalized;
   }
 
   List<Map<String, Object?>> _filterVisibleMessages(

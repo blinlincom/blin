@@ -5,6 +5,7 @@ import '../core/app_config.dart';
 import '../core/design_tokens.dart';
 import '../features/auth/auth_page.dart';
 import '../features/home/home_page.dart';
+import 'realtime_event_coordinator.dart';
 import 'session_controller.dart';
 
 class BimApp extends StatefulWidget {
@@ -17,22 +18,41 @@ class BimApp extends StatefulWidget {
 }
 
 class _BimAppState extends State<BimApp> with WidgetsBindingObserver {
+  final _navigatorKey = GlobalKey<NavigatorState>();
+  final _callOverlayKey = GlobalKey<CallOverlayHostState>();
+  late final RealtimeEventCoordinator _realtimeCoordinator;
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _realtimeCoordinator = RealtimeEventCoordinator(
+      controller: widget.controller,
+      navigatorKey: _navigatorKey,
+      callOverlayKey: _callOverlayKey,
+    )..start();
     widget.controller.coldStart();
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _realtimeCoordinator.dispose();
     super.dispose();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     widget.controller.appLifecycleChanged(state);
+    _realtimeCoordinator.didChangeAppLifecycleState(state);
+  }
+
+  @override
+  Future<bool> didPopRoute() async {
+    if (_callOverlayKey.currentState?.handleSystemBack() == true) {
+      return true;
+    }
+    return false;
   }
 
   @override
@@ -41,9 +61,16 @@ class _BimAppState extends State<BimApp> with WidgetsBindingObserver {
       animation: widget.controller,
       builder: (context, _) {
         return MaterialApp(
+          navigatorKey: _navigatorKey,
           title: AppConfig.appName,
           debugShowCheckedModeBanner: false,
           theme: _theme(),
+          builder: (context, child) {
+            return CallOverlayHost(
+              key: _callOverlayKey,
+              child: child ?? const SizedBox.shrink(),
+            );
+          },
           home: _root(),
         );
       },
@@ -52,6 +79,7 @@ class _BimAppState extends State<BimApp> with WidgetsBindingObserver {
 
   Widget _root() {
     if (widget.controller.isLoggedIn) {
+      _realtimeCoordinator.onSessionAvailable();
       return HomePage(controller: widget.controller);
     }
     return AuthPage(controller: widget.controller);

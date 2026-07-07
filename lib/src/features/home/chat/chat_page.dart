@@ -7,6 +7,7 @@ class ChatPage extends StatefulWidget {
     required this.channelId,
     required this.groupId,
     required this.channelType,
+    this.initialClientMsgNo = '',
     super.key,
   });
 
@@ -15,6 +16,7 @@ class ChatPage extends StatefulWidget {
   final String channelId;
   final String groupId;
   final int channelType;
+  final String initialClientMsgNo;
 
   @override
   State<ChatPage> createState() => _ChatPageState();
@@ -30,6 +32,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   final AudioRecorder _voiceRecorder = AudioRecorder();
   final Map<String, GlobalKey> _messageRowKeys = <String, GlobalKey>{};
   bool _toolsOpen = false;
+  bool _emojiOpen = false;
   bool _voiceMode = false;
   bool _voiceRecording = false;
   bool _voiceStartPending = false;
@@ -79,6 +82,9 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   final Set<String> _receivingRedPacketIds = <String>{};
   final Set<String> _receivingTransferIds = <String>{};
   String _highlightedMessageKey = '';
+  String _pendingInitialClientMsgNo = '';
+  bool _initialClientMsgHandled = false;
+  bool _initialClientMsgRevealed = false;
   Timer? _quoteHighlightTimer;
 
   bool get _isGroup => widget.channelType == _groupChannelType;
@@ -96,6 +102,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     _conversationRevision = widget.controller.conversationVersion;
     _messageRevision = _currentMessageRevision();
     _lastImStatusText = widget.controller.imStatusText;
+    _pendingInitialClientMsgNo = widget.initialClientMsgNo.trim();
     _channelInvalid = widget.controller.isChannelInvalid(
       channelId: widget.channelId,
       channelType: widget.channelType,
@@ -113,6 +120,11 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       ),
     );
     _loadMessagesIntoState(showLoading: _messages.isEmpty);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _tryRevealInitialMessage(source: 'first_frame');
+      }
+    });
     _refreshGroupMuteState();
     _refreshPeerOnlineStatus();
     if (_isGroup && !_channelInvalid) {
@@ -160,9 +172,10 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       return;
     }
     _clearSelectedMessageMenu();
-    if (_toolsOpen || _voiceMode) {
+    if (_toolsOpen || _emojiOpen || _voiceMode) {
       setState(() {
         _toolsOpen = false;
+        _emojiOpen = false;
         _voiceMode = false;
       });
     }
@@ -202,6 +215,9 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       _runningMessageLoadKey = '';
       _messageRowKeys.clear();
       _highlightedMessageKey = '';
+      _pendingInitialClientMsgNo = widget.initialClientMsgNo.trim();
+      _initialClientMsgHandled = false;
+      _initialClientMsgRevealed = false;
       _quoteHighlightTimer?.cancel();
       _clearSelectedMessageMenu();
       unawaited(_cancelVoiceRecording(silent: true));
@@ -231,12 +247,22 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         ),
       );
       _loadMessagesIntoState(showLoading: _messages.isEmpty);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          _tryRevealInitialMessage(source: 'channel_changed_first_frame');
+        }
+      });
       _refreshGroupMuteState();
       _refreshPeerOnlineStatus();
       if (_isGroup && !_channelInvalid) {
         unawaited(_loadGroupMuteStatus());
         unawaited(_refreshGroupPresence());
       }
+    } else if (oldWidget.initialClientMsgNo != widget.initialClientMsgNo) {
+      _pendingInitialClientMsgNo = widget.initialClientMsgNo.trim();
+      _initialClientMsgHandled = false;
+      _initialClientMsgRevealed = false;
+      _tryRevealInitialMessage(source: 'initial_client_msg_changed');
     }
   }
 
@@ -520,6 +546,8 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       return;
     }
     final shouldStickToBottom = _shouldAutoScrollForMessage(event);
+    final revealRequested =
+        _pendingInitialClientMsgNo.isNotEmpty && !_initialClientMsgHandled;
     setState(() {
       if (_isChannelInvalidEvent(event.source)) {
         _channelInvalid = true;
@@ -547,7 +575,8 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       _messageRevision = _currentMessageRevision();
       _conversationRevision = widget.controller.conversationVersion;
     });
-    if (shouldStickToBottom) {
+    _tryRevealInitialMessage(source: 'message_event');
+    if (shouldStickToBottom && !revealRequested && !_initialClientMsgRevealed) {
       _scrollToBottom(animated: event.source != 'send_local');
     }
     _scheduleBurnAfterReadForMessages(_messages);
@@ -777,11 +806,19 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       });
       _historyLoadingTimer?.cancel();
       _scheduleBurnAfterReadForMessages(nextMessages);
+      final revealRequested =
+          _pendingInitialClientMsgNo.isNotEmpty && !_initialClientMsgHandled;
+      _tryRevealInitialMessage(source: 'messages_loaded');
+      final suppressAutoBottom = revealRequested || _initialClientMsgRevealed;
       if (showLoading && !_didInitialScroll) {
         _didInitialScroll = true;
-        _scrollToBottom(animated: false);
+        if (!suppressAutoBottom) {
+          _scrollToBottom(animated: false);
+        }
       } else if (wasNearBottom) {
-        _scrollToBottom(animated: false);
+        if (!suppressAutoBottom) {
+          _scrollToBottom(animated: false);
+        }
       }
       if (!invalid) {
         _scheduleVisibleRead(source: 'messages_loaded');
@@ -1300,6 +1337,78 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     });
   }
 
+  int _findMessageIndexByClientMsgNo(String clientMsgNo) {
+    if (clientMsgNo.isEmpty) {
+      return -1;
+    }
+    for (var index = _messages.length - 1; index >= 0; index -= 1) {
+      final item = _messages[index];
+      final payload = _asObjectMap(item['payload']);
+      final itemClientMsgNo = _value(item, [
+        'client_msg_no',
+      ], fallback: _value(payload, ['client_msg_no']));
+      if (itemClientMsgNo == clientMsgNo) {
+        return index;
+      }
+    }
+    return -1;
+  }
+
+  void _tryRevealInitialMessage({required String source}) {
+    final clientMsgNo = _pendingInitialClientMsgNo;
+    if (_initialClientMsgHandled ||
+        clientMsgNo.isEmpty ||
+        _messagesLoading ||
+        _messages.isEmpty) {
+      return;
+    }
+    final messageIndex = _findMessageIndexByClientMsgNo(clientMsgNo);
+    if (messageIndex < 0) {
+      _initialClientMsgHandled = true;
+      _pendingInitialClientMsgNo = '';
+      AppLogger.warn(
+        'ui',
+        'initial notification message not found in chat',
+        data: {
+          'source': source,
+          'channel_id': widget.channelId,
+          'channel_type': widget.channelType,
+          'client_msg_no': clientMsgNo,
+          'message_count': _messages.length,
+        },
+      );
+      if (mounted) {
+        setState(() {
+          _error = null;
+          _message = '消息暂时未同步到本地';
+        });
+      }
+      return;
+    }
+    final target = _messages[messageIndex];
+    final targetKey = _messageLookupKey(target);
+    if (targetKey.isEmpty) {
+      return;
+    }
+    _initialClientMsgHandled = true;
+    _pendingInitialClientMsgNo = '';
+    _initialClientMsgRevealed = true;
+    AppLogger.info(
+      'ui',
+      'reveal initial notification message',
+      data: {
+        'source': source,
+        'channel_id': widget.channelId,
+        'channel_type': widget.channelType,
+        'client_msg_no': clientMsgNo,
+        'message_index': messageIndex,
+        'target_key': targetKey,
+      },
+    );
+    _highlightMessage(targetKey);
+    _scrollQuotedMessageIntoView(targetKey, messageIndex);
+  }
+
   void _jumpToQuotedMessage(Map<String, Object?> quote) {
     final messageIndex = _findQuotedMessageIndex(quote);
     if (messageIndex < 0) {
@@ -1474,8 +1583,33 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     setState(() {
       _toolsOpen = opening;
       if (opening) {
+        _emojiOpen = false;
         _voiceMode = false;
       }
+    });
+    if (!opening) {
+      _scrollToBottom(animated: false);
+    }
+  }
+
+  void _toggleEmojiPanel() {
+    if (!_composerEnabled) {
+      setState(() => _message = _groupMuteText(_groupMuteState));
+      return;
+    }
+    final opening = !_emojiOpen;
+    if (opening) {
+      FocusScope.of(context).unfocus();
+    }
+    _clearSelectedMessageMenu();
+    setState(() {
+      _emojiOpen = opening;
+      if (opening) {
+        _toolsOpen = false;
+        _voiceMode = false;
+      }
+      _message = '';
+      _error = null;
     });
     if (!opening) {
       _scrollToBottom(animated: false);
@@ -1492,6 +1626,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     setState(() {
       _voiceMode = !_voiceMode;
       _toolsOpen = false;
+      _emojiOpen = false;
       _message = '';
       _error = null;
     });
@@ -1627,6 +1762,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                           enabled: composerEnabled,
                           disabledText: muteText,
                           toolsOpen: _toolsOpen,
+                          emojiOpen: _emojiOpen,
                           voiceMode: _voiceMode,
                           recording: _voiceRecording,
                           onVoice: _toggleVoiceMode,
@@ -1636,16 +1772,21 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                               unawaited(_finishVoiceRecording()),
                           onVoiceRecordCancel: () =>
                               unawaited(_cancelVoiceRecording()),
-                          onEmoji: () => _sendMedia(ChatContentTypes.emoji),
+                          onEmoji: _toggleEmojiPanel,
                           onTools: _toggleTools,
                           onSend: _sendText,
                         ),
+                        if (_emojiOpen)
+                          _EmojiPanel(
+                            onSelected: (payload) =>
+                                unawaited(_sendEmoji(payload)),
+                          ),
                         if (_toolsOpen)
                           _ChatToolsPanel(
                             isGroup: _isGroup,
                             onTextOption: _openTextOptions,
                             onImage: () => _sendMedia(ChatContentTypes.image),
-                            onEmoji: () => _sendMedia(ChatContentTypes.emoji),
+                            onEmoji: _toggleEmojiPanel,
                             onSticker: () =>
                                 _sendMedia(ChatContentTypes.sticker),
                             onVideo: () => _sendMedia(ChatContentTypes.video),
@@ -2006,6 +2147,39 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     if (data == null) {
       return;
     }
+    final payloads = _mediaPayloadBatch(data);
+    for (final payload in payloads) {
+      if (!mounted) {
+        return;
+      }
+      await _sendMediaPayload(contentType, payload);
+    }
+  }
+
+  List<Map<String, String>> _mediaPayloadBatch(Map<String, String> data) {
+    final batchJson = data['batch_json'];
+    if (batchJson == null || batchJson.isEmpty) {
+      return [data];
+    }
+    final decoded = jsonDecode(batchJson);
+    if (decoded is! List) {
+      return [data];
+    }
+    return decoded
+        .whereType<Map>()
+        .map(
+          (item) => item.map(
+            (key, value) => MapEntry(key.toString(), value?.toString() ?? ''),
+          ),
+        )
+        .where((item) => item.isNotEmpty)
+        .toList(growable: false);
+  }
+
+  Future<void> _sendMediaPayload(
+    String contentType,
+    Map<String, String> data,
+  ) async {
     final url = data['url'] ?? '';
     final filePath = data['file_path'] ?? '';
     final params = Map<String, Object?>.from(data)..remove('url');
@@ -2038,6 +2212,71 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
             contentType: contentType,
             url: url,
             filePath: filePath,
+            params: params,
+          );
+        }
+      },
+      beforeTask: () {
+        setState(() {
+          _replyClientMsgNo = '';
+          _replyQuote = const {};
+        });
+      },
+    );
+  }
+
+  Future<void> _sendEmoji(Map<String, String> data) async {
+    if (!_composerEnabled) {
+      setState(() => _message = _groupMuteText(_groupMuteState));
+      return;
+    }
+    final emojiId = (data['emoji_id'] ?? '').trim();
+    final emojiAsset = (data['emoji_asset'] ?? '').trim();
+    if (emojiId.isEmpty || emojiAsset.isEmpty) {
+      setState(() => _error = '表情数据无效');
+      return;
+    }
+    final params = <String, Object?>{
+      'emoji_id': emojiId,
+      'emoji_code': emojiId,
+      'emoji_asset': emojiAsset,
+      'content': '[表情]',
+    };
+    if (_replyQuote.isNotEmpty) {
+      params['quote'] = Map<String, Object?>.from(_replyQuote);
+      params['quote_json'] = jsonEncode(_replyQuote);
+      params['quote_client_msg_no'] = _replyClientMsgNo;
+      params['reply_client_msg_no'] = _replyClientMsgNo;
+    }
+    if (_burnAfterRead) {
+      params['burn_after_read'] = '1';
+      if (_burnSeconds > 0) {
+        params['burn_after_read_seconds'] = _burnSeconds.toString();
+      }
+    }
+    AppLogger.info(
+      'ui',
+      'emoji selected for send',
+      data: {
+        'channel_id': widget.channelId,
+        'channel_type': widget.channelType,
+        'emoji_id': emojiId,
+        'emoji_asset': emojiAsset,
+      },
+    );
+    await _runSending(
+      () async {
+        if (_isGroup) {
+          await widget.controller.sendGroupMedia(
+            groupId: _groupId,
+            channelId: widget.channelId,
+            contentType: ChatContentTypes.emoji,
+            params: params,
+          );
+        } else {
+          await widget.controller.sendPrivateMedia(
+            receiverId: _receiverId,
+            contentType: ChatContentTypes.emoji,
             params: params,
           );
         }
@@ -2316,9 +2555,8 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       return Future.value(null);
     }
     if (contentType == ChatContentTypes.emoji) {
-      return Navigator.of(context).push<Map<String, String>>(
-        MaterialPageRoute(builder: (_) => const _EmojiPickerPage()),
-      );
+      _toggleEmojiPanel();
+      return Future.value(null);
     }
     if (contentType == ChatContentTypes.image ||
         contentType == ChatContentTypes.video) {

@@ -4,12 +4,14 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
+import android.os.Bundle
 import android.os.PowerManager
 import android.provider.Settings
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
 import android.app.NotificationManager
+import android.view.WindowManager
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -23,6 +25,14 @@ import javax.crypto.spec.GCMParameterSpec
 class MainActivity : FlutterActivity() {
     private val cacheSecurityChannelName = "bimotc.com/cache_security"
     private val backgroundReceiveChannelName = "bimotc.com/background_receive"
+    private val realtimeNotificationChannelName = "bimotc.com/realtime_notifications"
+    private var realtimeNotificationChannel: MethodChannel? = null
+    private var realtimeNotificationBridge: RealtimeNotificationBridge? = null
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        applyRealtimeWindowFlags(intent)
+    }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -67,6 +77,42 @@ class MainActivity : FlutterActivity() {
                 }
                 else -> result.notImplemented()
             }
+        }
+        realtimeNotificationChannel = MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            realtimeNotificationChannelName
+        ).also { channel ->
+            realtimeNotificationBridge = RealtimeNotificationBridge(this).also { bridge ->
+                bridge.configure(channel)
+            }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        applyRealtimeWindowFlags(intent)
+        realtimeNotificationBridge?.dispatchIntent(intent, realtimeNotificationChannel)
+    }
+
+    private fun applyRealtimeWindowFlags(intent: Intent?) {
+        val showForCall = intent?.action == realtimeNotificationTapAction &&
+            intent.getStringExtra(realtimeNotificationTypeExtra) == "call"
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+            setShowWhenLocked(showForCall)
+            setTurnScreenOn(showForCall)
+        } else if (showForCall) {
+            @Suppress("DEPRECATION")
+            window.addFlags(
+                WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+                    WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
+            )
+        } else {
+            @Suppress("DEPRECATION")
+            window.clearFlags(
+                WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+                    WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
+            )
         }
     }
 
@@ -115,6 +161,11 @@ class MainActivity : FlutterActivity() {
         }
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         startActivity(intent)
+    }
+
+    companion object {
+        private const val realtimeNotificationTapAction = "bimotc.com.ACTION_NOTIFICATION_TAP"
+        private const val realtimeNotificationTypeExtra = "type"
     }
 }
 

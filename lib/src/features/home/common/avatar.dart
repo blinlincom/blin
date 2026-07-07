@@ -33,15 +33,25 @@ class _Avatar extends StatelessWidget {
       height: size,
       clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(borderRadius: BorderRadius.circular(radius)),
-      child: Image.network(
-        url,
-        width: size,
-        height: size,
-        fit: BoxFit.cover,
-        gaplessPlayback: true,
-        errorBuilder: (_, __, ___) => fallback,
-        loadingBuilder: (context, child, progress) =>
-            progress == null ? child : fallback,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          fallback,
+          Image.network(
+            url,
+            width: size,
+            height: size,
+            fit: BoxFit.cover,
+            gaplessPlayback: true,
+            frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
+              if (wasSynchronouslyLoaded || frame != null) {
+                return child;
+              }
+              return const SizedBox.shrink();
+            },
+            errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+          ),
+        ],
       ),
     );
   }
