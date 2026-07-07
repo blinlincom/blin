@@ -3348,17 +3348,37 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
               title: widget.title,
               groupId: _groupId,
               channelId: widget.channelId,
+              avatarUrl: _headerAvatarUrl(),
+              memberCount: _groupMemberCount,
+              onlineCount: _groupOnlineCount,
             )
           : PrivateChatActionsPage(
               controller: widget.controller,
               title: widget.title,
               receiverId: _receiverId,
               channelId: widget.channelId,
+              avatarUrl: _headerAvatarUrl(),
+              online: _peerOnline,
+              burnAfterRead: _burnAfterRead,
+              peerBurnAfterRead: _peerBurnAfterRead,
+              burnSeconds: _burnSeconds,
+              peerBurnSeconds: _peerBurnSeconds,
+              onBurnChanged: _setBurnAfterReadFromSettings,
+              onStartVoiceCall: () => _startLiveKitCall('audio'),
+              onStartVideoCall: () => _startLiveKitCall('video'),
             ),
     );
     if (mounted && _isGroup) {
       unawaited(_refreshGroupPresence());
     }
+  }
+
+  Future<void> _setBurnAfterReadFromSettings(bool enabled, int seconds) async {
+    setState(() {
+      _burnAfterRead = enabled;
+      _burnSeconds = enabled ? seconds : 0;
+    });
+    await _notifyBurnAfterReadState();
   }
 
   Future<void> _runSending(
@@ -3463,7 +3483,11 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       return;
     }
     try {
-      await widget.controller.burnAfterRead(clientMsgNo);
+      await widget.controller.burnAfterRead(
+        targetClientMsgNo: clientMsgNo,
+        channelId: widget.channelId,
+        channelType: widget.channelType,
+      );
       await widget.controller.deleteLocalMessageOnly(
         targetClientMsgNo: clientMsgNo,
         channelId: widget.channelId,

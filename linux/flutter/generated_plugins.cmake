@@ -5,6 +5,7 @@
 list(APPEND FLUTTER_PLUGIN_LIST
   audioplayers_linux
   flutter_webrtc
+  gtk
   livekit_client
   mmkv_linux
   record_linux

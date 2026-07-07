@@ -189,6 +189,9 @@ class GroupDetailPage extends StatefulWidget {
     required this.title,
     required this.groupId,
     required this.channelId,
+    this.avatarUrl = '',
+    this.memberCount,
+    this.onlineCount,
     super.key,
   });
 
@@ -196,6 +199,9 @@ class GroupDetailPage extends StatefulWidget {
   final String title;
   final String groupId;
   final String channelId;
+  final String avatarUrl;
+  final int? memberCount;
+  final int? onlineCount;
 
   @override
   State<GroupDetailPage> createState() => _GroupDetailPageState();
@@ -209,11 +215,82 @@ class _GroupDetailPageState extends State<GroupDetailPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text(widget.title)),
+      backgroundColor: _pageColor,
+      appBar: AppBar(title: const Text('群聊设置')),
       body: SafeArea(
         child: ListView(
+          padding: const EdgeInsets.only(bottom: 24),
           children: [
-            const _SectionHeader(text: '群设置'),
+            ColoredBox(
+              color: _surfaceColor,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),
+                child: InkWell(
+                  onTap: _openGroupProfile,
+                  child: Row(
+                    children: [
+                      _Avatar(
+                        label: widget.title,
+                        imageUrl: widget.avatarUrl,
+                        size: 62,
+                        color: const Color(0xff34c759),
+                        icon: Icons.groups,
+                      ),
+                      const SizedBox(width: 14),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              widget.title.isEmpty ? '群聊' : widget.title,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: _textColor,
+                                fontSize: 19,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                            const SizedBox(height: 7),
+                            Text(
+                              _groupMetaText,
+                              style: const TextStyle(
+                                color: _mutedColor,
+                                fontSize: 13,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const Icon(Icons.chevron_right, color: _mutedColor),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            FutureBuilder<Map<String, Object?>>(
+              key: ValueKey(_version),
+              future: widget.controller.groupMembers(widget.groupId),
+              builder: (context, snapshot) {
+                final members = snapshot.connectionState == ConnectionState.done
+                    ? _listFromResult(snapshot.data ?? const {})
+                    : const <Map<String, Object?>>[];
+                return _GroupMemberPreview(
+                  loading: snapshot.connectionState != ConnectionState.done,
+                  members: members,
+                  onOpenAll: _openMembers,
+                  onAdd: _addMembers,
+                );
+              },
+            ),
+            const _GroupGap(),
+            _PlainListTile(
+              icon: Icons.info_outline,
+              title: '群聊资料',
+              subtitle: '群名称、群公告、成员数量',
+              trailing: '',
+              onTap: _openGroupProfile,
+            ),
             _PlainListTile(
               icon: Icons.edit_outlined,
               title: '更新群资料',
@@ -228,6 +305,15 @@ class _GroupDetailPageState extends State<GroupDetailPage> {
               trailing: '',
               onTap: _addMembers,
             ),
+            const _GroupGap(),
+            _PlainListTile(
+              icon: Icons.delete_sweep_outlined,
+              title: '清空聊天',
+              subtitle: '只清空自己看到的群聊记录',
+              trailing: '',
+              onTap: _clearGroupConversation,
+            ),
+            const _GroupGap(),
             _PlainListTile(
               icon: Icons.logout,
               title: '退出群聊',
@@ -244,64 +330,47 @@ class _GroupDetailPageState extends State<GroupDetailPage> {
               onTap: () =>
                   _run(() => widget.controller.deleteGroup(widget.groupId)),
             ),
-            _PlainListTile(
-              icon: Icons.delete_sweep_outlined,
-              title: '清空聊天',
-              subtitle: '只清空自己看到的群聊记录',
-              trailing: '',
-              onTap: _clearGroupConversation,
-            ),
             _ResultBlock(text: _message),
             _ErrorBlock(text: _error),
-            const _SectionHeader(text: '群成员'),
-            FutureBuilder<Map<String, Object?>>(
-              key: ValueKey(_version),
-              future: widget.controller.groupMembers(widget.groupId),
-              builder: (context, snapshot) {
-                if (snapshot.connectionState != ConnectionState.done) {
-                  return const Padding(
-                    padding: EdgeInsets.all(20),
-                    child: Center(child: CircularProgressIndicator()),
-                  );
-                }
-                if (snapshot.hasError) {
-                  return _ErrorState(text: snapshot.error.toString());
-                }
-                final members = _listFromResult(snapshot.data ?? const {});
-                if (members.isEmpty) {
-                  return const _EmptyRow(text: '暂无成员');
-                }
-                return Column(
-                  children: [
-                    for (final member in members)
-                      _PlainListTile(
-                        icon: Icons.person_outline,
-                        title: _memberTitle(member),
-                        subtitle: _memberSubtitle(member),
-                        trailing: _memberUsername(member),
-                        onTap: () async {
-                          await Navigator.of(context).push(
-                            MaterialPageRoute<void>(
-                              builder: (_) => GroupMemberActionPage(
-                                controller: widget.controller,
-                                groupId: widget.groupId,
-                                member: member,
-                              ),
-                            ),
-                          );
-                          if (mounted) {
-                            setState(() => _version++);
-                          }
-                        },
-                      ),
-                  ],
-                );
-              },
-            ),
           ],
         ),
       ),
     );
+  }
+
+  String get _groupMetaText {
+    final member = widget.memberCount == null ? '' : '${widget.memberCount}人';
+    final online = widget.onlineCount == null ? '' : '${widget.onlineCount}人在线';
+    final parts = [member, online].where((item) => item.isNotEmpty).toList();
+    return parts.isEmpty ? '群聊' : parts.join(' · ');
+  }
+
+  Future<void> _openGroupProfile() async {
+    await _push(
+      context,
+      GroupProfilePage(
+        controller: widget.controller,
+        title: widget.title,
+        groupId: widget.groupId,
+        channelId: widget.channelId,
+        avatarUrl: widget.avatarUrl,
+        memberCount: widget.memberCount,
+        onlineCount: widget.onlineCount,
+      ),
+    );
+  }
+
+  Future<void> _openMembers() async {
+    await _push(
+      context,
+      GroupMemberListPage(
+        controller: widget.controller,
+        groupId: widget.groupId,
+      ),
+    );
+    if (mounted) {
+      setState(() => _version++);
+    }
   }
 
   Future<void> _updateGroup() async {
@@ -380,6 +449,343 @@ class _GroupDetailPageState extends State<GroupDetailPage> {
     } catch (error) {
       setState(() => _error = error.toString());
     }
+  }
+}
+
+class GroupProfilePage extends StatefulWidget {
+  const GroupProfilePage({
+    required this.controller,
+    required this.title,
+    required this.groupId,
+    required this.channelId,
+    this.avatarUrl = '',
+    this.memberCount,
+    this.onlineCount,
+    super.key,
+  });
+
+  final SessionController controller;
+  final String title;
+  final String groupId;
+  final String channelId;
+  final String avatarUrl;
+  final int? memberCount;
+  final int? onlineCount;
+
+  @override
+  State<GroupProfilePage> createState() => _GroupProfilePageState();
+}
+
+class _GroupProfilePageState extends State<GroupProfilePage> {
+  late Future<Map<String, Object?>> _membersFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _membersFuture = widget.controller.groupMembers(widget.groupId);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: _pageColor,
+      appBar: AppBar(title: const Text('群聊资料')),
+      body: SafeArea(
+        child: ListView(
+          padding: const EdgeInsets.only(bottom: 24),
+          children: [
+            ColoredBox(
+              color: _surfaceColor,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(20, 24, 20, 22),
+                child: Row(
+                  children: [
+                    _Avatar(
+                      label: widget.title,
+                      imageUrl: widget.avatarUrl,
+                      size: 72,
+                      color: const Color(0xff34c759),
+                      icon: Icons.groups,
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            widget.title.isEmpty ? '群聊' : widget.title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: _textColor,
+                              fontSize: 21,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            _groupProfileMeta,
+                            style: const TextStyle(
+                              color: _mutedColor,
+                              fontSize: 13,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const _GroupGap(),
+            _ProfileInfoRow(label: '群名称', value: widget.title),
+            FutureBuilder<Map<String, Object?>>(
+              future: _membersFuture,
+              builder: (context, snapshot) {
+                final members = snapshot.connectionState == ConnectionState.done
+                    ? _listFromResult(snapshot.data ?? const {})
+                    : const <Map<String, Object?>>[];
+                final owner = members.firstWhere(
+                  (item) => _intValue(item, ['role']) == 1,
+                  orElse: () => const <String, Object?>{},
+                );
+                return Column(
+                  children: [
+                    _ProfileInfoRow(
+                      label: '群主',
+                      value: owner.isEmpty ? '未获取' : _memberTitle(owner),
+                    ),
+                    _ProfileInfoRow(
+                      label: '成员',
+                      value: members.isEmpty
+                          ? _groupProfileMeta
+                          : '${members.length}人',
+                    ),
+                  ],
+                );
+              },
+            ),
+            const _GroupGap(),
+            _PlainListTile(
+              icon: Icons.groups_outlined,
+              title: '查看全部群成员',
+              subtitle: '成员资料、禁言和踢出',
+              trailing: '',
+              onTap: () => _push(
+                context,
+                GroupMemberListPage(
+                  controller: widget.controller,
+                  groupId: widget.groupId,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  String get _groupProfileMeta {
+    final member = widget.memberCount == null ? '' : '${widget.memberCount}人';
+    final online = widget.onlineCount == null ? '' : '${widget.onlineCount}人在线';
+    final parts = [member, online].where((item) => item.isNotEmpty).toList();
+    return parts.isEmpty ? '群聊' : parts.join(' · ');
+  }
+}
+
+class GroupMemberListPage extends StatefulWidget {
+  const GroupMemberListPage({
+    required this.controller,
+    required this.groupId,
+    super.key,
+  });
+
+  final SessionController controller;
+  final String groupId;
+
+  @override
+  State<GroupMemberListPage> createState() => _GroupMemberListPageState();
+}
+
+class _GroupMemberListPageState extends State<GroupMemberListPage> {
+  var _version = 0;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: _pageColor,
+      appBar: AppBar(title: const Text('群成员')),
+      body: SafeArea(
+        child: FutureBuilder<Map<String, Object?>>(
+          key: ValueKey(_version),
+          future: widget.controller.groupMembers(widget.groupId),
+          builder: (context, snapshot) {
+            if (snapshot.connectionState != ConnectionState.done) {
+              return const Center(child: CircularProgressIndicator());
+            }
+            if (snapshot.hasError) {
+              return _ErrorState(text: snapshot.error.toString());
+            }
+            final members = _listFromResult(snapshot.data ?? const {});
+            if (members.isEmpty) {
+              return const _EmptyState(text: '暂无成员');
+            }
+            return ListView(
+              children: [
+                for (final member in members)
+                  _PlainListTile(
+                    icon: Icons.person_outline,
+                    title: _memberTitle(member),
+                    subtitle: _memberSubtitle(member),
+                    trailing: _memberUsername(member),
+                    onTap: () async {
+                      await Navigator.of(context).push(
+                        MaterialPageRoute<void>(
+                          builder: (_) => GroupMemberActionPage(
+                            controller: widget.controller,
+                            groupId: widget.groupId,
+                            member: member,
+                          ),
+                        ),
+                      );
+                      if (mounted) {
+                        setState(() => _version++);
+                      }
+                    },
+                  ),
+              ],
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
+class _GroupMemberPreview extends StatelessWidget {
+  const _GroupMemberPreview({
+    required this.loading,
+    required this.members,
+    required this.onOpenAll,
+    required this.onAdd,
+  });
+
+  final bool loading;
+  final List<Map<String, Object?>> members;
+  final VoidCallback onOpenAll;
+  final VoidCallback onAdd;
+
+  @override
+  Widget build(BuildContext context) {
+    final preview = members.take(8).toList(growable: false);
+    return ColoredBox(
+      color: _surfaceColor,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 18),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Expanded(
+                  child: Text(
+                    '群成员',
+                    style: TextStyle(
+                      color: _textColor,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+                InkWell(
+                  onTap: onOpenAll,
+                  child: Row(
+                    children: [
+                      Text(
+                        loading ? '加载中' : '${members.length}人',
+                        style: const TextStyle(
+                          color: _mutedColor,
+                          fontSize: 13,
+                        ),
+                      ),
+                      const Icon(
+                        Icons.chevron_right,
+                        size: 20,
+                        color: _mutedColor,
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 14),
+            Wrap(
+              spacing: 14,
+              runSpacing: 14,
+              children: [
+                for (final member in preview)
+                  SizedBox(
+                    width: 54,
+                    child: Column(
+                      children: [
+                        _Avatar(
+                          label: _memberTitle(member),
+                          imageUrl: _avatarUrlFromMap(member),
+                          size: 44,
+                          color: const Color(0xff8e99a8),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          _memberTitle(member),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            color: _secondaryTextColor,
+                            fontSize: 11,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                InkWell(
+                  onTap: onAdd,
+                  child: SizedBox(
+                    width: 54,
+                    child: Column(
+                      children: [
+                        Container(
+                          width: 44,
+                          height: 44,
+                          alignment: Alignment.center,
+                          decoration: BoxDecoration(
+                            color: _fillColor,
+                            border: Border.all(color: _lightBorderColor),
+                          ),
+                          child: const Icon(
+                            Icons.add,
+                            color: _mutedColor,
+                            size: 24,
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        const Text(
+                          '添加',
+                          style: TextStyle(
+                            color: _secondaryTextColor,
+                            fontSize: 11,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 

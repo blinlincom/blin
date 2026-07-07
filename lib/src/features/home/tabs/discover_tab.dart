@@ -34,6 +34,14 @@ class DiscoverTab extends StatelessWidget {
             subtitle: '搜索好友、群聊和本地联系人',
             onTap: () => _push(context, SearchPage(controller: controller)),
           ),
+          _MenuTile(
+            icon: Icons.qr_code_scanner,
+            iconColor: const Color(0xff111827),
+            title: '扫一扫',
+            subtitle: '扫描二维码添加好友',
+            onTap: () =>
+                _push(context, FriendQrScannerPage(controller: controller)),
+          ),
         ],
       ),
     );

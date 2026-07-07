@@ -1299,12 +1299,16 @@ class SessionController extends ChangeNotifier {
 
   Future<Map<String, Object?>> readReceipt({
     required String targetClientMsgNo,
+    required String channelId,
+    required int channelType,
     int messageSeq = 0,
   }) {
     return sendImAction(
       'im_message_read_receipts',
       params: {
         'client_msg_no': _im.newClientMsgNo(),
+        'channel_id': channelId,
+        'channel_type': channelType.toString(),
         'receipts': jsonEncode([
           {
             'target_client_msg_no': targetClientMsgNo,
@@ -1315,19 +1319,33 @@ class SessionController extends ChangeNotifier {
     );
   }
 
-  Future<Map<String, Object?>> receiptStatus(String targetClientMsgNo) {
+  Future<Map<String, Object?>> receiptStatus({
+    required String targetClientMsgNo,
+    required String channelId,
+    required int channelType,
+  }) {
     return sendImAction(
       'im_message_receipt_status',
-      params: {'target_client_msg_no': targetClientMsgNo},
+      params: {
+        'target_client_msg_no': targetClientMsgNo,
+        'channel_id': channelId,
+        'channel_type': channelType.toString(),
+      },
     );
   }
 
-  Future<Map<String, Object?>> burnAfterRead(String targetClientMsgNo) {
+  Future<Map<String, Object?>> burnAfterRead({
+    required String targetClientMsgNo,
+    required String channelId,
+    required int channelType,
+  }) {
     return sendImAction(
       'im_burn_after_read',
       params: {
         'target_client_msg_no': targetClientMsgNo,
         'client_msg_no': _im.newClientMsgNo(),
+        'channel_id': channelId,
+        'channel_type': channelType.toString(),
       },
     );
   }
@@ -1535,6 +1553,8 @@ class SessionController extends ChangeNotifier {
       groupId: groupId,
       payload: {
         'cmd': 'burn_after_read_state',
+        'channel_id': channelId,
+        'channel_type': channelType.toString(),
         'enabled': enabled ? '1' : '0',
         'seconds': seconds > 0 ? seconds.toString() : '0',
         if (groupId.isNotEmpty) 'group_id': groupId,

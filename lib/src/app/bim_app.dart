@@ -1,7 +1,11 @@
+import 'dart:async';
+
+import 'package:app_links/app_links.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../core/app_config.dart';
+import '../core/app_logger.dart';
 import '../core/design_tokens.dart';
 import '../features/auth/auth_page.dart';
 import '../features/home/home_page.dart';
@@ -21,6 +25,11 @@ class _BimAppState extends State<BimApp> with WidgetsBindingObserver {
   final _navigatorKey = GlobalKey<NavigatorState>();
   final _callOverlayKey = GlobalKey<CallOverlayHostState>();
   late final RealtimeEventCoordinator _realtimeCoordinator;
+  late final AppLinks _appLinks;
+  StreamSubscription<Uri>? _linkSubscription;
+  FriendQrTarget? _pendingFriendQrTarget;
+  String _lastFriendQrLink = '';
+  DateTime? _lastFriendQrLinkAt;
 
   @override
   void initState() {
@@ -31,12 +40,15 @@ class _BimAppState extends State<BimApp> with WidgetsBindingObserver {
       navigatorKey: _navigatorKey,
       callOverlayKey: _callOverlayKey,
     )..start();
+    _appLinks = AppLinks();
+    _initDeepLinks();
     widget.controller.coldStart();
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _linkSubscription?.cancel();
     _realtimeCoordinator.dispose();
     super.dispose();
   }
@@ -80,9 +92,80 @@ class _BimAppState extends State<BimApp> with WidgetsBindingObserver {
   Widget _root() {
     if (widget.controller.isLoggedIn) {
       _realtimeCoordinator.onSessionAvailable();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _openPendingFriendQrTarget();
+      });
       return HomePage(controller: widget.controller);
     }
     return AuthPage(controller: widget.controller);
+  }
+
+  Future<void> _initDeepLinks() async {
+    _linkSubscription = _appLinks.uriLinkStream.listen(
+      _handleAppLink,
+      onError: (Object error, StackTrace stackTrace) {
+        AppLogger.warn(
+          'deeplink',
+          'uri link stream failed',
+          data: {'error': error.toString(), 'stack': stackTrace.toString()},
+        );
+      },
+    );
+    try {
+      final initial = await _appLinks.getInitialLink();
+      if (initial != null) {
+        _handleAppLink(initial);
+      }
+    } catch (error, stackTrace) {
+      AppLogger.warn(
+        'deeplink',
+        'initial link failed',
+        data: {'error': error.toString(), 'stack': stackTrace.toString()},
+      );
+    }
+  }
+
+  void _handleAppLink(Uri uri) {
+    final target = parseFriendQrUri(uri);
+    if (target == null) {
+      AppLogger.info('deeplink', 'ignored app link', data: {'uri': '$uri'});
+      return;
+    }
+    final now = DateTime.now();
+    if (_lastFriendQrLink == target.raw &&
+        _lastFriendQrLinkAt != null &&
+        now.difference(_lastFriendQrLinkAt!) < const Duration(seconds: 2)) {
+      return;
+    }
+    _lastFriendQrLink = target.raw;
+    _lastFriendQrLinkAt = now;
+    AppLogger.info(
+      'deeplink',
+      'friend qr link received',
+      data: {
+        'username': target.username,
+        'logged_in': widget.controller.isLoggedIn,
+      },
+    );
+    _pendingFriendQrTarget = target;
+    if (widget.controller.isLoggedIn) {
+      _openPendingFriendQrTarget();
+    }
+  }
+
+  void _openPendingFriendQrTarget() {
+    final target = _pendingFriendQrTarget;
+    final navigator = _navigatorKey.currentState;
+    if (target == null || navigator == null || !widget.controller.isLoggedIn) {
+      return;
+    }
+    _pendingFriendQrTarget = null;
+    navigator.push(
+      MaterialPageRoute<void>(
+        builder: (_) =>
+            FriendQrResultPage(controller: widget.controller, target: target),
+      ),
+    );
   }
 
   ThemeData _theme() {

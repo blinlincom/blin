@@ -58,9 +58,34 @@ class MineTab extends StatelessWidget {
                           ],
                         ),
                       ),
+                      IconButton(
+                        tooltip: '我的二维码',
+                        onPressed: () => _push(
+                          context,
+                          MyFriendQrPage(controller: controller),
+                        ),
+                        icon: const Icon(Icons.qr_code_2, size: 24),
+                      ),
                     ],
                   ),
                 ),
+              ),
+              const _GroupGap(),
+              _MenuTile(
+                icon: Icons.qr_code_2,
+                iconColor: const Color(0xff2563eb),
+                title: '我的二维码',
+                subtitle: '让朋友扫码添加我',
+                onTap: () =>
+                    _push(context, MyFriendQrPage(controller: controller)),
+              ),
+              _MenuTile(
+                icon: Icons.qr_code_scanner,
+                iconColor: const Color(0xff111827),
+                title: '扫一扫',
+                subtitle: '扫描好友二维码',
+                onTap: () =>
+                    _push(context, FriendQrScannerPage(controller: controller)),
               ),
               const _GroupGap(),
               _MenuTile(

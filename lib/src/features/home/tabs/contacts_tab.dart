@@ -143,6 +143,8 @@ class _ContactsTabState extends State<ContactsTab> {
                       title: _friendTitle(item),
                       receiverId: _friendUserId(item),
                       channelId: _friendChannelId(item),
+                      avatarUrl: _friendAvatarUrl(item),
+                      online: _friendPresenceText(item) == '在线',
                     ),
                   ),
                 ),

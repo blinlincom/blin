@@ -8,8 +8,10 @@ import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:livekit_client/livekit_client.dart' as lk;
+import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:photo_manager/photo_manager.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 import 'package:record/record.dart';
 import 'package:video_player/video_player.dart';
 
@@ -29,6 +31,7 @@ part 'tabs/discover_tab.dart';
 part 'tabs/mine_tab.dart';
 part 'contacts/quick_actions_page.dart';
 part 'contacts/search_page.dart';
+part 'contacts/qr_friend_pages.dart';
 part 'contacts/connection_pages.dart';
 part 'contacts/add_friend_page.dart';
 part 'contacts/friend_requests_page.dart';
