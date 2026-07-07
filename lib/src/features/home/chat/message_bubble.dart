@@ -23,6 +23,10 @@ class _MessageBubble extends StatelessWidget {
     final payload = _asObjectMap(item['payload']);
     final content = _messageContentText(item, payload);
     final quote = _messageQuote(item);
+    final readText = _messageReadStatusText(item);
+    final timeLabel = _messageTimeLabel(item);
+    final isGroupMessage =
+        _intValue(item, ['channel_type']) == _groupChannelType;
     final isImageLike =
         contentType == ChatContentTypes.image ||
         contentType == ChatContentTypes.gif ||
@@ -34,6 +38,9 @@ class _MessageBubble extends StatelessWidget {
       payload: payload,
       isMe: isMe,
       status: status,
+      readText: readText,
+      timeLabel: timeLabel,
+      isGroupMessage: isGroupMessage,
       redPacketReceiving: redPacketReceiving,
       onRetry: onRetry,
     );
@@ -226,6 +233,9 @@ class _MessageBubbleContent extends StatelessWidget {
     required this.payload,
     required this.isMe,
     required this.status,
+    required this.readText,
+    required this.timeLabel,
+    required this.isGroupMessage,
     required this.redPacketReceiving,
     required this.onRetry,
   });
@@ -235,6 +245,9 @@ class _MessageBubbleContent extends StatelessWidget {
   final Map<String, Object?> payload;
   final bool isMe;
   final String status;
+  final String readText;
+  final String timeLabel;
+  final bool isGroupMessage;
   final bool redPacketReceiving;
   final VoidCallback onRetry;
 
@@ -245,6 +258,10 @@ class _MessageBubbleContent extends StatelessWidget {
         key: ValueKey(_mediaPreviewKey(contentType, payload, content)),
         payload: payload,
         status: status,
+        readText: readText,
+        timeLabel: timeLabel,
+        isMe: isMe,
+        isGroupMessage: isGroupMessage,
         onRetry: onRetry,
       ),
       ChatContentTypes.gif => _MediaPreview(
@@ -256,13 +273,12 @@ class _MessageBubbleContent extends StatelessWidget {
       ChatContentTypes.sticker => _StickerPreview(
         text: _value(payload, ['sticker_id', 'emoji_code'], fallback: content),
       ),
-      ChatContentTypes.emoji => Text(
-        _value(payload, [
-          'emoji_code',
-        ], fallback: content.isEmpty ? '[表情]' : content),
-        style: const TextStyle(fontSize: 24, height: 1.2),
+      ChatContentTypes.emoji => _EmojiMessagePreview(
+        payload: payload,
+        content: content,
       ),
       ChatContentTypes.voice => _VoicePreview(
+        payload: payload,
         seconds: _value(payload, ['duration'], fallback: '0'),
         isMe: isMe,
       ),
@@ -270,6 +286,10 @@ class _MessageBubbleContent extends StatelessWidget {
         key: ValueKey(_mediaPreviewKey(contentType, payload, content)),
         payload: payload,
         status: status,
+        readText: readText,
+        timeLabel: timeLabel,
+        isMe: isMe,
+        isGroupMessage: isGroupMessage,
         onRetry: onRetry,
       ),
       ChatContentTypes.file => _FilePreview(payload: payload, content: content),
@@ -460,35 +480,105 @@ class _StickerPreview extends StatelessWidget {
   }
 }
 
-class _VoicePreview extends StatelessWidget {
-  const _VoicePreview({required this.seconds, required this.isMe});
+class _VoicePreview extends StatefulWidget {
+  const _VoicePreview({
+    required this.payload,
+    required this.seconds,
+    required this.isMe,
+  });
 
+  final Map<String, Object?> payload;
   final String seconds;
   final bool isMe;
 
   @override
+  State<_VoicePreview> createState() => _VoicePreviewState();
+}
+
+class _VoicePreviewState extends State<_VoicePreview> {
+  AudioPlayer? _player;
+  bool _playing = false;
+
+  @override
+  void dispose() {
+    unawaited(_player?.dispose());
+    super.dispose();
+  }
+
+  Future<void> _togglePlay() async {
+    final source = _voiceSource();
+    if (source.isEmpty) {
+      return;
+    }
+    if (_playing) {
+      await _player?.stop();
+      if (mounted) {
+        setState(() => _playing = false);
+      }
+      return;
+    }
+    final player = _player ??= AudioPlayer();
+    player.onPlayerComplete.first.then((_) {
+      if (mounted) {
+        setState(() => _playing = false);
+      }
+    });
+    if (File(source).existsSync()) {
+      await player.play(DeviceFileSource(source));
+    } else {
+      await player.play(UrlSource(_normalizeAvatarUrl(source)));
+    }
+    if (mounted) {
+      setState(() => _playing = true);
+    }
+  }
+
+  String _voiceSource() {
+    final media = _asObjectMap(widget.payload['media']);
+    final local = _value(
+      widget.payload,
+      ['file_path', 'voice_file_path', 'local_path'],
+      fallback: _value(media, ['file_path', 'voice_file_path', 'local_path']),
+    );
+    if (local.isNotEmpty) {
+      return local;
+    }
+    return _value(
+      widget.payload,
+      ['voice_url', 'audio_url', 'file_url', 'url', 'path'],
+      fallback: _value(media, ['voice_url', 'audio_url', 'file_url', 'url']),
+    );
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final label = seconds == '0' || seconds.isEmpty ? '' : '$seconds"';
-    return SizedBox(
-      width: 100,
-      child: Row(
-        mainAxisAlignment: isMe
-            ? MainAxisAlignment.end
-            : MainAxisAlignment.start,
-        children: [
-          if (!isMe) const Icon(Icons.graphic_eq, size: 20),
-          if (!isMe) const SizedBox(width: 8),
-          Text(
-            label,
-            style: const TextStyle(
-              color: _textColor,
-              fontSize: 15,
-              fontWeight: FontWeight.w700,
+    final label = widget.seconds == '0' || widget.seconds.isEmpty
+        ? ''
+        : '${widget.seconds}"';
+    final icon = _playing ? Icons.pause_rounded : Icons.graphic_eq;
+    return InkWell(
+      onTap: _togglePlay,
+      child: SizedBox(
+        width: 104,
+        child: Row(
+          mainAxisAlignment: widget.isMe
+              ? MainAxisAlignment.end
+              : MainAxisAlignment.start,
+          children: [
+            if (!widget.isMe) Icon(icon, size: 20),
+            if (!widget.isMe) const SizedBox(width: 8),
+            Text(
+              label,
+              style: const TextStyle(
+                color: _textColor,
+                fontSize: 15,
+                fontWeight: FontWeight.w700,
+              ),
             ),
-          ),
-          if (isMe) const SizedBox(width: 8),
-          if (isMe) const Icon(Icons.graphic_eq, size: 20),
-        ],
+            if (widget.isMe) const SizedBox(width: 8),
+            if (widget.isMe) Icon(icon, size: 20),
+          ],
+        ),
       ),
     );
   }
@@ -619,14 +709,22 @@ class _ContactCardPreview extends StatelessWidget {
   Widget build(BuildContext context) {
     final name = _value(payload, [
       'card_nickname',
+      'card_name',
       'nickname',
       'name',
+      'card_username',
       'card_user_id',
     ]);
+    final avatar = _value(payload, ['card_avatar', 'avatar']);
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        _Avatar(label: name, size: 32, color: const Color(0xff34c759)),
+        _Avatar(
+          label: name,
+          imageUrl: avatar,
+          size: 32,
+          color: const Color(0xff34c759),
+        ),
         const SizedBox(width: 8),
         Flexible(
           child: Text(

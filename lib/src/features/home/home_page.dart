@@ -10,6 +10,7 @@ import 'package:flutter/services.dart';
 import 'package:livekit_client/livekit_client.dart' as lk;
 import 'package:path_provider/path_provider.dart';
 import 'package:photo_manager/photo_manager.dart';
+import 'package:record/record.dart';
 import 'package:video_player/video_player.dart';
 
 import '../../app/session_controller.dart';
@@ -45,6 +46,8 @@ part 'common/media_preview.dart';
 part 'chat/media_viewer_pages.dart';
 part 'chat/tool_panel.dart';
 part 'chat/composer_bar.dart';
+part 'chat/emoji_picker.dart';
+part 'chat/contact_card_picker.dart';
 part 'calls/livekit_call_page.dart';
 part 'common/section_header.dart';
 part 'common/navigation_helpers.dart';
@@ -150,15 +153,25 @@ class _HomePageState extends State<HomePage> {
         _activeIncomingCallIds.remove(call.callId);
         return;
       }
-      await Navigator.of(context).push(
-        _callPageRoute(
-          LiveKitCallPage.incoming(
-            controller: widget.controller,
-            initialCall: call,
+      try {
+        final latestCall = await _confirmIncomingCall(call);
+        if (!mounted || latestCall == null) {
+          return;
+        }
+        final closedCallId = await Navigator.of(context).push<int>(
+          _callPageRoute(
+            LiveKitCallPage.incoming(
+              controller: widget.controller,
+              initialCall: latestCall,
+            ),
           ),
-        ),
-      );
-      _activeIncomingCallIds.remove(call.callId);
+        );
+        if (closedCallId != null && closedCallId > 0) {
+          _rememberEndedCall(closedCallId);
+        }
+      } finally {
+        _activeIncomingCallIds.remove(call.callId);
+      }
     });
   }
 
@@ -166,7 +179,78 @@ class _HomePageState extends State<HomePage> {
     return event.call.isEnded ||
         event.isCancel ||
         event.isReject ||
-        event.event == 'call.hangup';
+        event.isHangup;
+  }
+
+  Future<LiveKitCallInfo?> _confirmIncomingCall(LiveKitCallInfo call) async {
+    if (_recentEndedCallIds.containsKey(call.callId)) {
+      return null;
+    }
+    try {
+      final latest = await widget.controller
+          .liveKitCallToken(call.callId)
+          .timeout(const Duration(seconds: 6));
+      final resolved = latest.withConnectionFrom(call);
+      if (_recentEndedCallIds.containsKey(call.callId)) {
+        AppLogger.info(
+          'call',
+          'incoming call ignored because terminal event arrived while checking',
+          data: {'call_id': call.callId},
+        );
+        return null;
+      }
+      if (_isUnavailableIncomingCall(resolved)) {
+        _rememberEndedCall(call.callId);
+        AppLogger.info(
+          'call',
+          'incoming call ignored because server state is terminal',
+          data: {
+            'call_id': call.callId,
+            'status': resolved.status,
+            'status_text': resolved.statusText,
+          },
+        );
+        return null;
+      }
+      AppLogger.info(
+        'call',
+        'incoming call confirmed before showing page',
+        data: {
+          'call_id': resolved.callId,
+          'status': resolved.status,
+          'status_text': resolved.statusText,
+        },
+      );
+      return resolved;
+    } catch (error, stackTrace) {
+      _rememberEndedCall(call.callId);
+      AppLogger.warn(
+        'call',
+        'incoming call ignored because server confirmation failed',
+        data: {
+          'call_id': call.callId,
+          'error': error.toString(),
+          'stack': stackTrace.toString().split('\n').take(3).join('\n'),
+        },
+      );
+      return null;
+    }
+  }
+
+  bool _isUnavailableIncomingCall(LiveKitCallInfo call) {
+    final statusText = call.statusText.toLowerCase();
+    return call.callId <= 0 ||
+        call.isEnded ||
+        statusText.contains('取消') ||
+        statusText.contains('拒') ||
+        statusText.contains('挂断') ||
+        statusText.contains('结束') ||
+        statusText.contains('超时') ||
+        statusText.contains('cancel') ||
+        statusText.contains('reject') ||
+        statusText.contains('hangup') ||
+        statusText.contains('end') ||
+        statusText.contains('timeout');
   }
 
   void _rememberEndedCall(int callId) {

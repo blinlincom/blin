@@ -103,6 +103,7 @@ class _MomentsPageState extends State<MomentsPage> {
         _refreshing = false;
         _error = '';
       });
+      _cacheCurrentFeed();
     } catch (error, stackTrace) {
       AppLogger.error(
         'moments',
@@ -147,6 +148,7 @@ class _MomentsPageState extends State<MomentsPage> {
         _pageCount = _intValue(data, ['pagecount'], fallback: _pageCount);
         _loadingMore = false;
       });
+      _cacheCurrentFeed();
     } catch (error, stackTrace) {
       AppLogger.warn(
         'moments',
@@ -184,6 +186,7 @@ class _MomentsPageState extends State<MomentsPage> {
         ),
       ];
     });
+    _cacheCurrentFeed();
   }
 
   void _replacePost(Map<String, Object?> post) {
@@ -201,6 +204,11 @@ class _MomentsPageState extends State<MomentsPage> {
       next.insert(0, post);
     }
     setState(() => _posts = next);
+    _cacheCurrentFeed();
+  }
+
+  void _cacheCurrentFeed() {
+    widget.controller.writeMomentsFeed(_posts);
   }
 
   Future<void> _toggleLike(Map<String, Object?> post) async {
@@ -289,6 +297,7 @@ class _MomentsPageState extends State<MomentsPage> {
             .where((item) => _intValue(item, ['post_id', 'id']) != postId)
             .toList(growable: false);
       });
+      _cacheCurrentFeed();
     } catch (error, stackTrace) {
       AppLogger.error(
         'moments',
@@ -713,42 +722,28 @@ class _MomentHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      height: 250,
+      height: 216,
       child: Stack(
         children: [
           _MomentCoverImage(
             imageUrl: backgroundUrl,
-            height: 194,
-            child: Align(
-              alignment: Alignment.bottomRight,
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(20, 20, 20, 34),
-                child: Text(
-                  name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  textAlign: TextAlign.right,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 20,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ),
-            ),
+            height: 180,
+            child: const SizedBox.shrink(),
           ),
           Positioned(
-            right: 18,
-            top: 154,
+            right: 16,
+            top: 146,
             child: Container(
-              width: 72,
-              height: 72,
+              width: 64,
+              height: 64,
+              alignment: Alignment.center,
               decoration: BoxDecoration(
-                border: Border.all(color: Colors.white, width: 3),
+                border: Border.all(color: Colors.white, width: 2.5),
                 color: _momentsSurface,
+                borderRadius: BorderRadius.circular(_momentAvatarRadius(64)),
               ),
               clipBehavior: Clip.antiAlias,
-              child: _MomentAvatar(label: name, imageUrl: avatarUrl, size: 66),
+              child: _MomentAvatar(label: name, imageUrl: avatarUrl, size: 58),
             ),
           ),
         ],
@@ -844,23 +839,23 @@ class _MomentPostTile extends StatelessWidget {
     return ColoredBox(
       color: _momentsSurface,
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(12, 14, 12, 0),
+        padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             _MomentAvatar(
               label: _displayName(user),
               imageUrl: _textValue(user, ['usertx', 'avatar']),
-              size: 44,
+              size: 40,
             ),
-            const SizedBox(width: 10),
+            const SizedBox(width: 9),
             Expanded(
               child: DecoratedBox(
                 decoration: const BoxDecoration(
                   border: Border(bottom: BorderSide(color: _momentsBorder)),
                 ),
                 child: Padding(
-                  padding: const EdgeInsets.only(bottom: 14),
+                  padding: const EdgeInsets.only(bottom: 10),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -870,26 +865,26 @@ class _MomentPostTile extends StatelessWidget {
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
                           color: _momentsLike,
-                          fontSize: 15,
+                          fontSize: 14.5,
                           fontWeight: FontWeight.w700,
                         ),
                       ),
                       if (_textValue(post, ['content']).isNotEmpty) ...[
-                        const SizedBox(height: 6),
+                        const SizedBox(height: 4),
                         Text(
                           _textValue(post, ['content']),
                           style: const TextStyle(
                             color: _momentsText,
-                            fontSize: 15.5,
-                            height: 1.42,
+                            fontSize: 15,
+                            height: 1.36,
                           ),
                         ),
                       ],
                       if (media.isNotEmpty) ...[
-                        const SizedBox(height: 8),
+                        const SizedBox(height: 6),
                         _MomentMediaGrid(media: media),
                       ],
-                      const SizedBox(height: 9),
+                      const SizedBox(height: 6),
                       Row(
                         children: [
                           Text(
@@ -921,7 +916,7 @@ class _MomentPostTile extends StatelessWidget {
                         ],
                       ),
                       if (likes.isNotEmpty || comments.isNotEmpty) ...[
-                        const SizedBox(height: 8),
+                        const SizedBox(height: 6),
                         _MomentSocialPanel(
                           likes: likes,
                           comments: comments,
@@ -1033,7 +1028,7 @@ class _MomentSocialPanel extends StatelessWidget {
     return Container(
       width: double.infinity,
       color: _momentsFill,
-      padding: const EdgeInsets.fromLTRB(8, 6, 8, 6),
+      padding: const EdgeInsets.fromLTRB(8, 5, 8, 5),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -1060,7 +1055,7 @@ class _MomentSocialPanel extends StatelessWidget {
             ),
           if (likes.isNotEmpty && comments.isNotEmpty)
             const Padding(
-              padding: EdgeInsets.symmetric(vertical: 5),
+              padding: EdgeInsets.symmetric(vertical: 4),
               child: Divider(height: 1, color: _momentsBorder),
             ),
           for (final comment in comments)
@@ -1071,7 +1066,7 @@ class _MomentSocialPanel extends StatelessWidget {
                   : null,
               behavior: HitTestBehavior.opaque,
               child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 2),
+                padding: const EdgeInsets.symmetric(vertical: 1),
                 child: _MomentCommentText(comment: comment),
               ),
             ),
@@ -1114,7 +1109,7 @@ class _MomentCommentText extends StatelessWidget {
           TextSpan(text: '：${_textValue(comment, ['content'])}'),
         ],
       ),
-      style: const TextStyle(color: _momentsText, fontSize: 13.5, height: 1.35),
+      style: const TextStyle(color: _momentsText, fontSize: 13.2, height: 1.32),
     );
   }
 }
@@ -1183,8 +1178,8 @@ class _MomentMediaTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isVideo = _isMomentVideo(media);
-    final url = _mediaUrl(_textValue(media, ['url', 'image_url', 'video_url']));
-    final thumb = _mediaUrl(_textValue(media, ['thumb_url', 'cover_url']));
+    final url = _momentMediaSourceUrl(media);
+    final thumb = _momentMediaCoverUrl(media);
     return GestureDetector(
       onTap: () => _openMomentMediaViewer(context, media),
       child: SizedBox(
@@ -1196,17 +1191,23 @@ class _MomentMediaTile extends StatelessWidget {
             child: Stack(
               fit: StackFit.expand,
               children: [
-                if ((isVideo ? thumb : url).isNotEmpty)
+                if (isVideo)
+                  _MomentVideoFramePreview(
+                    videoUrl: url,
+                    coverUrl: thumb,
+                    fallback: const _MomentMediaFallback(isVideo: true),
+                  )
+                else if (url.isNotEmpty)
                   Image.network(
-                    isVideo && thumb.isNotEmpty ? thumb : url,
+                    url,
                     fit: BoxFit.cover,
                     gaplessPlayback: true,
                     errorBuilder: (_, __, ___) =>
-                        _MomentMediaFallback(isVideo: isVideo),
+                        const _MomentMediaFallback(isVideo: false),
                     loadingBuilder: (context, child, progress) =>
                         progress == null
                         ? child
-                        : _MomentMediaFallback(isVideo: isVideo),
+                        : const _MomentMediaFallback(isVideo: false),
                   )
                 else
                   _MomentMediaFallback(isVideo: isVideo),
@@ -1234,9 +1235,9 @@ Size _singleMomentMediaSize(
 ) {
   final isVideo = _isMomentVideo(media);
   final viewport = MediaQuery.sizeOf(context);
-  final maxWidth = availableWidth.clamp(150, isVideo ? 292 : 256).toDouble();
-  final maxHeight = (viewport.height * 0.34)
-      .clamp(180, isVideo ? 240 : 280)
+  final maxWidth = availableWidth.clamp(140, isVideo ? 260 : 236).toDouble();
+  final maxHeight = (viewport.height * 0.28)
+      .clamp(150, isVideo ? 206 : 236)
       .toDouble();
   final ratio = _momentMediaAspectRatio(media, isVideo: isVideo);
   var width = maxWidth;
@@ -1245,7 +1246,7 @@ Size _singleMomentMediaSize(
     height = maxHeight;
     width = height * ratio;
   }
-  return Size(width.clamp(120, maxWidth).toDouble(), height);
+  return Size(width.clamp(112, maxWidth).toDouble(), height);
 }
 
 double _momentMediaAspectRatio(
@@ -1420,12 +1421,19 @@ class _ComposerMediaTile extends StatelessWidget {
             color: const Color(0xffdde2e8),
             child: item.mediaType == 'image'
                 ? Image.file(File(item.filePath), fit: BoxFit.cover)
-                : const Icon(
-                    Icons.play_circle_fill,
-                    size: 42,
-                    color: Colors.white,
+                : _MomentVideoFramePreview(
+                    filePath: item.filePath,
+                    fallback: const _MomentMediaFallback(isVideo: true),
                   ),
           ),
+          if (item.mediaType == 'video')
+            const Center(
+              child: Icon(
+                Icons.play_circle_fill,
+                size: 42,
+                color: Colors.white,
+              ),
+            ),
           if (!publishing)
             Positioned(
               top: 0,
@@ -1751,25 +1759,32 @@ class _MomentAvatar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final url = _avatarUrl(imageUrl);
-    final fallback = ColoredBox(
-      color: const Color(0xff8e99a8),
-      child: Center(
-        child: Text(
-          _avatarInitial(label),
-          style: TextStyle(
-            color: Colors.white,
-            fontWeight: FontWeight.w800,
-            fontSize: size * 0.34,
-          ),
+    final radius = _momentAvatarRadius(size);
+    final fallback = Container(
+      width: size,
+      height: size,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: const Color(0xff8e99a8),
+        borderRadius: BorderRadius.circular(radius),
+      ),
+      child: Text(
+        _avatarInitial(label),
+        style: TextStyle(
+          color: Colors.white,
+          fontWeight: FontWeight.w800,
+          fontSize: size * 0.34,
         ),
       ),
     );
     if (url.isEmpty) {
-      return SizedBox(width: size, height: size, child: fallback);
+      return fallback;
     }
-    return SizedBox(
+    return Container(
       width: size,
       height: size,
+      clipBehavior: Clip.antiAlias,
+      decoration: BoxDecoration(borderRadius: BorderRadius.circular(radius)),
       child: Image.network(
         url,
         fit: BoxFit.cover,
@@ -1780,6 +1795,136 @@ class _MomentAvatar extends StatelessWidget {
       ),
     );
   }
+}
+
+class _MomentVideoFramePreview extends StatefulWidget {
+  const _MomentVideoFramePreview({
+    required this.fallback,
+    this.videoUrl = '',
+    this.coverUrl = '',
+    this.filePath = '',
+  });
+
+  final String videoUrl;
+  final String coverUrl;
+  final String filePath;
+  final Widget fallback;
+
+  @override
+  State<_MomentVideoFramePreview> createState() =>
+      _MomentVideoFramePreviewState();
+}
+
+class _MomentVideoFramePreviewState extends State<_MomentVideoFramePreview> {
+  VideoPlayerController? _controller;
+  bool _failed = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadFirstFrame();
+  }
+
+  @override
+  void didUpdateWidget(covariant _MomentVideoFramePreview oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.videoUrl != widget.videoUrl ||
+        oldWidget.coverUrl != widget.coverUrl ||
+        oldWidget.filePath != widget.filePath) {
+      _controller?.dispose();
+      _controller = null;
+      _failed = false;
+      _loadFirstFrame();
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller?.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadFirstFrame() async {
+    if (widget.coverUrl.isNotEmpty ||
+        (widget.videoUrl.isEmpty && widget.filePath.isEmpty)) {
+      return;
+    }
+    final expectedUrl = widget.videoUrl;
+    final expectedFile = widget.filePath;
+    try {
+      final options = VideoPlayerOptions(mixWithOthers: true);
+      final controller = expectedFile.isNotEmpty
+          ? VideoPlayerController.file(
+              File(expectedFile),
+              videoPlayerOptions: options,
+            )
+          : VideoPlayerController.networkUrl(
+              Uri.parse(expectedUrl),
+              videoPlayerOptions: options,
+            );
+      await controller.initialize();
+      await controller.seekTo(Duration.zero);
+      await controller.pause();
+      if (!mounted ||
+          expectedUrl != widget.videoUrl ||
+          expectedFile != widget.filePath) {
+        await controller.dispose();
+        return;
+      }
+      setState(() => _controller = controller);
+    } catch (error, stackTrace) {
+      AppLogger.warn(
+        'moments',
+        'load video first frame failed',
+        data: {
+          'video_url': expectedUrl,
+          'file_path': expectedFile,
+          'error': error.toString(),
+          'stack': stackTrace.toString(),
+        },
+      );
+      if (mounted) {
+        setState(() => _failed = true);
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (widget.coverUrl.isNotEmpty) {
+      return Image.network(
+        widget.coverUrl,
+        fit: BoxFit.cover,
+        gaplessPlayback: true,
+        errorBuilder: (_, __, ___) => _firstFrameOrFallback(),
+        loadingBuilder: (context, child, progress) =>
+            progress == null ? child : widget.fallback,
+      );
+    }
+    return _firstFrameOrFallback();
+  }
+
+  Widget _firstFrameOrFallback() {
+    final controller = _controller;
+    if (_failed || controller == null || !controller.value.isInitialized) {
+      return widget.fallback;
+    }
+    final size = controller.value.size;
+    final width = size.width > 0 ? size.width : 16.0;
+    final height = size.height > 0 ? size.height : 9.0;
+    return FittedBox(
+      fit: BoxFit.cover,
+      child: SizedBox(
+        width: width,
+        height: height,
+        child: VideoPlayer(controller),
+      ),
+    );
+  }
+}
+
+double _momentAvatarRadius(double size) {
+  return (size * 0.18).clamp(BimRadius.sm, BimRadius.md).toDouble();
 }
 
 class _MomentLoadingState extends StatelessWidget {
@@ -2053,7 +2198,7 @@ Future<bool> _confirmMomentAction(
 }
 
 void _openMomentMediaViewer(BuildContext context, Map<String, Object?> media) {
-  final url = _mediaUrl(_textValue(media, ['url', 'image_url', 'video_url']));
+  final url = _momentMediaSourceUrl(media);
   if (url.isEmpty) {
     return;
   }
@@ -2235,6 +2380,32 @@ String _avatarUrl(String value) {
 
 String _mediaUrl(String value) {
   return _absoluteUrl(value);
+}
+
+String _momentMediaSourceUrl(Map<String, Object?> media) {
+  return _mediaUrl(
+    _textValue(media, [
+      'url',
+      'image_url',
+      'video_url',
+      'file_url',
+      'media_url',
+      'path',
+      'src',
+    ]),
+  );
+}
+
+String _momentMediaCoverUrl(Map<String, Object?> media) {
+  return _mediaUrl(
+    _textValue(media, [
+      'thumb_url',
+      'cover_url',
+      'thumbnail_url',
+      'poster_url',
+      'preview_url',
+    ]),
+  );
 }
 
 String _absoluteUrl(String value) {

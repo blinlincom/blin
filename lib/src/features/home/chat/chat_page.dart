@@ -27,11 +27,21 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   final _textController = TextEditingController();
   final _scrollController = ScrollController();
   final _inputFocusNode = FocusNode();
+  final AudioRecorder _voiceRecorder = AudioRecorder();
   final Map<String, GlobalKey> _messageRowKeys = <String, GlobalKey>{};
   bool _toolsOpen = false;
+  bool _voiceMode = false;
+  bool _voiceRecording = false;
+  bool _voiceStartPending = false;
+  bool _voiceStopAfterStart = false;
+  bool _voiceCancelAfterStart = false;
   bool _burnAfterRead = false;
+  bool _peerBurnAfterRead = false;
   bool _mentionAll = false;
   int _burnSeconds = 0;
+  int _peerBurnSeconds = 0;
+  DateTime? _voiceRecordStartedAt;
+  String _voiceRecordPath = '';
   List<String> _mentionUserIds = const [];
   String _replyClientMsgNo = '';
   Map<String, Object?> _replyQuote = const {};
@@ -90,6 +100,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       channelId: widget.channelId,
       channelType: widget.channelType,
     );
+    _hydrateCachedMessagesForFirstFrame();
     widget.controller.addListener(_onControllerChanged);
     _messageSub = widget.controller.messageEvents.listen(_onMessageEvent);
     _presenceSub = widget.controller.presenceEvents.listen(_onPresenceEvent);
@@ -101,7 +112,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         channelType: widget.channelType,
       ),
     );
-    _loadMessagesIntoState(showLoading: true);
+    _loadMessagesIntoState(showLoading: _messages.isEmpty);
     _refreshGroupMuteState();
     _refreshPeerOnlineStatus();
     if (_isGroup && !_channelInvalid) {
@@ -149,8 +160,11 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       return;
     }
     _clearSelectedMessageMenu();
-    if (_toolsOpen) {
-      setState(() => _toolsOpen = false);
+    if (_toolsOpen || _voiceMode) {
+      setState(() {
+        _toolsOpen = false;
+        _voiceMode = false;
+      });
     }
     if (_isNearBottom()) {
       _stickToBottomDuringKeyboard();
@@ -190,12 +204,16 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       _highlightedMessageKey = '';
       _quoteHighlightTimer?.cancel();
       _clearSelectedMessageMenu();
+      unawaited(_cancelVoiceRecording(silent: true));
+      _voiceMode = false;
       _didInitialScroll = false;
       _burnTriggeredClientMsgNos.clear();
       _burnRetryAttempts.clear();
       _receivingRedPacketIds.clear();
       _receivingTransferIds.clear();
       _groupMuteState = const {};
+      _peerBurnAfterRead = false;
+      _peerBurnSeconds = 0;
       _peerOnline = false;
       _onlineStatusLoading = false;
       _channelInvalid = widget.controller.isChannelInvalid(
@@ -205,13 +223,14 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       _groupMemberCount = null;
       _groupOnlineCount = null;
       _groupPresenceLoading = false;
+      _hydrateCachedMessagesForFirstFrame();
       unawaited(
         widget.controller.openConversation(
           channelId: widget.channelId,
           channelType: widget.channelType,
         ),
       );
-      _loadMessagesIntoState(showLoading: true);
+      _loadMessagesIntoState(showLoading: _messages.isEmpty);
       _refreshGroupMuteState();
       _refreshPeerOnlineStatus();
       if (_isGroup && !_channelInvalid) {
@@ -496,6 +515,10 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         event.channelType != widget.channelType) {
       return;
     }
+    if (event.source == 'burn_after_read_state_cmd') {
+      _applyPeerBurnAfterReadState(event.message);
+      return;
+    }
     final shouldStickToBottom = _shouldAutoScrollForMessage(event);
     setState(() {
       if (_isChannelInvalidEvent(event.source)) {
@@ -531,6 +554,28 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     if (!_channelInvalid) {
       _scheduleVisibleRead(source: 'message_event');
     }
+  }
+
+  void _applyPeerBurnAfterReadState(Map<String, Object?> message) {
+    final payload = _asObjectMap(message['payload']);
+    final senderId = _value(payload, ['sender_id', 'from_id', 'user_id']);
+    final senderUid = _value(payload, ['sender_uid', 'from_uid']);
+    final currentUserId = widget.controller.session?.userId.toString() ?? '';
+    final currentUid = widget.controller.session?.chat?.uid ?? '';
+    if ((senderId.isNotEmpty && senderId == currentUserId) ||
+        (senderUid.isNotEmpty && senderUid == currentUid)) {
+      return;
+    }
+    final enabled = _boolValue(payload['enabled']);
+    final seconds = _intValue(payload, ['seconds']);
+    setState(() {
+      _peerBurnAfterRead = enabled;
+      _peerBurnSeconds = enabled ? seconds : 0;
+      _message = enabled
+          ? (seconds > 0 ? '对方已开启阅后即焚 ${seconds}s' : '对方已开启阅后即焚')
+          : '对方已关闭阅后即焚';
+      _error = null;
+    });
   }
 
   void _onPresenceEvent(BusinessImPresenceEvent event) {
@@ -613,6 +658,47 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         _runningMessageLoadKey = '';
       }
     });
+  }
+
+  void _hydrateCachedMessagesForFirstFrame() {
+    if (_channelInvalid) {
+      _messages = const [];
+      _messagesLoading = false;
+      return;
+    }
+    final cached = widget.controller.cachedLocalMessages(
+      channelId: widget.channelId,
+      channelType: widget.channelType,
+    );
+    if (cached.isEmpty) {
+      _messages = const [];
+      _messagesLoading = true;
+      _historyLoadingSlow = false;
+      AppLogger.info(
+        'ui',
+        'chat first frame has no cached messages',
+        data: {
+          'channel_id': widget.channelId,
+          'channel_type': widget.channelType,
+        },
+      );
+      return;
+    }
+    _messages = cached;
+    _messagesLoading = false;
+    _historyLoadingSlow = false;
+    _didInitialScroll = true;
+    _pruneMessageRowKeys(cached);
+    AppLogger.info(
+      'ui',
+      'chat first frame hydrated from cache',
+      data: {
+        'channel_id': widget.channelId,
+        'channel_type': widget.channelType,
+        'count': cached.length,
+        'last_message': _chatUiMessageSummary(cached.last),
+      },
+    );
   }
 
   Future<void> _loadMessagesIntoState({required bool showLoading}) async {
@@ -830,6 +916,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     _presenceSub?.cancel();
     _historyLoadingTimer?.cancel();
     _quoteHighlightTimer?.cancel();
+    unawaited(_disposeVoiceRecorderQuietly());
     _scrollController.removeListener(_onMessageListScrolled);
     _scrollController.dispose();
     _inputFocusNode.removeListener(_onInputFocusChanged);
@@ -1384,10 +1471,30 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     if (opening) {
       FocusScope.of(context).unfocus();
     }
-    setState(() => _toolsOpen = opening);
+    setState(() {
+      _toolsOpen = opening;
+      if (opening) {
+        _voiceMode = false;
+      }
+    });
     if (!opening) {
       _scrollToBottom(animated: false);
     }
+  }
+
+  void _toggleVoiceMode() {
+    if (!_composerEnabled) {
+      setState(() => _message = _groupMuteText(_groupMuteState));
+      return;
+    }
+    FocusScope.of(context).unfocus();
+    _clearSelectedMessageMenu();
+    setState(() {
+      _voiceMode = !_voiceMode;
+      _toolsOpen = false;
+      _message = '';
+      _error = null;
+    });
   }
 
   @override
@@ -1432,6 +1539,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                         ),
                         if (_replyQuote.isNotEmpty ||
                             _burnAfterRead ||
+                            _peerBurnAfterRead ||
                             _mentionAll ||
                             _mentionUserIds.isNotEmpty)
                           _ChatOptionBar(
@@ -1519,7 +1627,15 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                           enabled: composerEnabled,
                           disabledText: muteText,
                           toolsOpen: _toolsOpen,
-                          onVoice: () => _sendMedia(ChatContentTypes.voice),
+                          voiceMode: _voiceMode,
+                          recording: _voiceRecording,
+                          onVoice: _toggleVoiceMode,
+                          onVoiceRecordStart: () =>
+                              unawaited(_startVoiceRecording()),
+                          onVoiceRecordEnd: () =>
+                              unawaited(_finishVoiceRecording()),
+                          onVoiceRecordCancel: () =>
+                              unawaited(_cancelVoiceRecording()),
                           onEmoji: () => _sendMedia(ChatContentTypes.emoji),
                           onTools: _toggleTools,
                           onSend: _sendText,
@@ -1532,7 +1648,6 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                             onEmoji: () => _sendMedia(ChatContentTypes.emoji),
                             onSticker: () =>
                                 _sendMedia(ChatContentTypes.sticker),
-                            onVoice: () => _sendMedia(ChatContentTypes.voice),
                             onVideo: () => _sendMedia(ChatContentTypes.video),
                             onFile: () => _sendMedia(ChatContentTypes.file),
                             onContactCard: _sendContactCard,
@@ -1936,7 +2051,275 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     );
   }
 
+  Future<void> _startVoiceRecording() async {
+    if (!_composerEnabled) {
+      setState(() => _message = _groupMuteText(_groupMuteState));
+      return;
+    }
+    if (_voiceRecording || _voiceStartPending) {
+      return;
+    }
+    _voiceStartPending = true;
+    _voiceStopAfterStart = false;
+    _voiceCancelAfterStart = false;
+    try {
+      final allowed = await _voiceRecorder.hasPermission();
+      if (!allowed) {
+        _voiceStartPending = false;
+        if (mounted) {
+          setState(() => _error = '需要麦克风权限');
+        }
+        return;
+      }
+      final dir = await getTemporaryDirectory();
+      final path =
+          '${dir.path}/bim_voice_${DateTime.now().microsecondsSinceEpoch}.m4a';
+      await _voiceRecorder.start(
+        const RecordConfig(
+          encoder: AudioEncoder.aacLc,
+          bitRate: 64000,
+          sampleRate: 44100,
+          numChannels: 1,
+        ),
+        path: path,
+      );
+      if (!mounted) {
+        await _voiceRecorder.cancel();
+        _voiceStartPending = false;
+        return;
+      }
+      if (_voiceCancelAfterStart) {
+        await _voiceRecorder.cancel();
+        await _deleteTempVoiceFile(path);
+        setState(() {
+          _voiceStartPending = false;
+          _voiceStopAfterStart = false;
+          _voiceCancelAfterStart = false;
+          _voiceRecording = false;
+          _voiceRecordStartedAt = null;
+          _voiceRecordPath = '';
+          _message = '已取消发送';
+        });
+        return;
+      }
+      setState(() {
+        _voiceStartPending = false;
+        _voiceRecording = true;
+        _voiceRecordStartedAt = DateTime.now();
+        _voiceRecordPath = path;
+        _message = '';
+        _error = null;
+      });
+      if (_voiceStopAfterStart) {
+        _voiceStopAfterStart = false;
+        unawaited(_finishVoiceRecording());
+      }
+    } catch (error, stackTrace) {
+      _voiceStartPending = false;
+      _voiceStopAfterStart = false;
+      _voiceCancelAfterStart = false;
+      AppLogger.error(
+        'ui',
+        'voice recording start failed',
+        error: error,
+        stackTrace: stackTrace,
+      );
+      if (mounted) {
+        setState(() => _error = '录音启动失败');
+      }
+    }
+  }
+
+  Future<void> _finishVoiceRecording() async {
+    if (_voiceStartPending && !_voiceRecording) {
+      _voiceStopAfterStart = true;
+      return;
+    }
+    if (!_voiceRecording) {
+      return;
+    }
+    final startedAt = _voiceRecordStartedAt;
+    final fallbackPath = _voiceRecordPath;
+    try {
+      final path = await _voiceRecorder.stop();
+      final elapsedMs = startedAt == null
+          ? 0
+          : DateTime.now().difference(startedAt).inMilliseconds;
+      if (mounted) {
+        setState(() {
+          _voiceRecording = false;
+          _voiceStartPending = false;
+          _voiceStopAfterStart = false;
+          _voiceCancelAfterStart = false;
+          _voiceRecordStartedAt = null;
+          _voiceRecordPath = '';
+        });
+      }
+      final filePath = path?.isNotEmpty == true ? path! : fallbackPath;
+      if (elapsedMs < 700) {
+        await _deleteTempVoiceFile(filePath);
+        if (mounted) {
+          setState(() => _message = '说话时间太短');
+        }
+        return;
+      }
+      await _sendRecordedVoice(filePath, max(1, (elapsedMs / 1000).round()));
+    } catch (error, stackTrace) {
+      AppLogger.error(
+        'ui',
+        'voice recording finish failed',
+        error: error,
+        stackTrace: stackTrace,
+      );
+      if (mounted) {
+        setState(() {
+          _voiceRecording = false;
+          _voiceStartPending = false;
+          _voiceStopAfterStart = false;
+          _voiceCancelAfterStart = false;
+          _voiceRecordStartedAt = null;
+          _voiceRecordPath = '';
+          _error = '录音发送失败';
+        });
+      }
+    }
+  }
+
+  Future<void> _cancelVoiceRecording({bool silent = false}) async {
+    if (_voiceStartPending && !_voiceRecording) {
+      _voiceCancelAfterStart = true;
+      return;
+    }
+    if (!_voiceRecording && _voiceRecordPath.isEmpty) {
+      return;
+    }
+    final path = _voiceRecordPath;
+    try {
+      if (_voiceRecording) {
+        await _voiceRecorder.cancel();
+      }
+      await _deleteTempVoiceFile(path);
+    } catch (error, stackTrace) {
+      AppLogger.warn(
+        'ui',
+        'voice recording cancel failed',
+        data: {'error': error.toString(), 'stack': stackTrace.toString()},
+      );
+    }
+    if (mounted) {
+      setState(() {
+        _voiceRecording = false;
+        _voiceStartPending = false;
+        _voiceStopAfterStart = false;
+        _voiceCancelAfterStart = false;
+        _voiceRecordStartedAt = null;
+        _voiceRecordPath = '';
+        if (!silent) {
+          _message = '已取消发送';
+        }
+      });
+    }
+  }
+
+  Future<void> _disposeVoiceRecorderQuietly() async {
+    final path = _voiceRecordPath;
+    try {
+      if (_voiceRecording) {
+        await _voiceRecorder.cancel();
+      }
+      await _deleteTempVoiceFile(path);
+      await _voiceRecorder.dispose();
+      _voiceRecording = false;
+      _voiceStartPending = false;
+      _voiceStopAfterStart = false;
+      _voiceCancelAfterStart = false;
+      _voiceRecordStartedAt = null;
+      _voiceRecordPath = '';
+    } catch (error, stackTrace) {
+      AppLogger.warn(
+        'ui',
+        'voice recorder dispose failed',
+        data: {'error': error.toString(), 'stack': stackTrace.toString()},
+      );
+    }
+  }
+
+  Future<void> _deleteTempVoiceFile(String path) async {
+    if (path.isEmpty) {
+      return;
+    }
+    final file = File(path);
+    if (await file.exists()) {
+      await file.delete();
+    }
+  }
+
+  Future<void> _sendRecordedVoice(String filePath, int durationSeconds) async {
+    if (filePath.isEmpty || !await File(filePath).exists()) {
+      if (mounted) {
+        setState(() => _error = '语音文件不存在');
+      }
+      return;
+    }
+    final file = File(filePath);
+    final size = await file.length();
+    final params = <String, Object?>{
+      'duration': durationSeconds.toString(),
+      'name': _fileName(filePath),
+      'mime': _mimeFromPath(filePath, ChatContentTypes.voice),
+      'size': size.toString(),
+      'file_path': filePath,
+    };
+    if (_replyQuote.isNotEmpty) {
+      params['quote'] = Map<String, Object?>.from(_replyQuote);
+      params['quote_json'] = jsonEncode(_replyQuote);
+      params['quote_client_msg_no'] = _replyClientMsgNo;
+      params['reply_client_msg_no'] = _replyClientMsgNo;
+    }
+    if (_burnAfterRead) {
+      params['burn_after_read'] = '1';
+      if (_burnSeconds > 0) {
+        params['burn_after_read_seconds'] = _burnSeconds.toString();
+      }
+    }
+    await _runSending(
+      () async {
+        if (_isGroup) {
+          await widget.controller.sendGroupMedia(
+            groupId: _groupId,
+            channelId: widget.channelId,
+            contentType: ChatContentTypes.voice,
+            filePath: filePath,
+            params: params,
+          );
+        } else {
+          await widget.controller.sendPrivateMedia(
+            receiverId: _receiverId,
+            contentType: ChatContentTypes.voice,
+            filePath: filePath,
+            params: params,
+          );
+        }
+      },
+      beforeTask: () {
+        setState(() {
+          _replyClientMsgNo = '';
+          _replyQuote = const {};
+        });
+      },
+    );
+  }
+
   Future<Map<String, String>?> _selectMediaPayload(String contentType) {
+    if (contentType == ChatContentTypes.voice) {
+      setState(() => _message = '请长按录音发送语音');
+      return Future.value(null);
+    }
+    if (contentType == ChatContentTypes.emoji) {
+      return Navigator.of(context).push<Map<String, String>>(
+        MaterialPageRoute(builder: (_) => const _EmojiPickerPage()),
+      );
+    }
     if (contentType == ChatContentTypes.image ||
         contentType == ChatContentTypes.video) {
       return Navigator.of(context).push<Map<String, String>>(
@@ -1962,20 +2345,24 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       setState(() => _message = _groupMuteText(_groupMuteState));
       return;
     }
-    final data = await _openInput(
-      context,
-      title: '发送名片',
-      fields: const [ActionInputField(id: 'card_user_id', label: '名片用户')],
+    final card = await Navigator.of(context).push<Map<String, Object?>>(
+      MaterialPageRoute(
+        builder: (_) => _ContactCardPickerPage(controller: widget.controller),
+      ),
     );
-    if (data == null) {
+    if (card == null || !mounted) {
       return;
     }
-    final cardUserId = data['card_user_id'] ?? '';
+    final cardUserId = _value(card, ['card_user_id']);
     if (cardUserId.isEmpty) {
       setState(() => _error = '名片用户不能为空');
       return;
     }
-    final params = <String, Object?>{};
+    if (!_isCurrentFriendCard(cardUserId)) {
+      setState(() => _error = '只能发送自己的好友名片');
+      return;
+    }
+    final params = <String, Object?>{...card};
     if (_replyQuote.isNotEmpty) {
       params['quote'] = Map<String, Object?>.from(_replyQuote);
       params['quote_json'] = jsonEncode(_replyQuote);
@@ -2006,6 +2393,14 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         });
       },
     );
+  }
+
+  bool _isCurrentFriendCard(String cardUserId) {
+    if (cardUserId.isEmpty) {
+      return false;
+    }
+    final friends = widget.controller.cachedFriends(allowDisk: true);
+    return friends.any((friend) => _friendUserId(friend) == cardUserId);
   }
 
   VoidCallback? _messageTapHandler(Map<String, Object?> item) {
@@ -2218,12 +2613,49 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     if (data == null) {
       return;
     }
+    final oldBurnAfterRead = _burnAfterRead;
+    final oldBurnSeconds = _burnSeconds;
+    final nextBurnAfterRead = (data['burn_after_read'] ?? '') == '1';
+    final nextBurnSeconds =
+        int.tryParse(data['burn_after_read_seconds'] ?? '') ?? 0;
     setState(() {
       _mentionUserIds = _idsFromText(data['mention_user_ids'] ?? '');
       _mentionAll = (data['mention_all'] ?? '') == '1';
-      _burnAfterRead = (data['burn_after_read'] ?? '') == '1';
-      _burnSeconds = int.tryParse(data['burn_after_read_seconds'] ?? '') ?? 0;
+      _burnAfterRead = nextBurnAfterRead;
+      _burnSeconds = nextBurnSeconds;
     });
+    if (oldBurnAfterRead != nextBurnAfterRead ||
+        oldBurnSeconds != nextBurnSeconds) {
+      unawaited(_notifyBurnAfterReadState());
+    }
+  }
+
+  Future<void> _notifyBurnAfterReadState() async {
+    try {
+      await widget.controller.sendBurnAfterReadState(
+        channelId: widget.channelId,
+        channelType: widget.channelType,
+        groupId: _isGroup ? _groupId : '',
+        enabled: _burnAfterRead,
+        seconds: _burnSeconds,
+      );
+    } catch (error, stackTrace) {
+      AppLogger.error(
+        'ui',
+        'burn after read state notify failed',
+        error: error,
+        stackTrace: stackTrace,
+        data: {
+          'channel_id': widget.channelId,
+          'channel_type': widget.channelType,
+          'enabled': _burnAfterRead,
+          'seconds': _burnSeconds,
+        },
+      );
+      if (mounted) {
+        setState(() => _error = '阅后即焚状态同步失败');
+      }
+    }
   }
 
   Future<void> _recallSelected() async {
@@ -2629,6 +3061,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   }
 
   void _clearOptions() {
+    final shouldNotifyBurnDisabled = _burnAfterRead || _burnSeconds > 0;
     setState(() {
       _replyClientMsgNo = '';
       _replyQuote = const {};
@@ -2637,6 +3070,9 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       _burnAfterRead = false;
       _burnSeconds = 0;
     });
+    if (shouldNotifyBurnDisabled) {
+      unawaited(_notifyBurnAfterReadState());
+    }
   }
 
   bool _isMessageDeleteEvent(String source) {
@@ -2778,6 +3214,11 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     }
     if (_burnAfterRead) {
       parts.add(_burnSeconds > 0 ? '阅后即焚 ${_burnSeconds}s' : '阅后即焚');
+    }
+    if (_peerBurnAfterRead) {
+      parts.add(
+        _peerBurnSeconds > 0 ? '对方已开启阅后即焚 ${_peerBurnSeconds}s' : '对方已开启阅后即焚',
+      );
     }
     return parts.join(' · ');
   }

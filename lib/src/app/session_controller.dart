@@ -869,6 +869,14 @@ class SessionController extends ChangeNotifier {
     return _copyList(_momentsCache.readFeed(uid));
   }
 
+  void writeMomentsFeed(List<Map<String, Object?>> posts) {
+    final uid = _chatUid();
+    if (uid.isEmpty) {
+      return;
+    }
+    _momentsCache.writeFeed(uid: uid, posts: _copyList(posts));
+  }
+
   String readMomentsDraft() {
     final uid = _chatUid();
     if (uid.isEmpty) {
@@ -1038,6 +1046,16 @@ class SessionController extends ChangeNotifier {
       channelID: channelId,
       channelType: channelType,
       groupId: groupId,
+    );
+  }
+
+  List<Map<String, Object?>> cachedLocalMessages({
+    required String channelId,
+    required int channelType,
+  }) {
+    return _im.cachedLocalMessages(
+      channelID: channelId,
+      channelType: channelType,
     );
   }
 
@@ -1407,17 +1425,40 @@ class SessionController extends ChangeNotifier {
     return const {'msg': '已发送'};
   }
 
+  Future<void> sendBurnAfterReadState({
+    required String channelId,
+    required int channelType,
+    String groupId = '',
+    required bool enabled,
+    required int seconds,
+  }) async {
+    _requireSession();
+    await _sendBusinessMessage(
+      channelId: channelId,
+      channelType: channelType,
+      contentType: 'cmd',
+      groupId: groupId,
+      payload: {
+        'cmd': 'burn_after_read_state',
+        'enabled': enabled ? '1' : '0',
+        'seconds': seconds > 0 ? seconds.toString() : '0',
+        if (groupId.isNotEmpty) 'group_id': groupId,
+      },
+    );
+  }
+
   Future<Map<String, Object?>> sendPrivateContactCard({
     required String receiverId,
     required String cardUserId,
     Map<String, Object?> params = const {},
   }) async {
     _requireSession();
+    _ensureContactCardIsFriend(cardUserId);
     await _sendBusinessMessage(
       channelId: _uidFromUserId(receiverId),
       channelType: 1,
       contentType: ChatContentTypes.contactCard,
-      payload: {'card_user_id': cardUserId, ...params},
+      payload: {...params, 'card_user_id': cardUserId},
     );
     return const {'msg': '已发送'};
   }
@@ -1429,12 +1470,13 @@ class SessionController extends ChangeNotifier {
     Map<String, Object?> params = const {},
   }) async {
     _requireSession();
+    _ensureContactCardIsFriend(cardUserId);
     await _sendBusinessMessage(
       channelId: channelId.isEmpty ? groupId : channelId,
       channelType: 2,
       contentType: ChatContentTypes.contactCard,
       groupId: groupId,
-      payload: {'group_id': groupId, 'card_user_id': cardUserId, ...params},
+      payload: {...params, 'group_id': groupId, 'card_user_id': cardUserId},
     );
     return const {'msg': '已发送'};
   }
@@ -1877,6 +1919,52 @@ class SessionController extends ChangeNotifier {
     );
     notifyListeners();
     return result;
+  }
+
+  Future<void> setConversationPinned({
+    required String channelId,
+    required int channelType,
+    required bool pinned,
+  }) async {
+    _requireSession();
+    await _im.setConversationPinned(
+      channelID: channelId,
+      channelType: channelType,
+      pinned: pinned,
+    );
+    notifyListeners();
+  }
+
+  Future<Map<String, Object?>> deleteConversation({
+    required Map<String, Object?> conversation,
+  }) async {
+    final current = _requireSession();
+    final chat = current.chat;
+    final channelType = _conversationChannelType(conversation, chat);
+    var channelId = _conversationStringValue(conversation, [
+      'channel_id',
+      'uid',
+    ]);
+    if (channelType == (chat?.channelTypeGroup ?? 2)) {
+      final groupId = _conversationStringValue(conversation, [
+        'group_id',
+        'id',
+      ], fallback: channelId);
+      channelId = channelId.isNotEmpty ? channelId : groupId;
+      return deleteGroupConversation(groupId: groupId, channelId: channelId);
+    }
+    final receiverId = _conversationStringValue(conversation, [
+      'receiver_id',
+      'peer_id',
+      'friend_id',
+      'user_id',
+      'userid',
+    ], fallback: _userIdFromUid(channelId));
+    channelId = channelId.isNotEmpty ? channelId : _uidFromUserId(receiverId);
+    return deletePrivateConversation(
+      receiverId: receiverId,
+      channelId: channelId,
+    );
   }
 
   Future<Map<String, Object?>> clearAllChatRecords() async {
@@ -2572,6 +2660,38 @@ class SessionController extends ChangeNotifier {
     return '';
   }
 
+  void _ensureContactCardIsFriend(String cardUserId) {
+    final id = cardUserId.trim();
+    if (id.isEmpty) {
+      throw ApiException('名片用户不能为空');
+    }
+    final friends = cachedFriends();
+    final matched = friends.any((friend) {
+      final profile = _friendProfileFromItem(friend);
+      return _profileUserId(profile, fallback: friend) == id;
+    });
+    if (!matched) {
+      AppLogger.warn(
+        'session',
+        'contact card blocked because user is not friend',
+        data: {'card_user_id': id, 'friend_count': friends.length},
+      );
+      throw ApiException('只能发送自己的好友名片');
+    }
+  }
+
+  Map<String, Object?> _friendProfileFromItem(Map<String, Object?> item) {
+    final friend = item['friend'];
+    if (friend is Map) {
+      return friend.map((key, value) => MapEntry(key.toString(), value));
+    }
+    final user = item['user'];
+    if (user is Map) {
+      return user.map((key, value) => MapEntry(key.toString(), value));
+    }
+    return item;
+  }
+
   Future<void> _runBusy(Future<void> Function() task) async {
     _busy = true;
     _error = null;
@@ -2602,6 +2722,44 @@ class SessionController extends ChangeNotifier {
       return userId;
     }
     return 'app${_api.appId}user$userId';
+  }
+
+  int _conversationIntValue(Map<String, Object?> source, List<String> keys) {
+    for (final key in keys) {
+      final value = source[key];
+      if (value is int) {
+        return value;
+      }
+      final parsed = int.tryParse(value?.toString() ?? '');
+      if (parsed != null) {
+        return parsed;
+      }
+    }
+    return 0;
+  }
+
+  int _conversationChannelType(Map<String, Object?> source, ChatSession? chat) {
+    final direct = _conversationIntValue(source, ['channel_type']);
+    if (direct > 0) {
+      return direct;
+    }
+    return source['conversation_type']?.toString() == 'group'
+        ? chat?.channelTypeGroup ?? 2
+        : chat?.channelTypePerson ?? 1;
+  }
+
+  String _conversationStringValue(
+    Map<String, Object?> source,
+    List<String> keys, {
+    String fallback = '',
+  }) {
+    for (final key in keys) {
+      final value = source[key]?.toString().trim() ?? '';
+      if (value.isNotEmpty) {
+        return value;
+      }
+    }
+    return fallback;
   }
 
   String _userIdFromUid(String uid) {

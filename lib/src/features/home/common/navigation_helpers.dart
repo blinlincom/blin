@@ -12,17 +12,38 @@ Future<Map<String, String>?> _openInput(
   );
 }
 
-Future<void> _push(BuildContext context, Widget page) {
+Future<void> _push(BuildContext context, Widget page) async {
   if (page is LiveKitCallPage) {
-    return Navigator.of(context).push(_callPageRoute(page));
+    await Navigator.of(context).push(_callPageRoute(page));
+    return;
   }
-  return Navigator.of(
+  if (page is ChatPage) {
+    await Navigator.of(context).push(_chatPageRoute(page));
+    return;
+  }
+  await Navigator.of(
     context,
   ).push(MaterialPageRoute<void>(builder: (_) => page));
 }
 
-PageRoute<void> _callPageRoute(LiveKitCallPage page) {
+PageRoute<void> _chatPageRoute(ChatPage page) {
   return PageRouteBuilder<void>(
+    opaque: true,
+    pageBuilder: (_, __, ___) =>
+        const ColoredBox(color: _chatPageColor, child: SizedBox.expand()),
+    transitionsBuilder: (_, animation, __, ___) {
+      return ColoredBox(
+        color: _chatPageColor,
+        child: FadeTransition(opacity: animation, child: page),
+      );
+    },
+    transitionDuration: const Duration(milliseconds: 160),
+    reverseTransitionDuration: const Duration(milliseconds: 140),
+  );
+}
+
+PageRoute<int> _callPageRoute(LiveKitCallPage page) {
+  return PageRouteBuilder<int>(
     opaque: false,
     barrierColor: Colors.transparent,
     pageBuilder: (_, __, ___) => page,
@@ -69,8 +90,8 @@ void _openPrivateChat(
   }
   Navigator.of(context)
       .push(
-        MaterialPageRoute<void>(
-          builder: (_) => ChatPage(
+        _chatPageRoute(
+          ChatPage(
             controller: controller,
             title: _friendTitle(item),
             channelId: channelId,
@@ -100,8 +121,8 @@ void _openGroupChat(
   }
   Navigator.of(context)
       .push(
-        MaterialPageRoute<void>(
-          builder: (_) => ChatPage(
+        _chatPageRoute(
+          ChatPage(
             controller: controller,
             title: _groupTitle(item),
             channelId: channelId,

@@ -14,6 +14,7 @@ class ImCacheStore {
   static const _friendListPrefix = 'im_friend_list';
   static const _groupListPrefix = 'im_group_list';
   static const _profilePrefix = 'im_profile';
+  static const _pinnedConversationPrefix = 'im_pinned_conversations';
   static const _readPrefix = 'im_read_marker';
   static const _gatewayCursorPrefix = 'im_gateway_cursor';
   static const _clearPrefix = 'im_chat_clear_marker';
@@ -123,6 +124,7 @@ class ImCacheStore {
     writeGlobalClearMarker(uid: uid, timestampMs: timestampMs);
     final prefixes = [
       '$_conversationPrefix:$uid',
+      '$_pinnedConversationPrefix:$uid',
       '$_recentPrefix:$uid',
       '$_messagePrefix:$uid:',
       '$_readPrefix:$uid:',
@@ -179,6 +181,7 @@ class ImCacheStore {
         .where((item) => item != '$channelType:$channelId')
         .toList(growable: false);
     _kv.encodeString('$_recentPrefix:$uid', jsonEncode(recent));
+    unpinConversation(uid: uid, channelId: channelId, channelType: channelType);
   }
 
   void removeChannelCache({
@@ -206,6 +209,65 @@ class ImCacheStore {
         .where((item) => item != '$channelType:$channelId')
         .toList(growable: false);
     _kv.encodeString('$_recentPrefix:$uid', jsonEncode(recent));
+    unpinConversation(uid: uid, channelId: channelId, channelType: channelType);
+  }
+
+  Set<String> readPinnedConversationKeys(String uid) {
+    final raw = _kv.decodeString('$_pinnedConversationPrefix:$uid');
+    if (raw == null || raw.isEmpty) {
+      return const {};
+    }
+    final decoded = jsonDecode(raw);
+    if (decoded is! List) {
+      return const {};
+    }
+    return decoded.map((item) => item.toString()).toSet();
+  }
+
+  bool isConversationPinned({
+    required String uid,
+    required String channelId,
+    required int channelType,
+  }) {
+    return readPinnedConversationKeys(
+      uid,
+    ).contains(_conversationStateKey(channelId, channelType));
+  }
+
+  void setConversationPinned({
+    required String uid,
+    required String channelId,
+    required int channelType,
+    required bool pinned,
+  }) {
+    final pins = readPinnedConversationKeys(uid).toSet();
+    final key = _conversationStateKey(channelId, channelType);
+    if (pinned) {
+      pins.add(key);
+    } else {
+      pins.remove(key);
+    }
+    if (pins.isEmpty) {
+      _kv.removeValue('$_pinnedConversationPrefix:$uid');
+      return;
+    }
+    _kv.encodeString(
+      '$_pinnedConversationPrefix:$uid',
+      jsonEncode(pins.toList(growable: false)),
+    );
+  }
+
+  void unpinConversation({
+    required String uid,
+    required String channelId,
+    required int channelType,
+  }) {
+    setConversationPinned(
+      uid: uid,
+      channelId: channelId,
+      channelType: channelType,
+      pinned: false,
+    );
   }
 
   void deleteMessage({
@@ -452,6 +514,10 @@ class ImCacheStore {
 
   String _messageKey(String uid, String channelId, int channelType) {
     return '$_messagePrefix:$uid:$channelType:$channelId';
+  }
+
+  String _conversationStateKey(String channelId, int channelType) {
+    return '$channelType:$channelId';
   }
 
   String _readMarkerKey(String uid, String channelId, int channelType) {

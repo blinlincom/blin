@@ -7,7 +7,12 @@ class _Composer extends StatelessWidget {
     required this.enabled,
     required this.disabledText,
     required this.toolsOpen,
+    required this.voiceMode,
+    required this.recording,
     required this.onVoice,
+    required this.onVoiceRecordStart,
+    required this.onVoiceRecordEnd,
+    required this.onVoiceRecordCancel,
     required this.onEmoji,
     required this.onTools,
     required this.onSend,
@@ -18,7 +23,12 @@ class _Composer extends StatelessWidget {
   final bool enabled;
   final String disabledText;
   final bool toolsOpen;
+  final bool voiceMode;
+  final bool recording;
   final VoidCallback onVoice;
+  final VoidCallback onVoiceRecordStart;
+  final VoidCallback onVoiceRecordEnd;
+  final VoidCallback onVoiceRecordCancel;
   final VoidCallback onEmoji;
   final VoidCallback onTools;
   final VoidCallback onSend;
@@ -41,65 +51,76 @@ class _Composer extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
             _ComposerIconButton(
-              tooltip: '语音',
-              icon: Icons.mic_none,
+              tooltip: voiceMode ? '键盘' : '语音',
+              icon: voiceMode ? Icons.keyboard_alt_outlined : Icons.mic_none,
               onPressed: !enabled ? null : onVoice,
             ),
             const SizedBox(width: 6),
             Expanded(
-              child: Container(
-                constraints: const BoxConstraints(
-                  minHeight: BimDimensions.composerControl,
-                ),
-                decoration: BoxDecoration(
-                  color: _fillColor,
-                  borderRadius: BorderRadius.circular(6),
-                ),
-                child: TextField(
-                  controller: controller,
-                  focusNode: focusNode,
-                  minLines: 1,
-                  maxLines: 4,
-                  readOnly: !enabled,
-                  enabled: enabled,
-                  textInputAction: TextInputAction.send,
-                  onSubmitted: (_) {
-                    if (enabled) {
-                      onSend();
-                    }
-                  },
-                  decoration: InputDecoration(
-                    hintText: enabled ? '输入消息' : disabledText,
-                    hintStyle: const TextStyle(
-                      color: Color(0xffaeb4bd),
-                      fontSize: 15,
+              child: voiceMode
+                  ? _VoiceRecordButton(
+                      enabled: enabled,
+                      disabledText: disabledText,
+                      recording: recording,
+                      onStart: onVoiceRecordStart,
+                      onEnd: onVoiceRecordEnd,
+                      onCancel: onVoiceRecordCancel,
+                    )
+                  : Container(
+                      constraints: const BoxConstraints(
+                        minHeight: BimDimensions.composerControl,
+                      ),
+                      decoration: BoxDecoration(
+                        color: _fillColor,
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: TextField(
+                        controller: controller,
+                        focusNode: focusNode,
+                        minLines: 1,
+                        maxLines: 4,
+                        readOnly: !enabled,
+                        enabled: enabled,
+                        textInputAction: TextInputAction.send,
+                        onSubmitted: (_) {
+                          if (enabled) {
+                            onSend();
+                          }
+                        },
+                        decoration: InputDecoration(
+                          hintText: enabled ? '输入消息' : disabledText,
+                          hintStyle: const TextStyle(
+                            color: Color(0xffaeb4bd),
+                            fontSize: 15,
+                          ),
+                          filled: true,
+                          fillColor: !enabled
+                              ? const Color(0xffeeeeee)
+                              : _fillColor,
+                          isDense: true,
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(6),
+                            borderSide: BorderSide.none,
+                          ),
+                          enabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(6),
+                            borderSide: BorderSide.none,
+                          ),
+                          disabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(6),
+                            borderSide: BorderSide.none,
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(6),
+                            borderSide: BorderSide.none,
+                          ),
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 14,
+                            vertical: 11,
+                          ),
+                        ),
+                      ),
                     ),
-                    filled: true,
-                    fillColor: !enabled ? const Color(0xffeeeeee) : _fillColor,
-                    isDense: true,
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(6),
-                      borderSide: BorderSide.none,
-                    ),
-                    enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(6),
-                      borderSide: BorderSide.none,
-                    ),
-                    disabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(6),
-                      borderSide: BorderSide.none,
-                    ),
-                    focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(6),
-                      borderSide: BorderSide.none,
-                    ),
-                    contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 14,
-                      vertical: 11,
-                    ),
-                  ),
-                ),
-              ),
             ),
             const SizedBox(width: 6),
             _ComposerIconButton(
@@ -113,46 +134,155 @@ class _Composer extends StatelessWidget {
               icon: toolsOpen ? Icons.close : Icons.add_circle_outline,
               onPressed: !enabled ? null : onTools,
             ),
-            ValueListenableBuilder<TextEditingValue>(
-              valueListenable: controller,
-              builder: (context, value, _) {
-                if (!enabled || value.text.trim().isEmpty) {
-                  return const SizedBox.shrink();
-                }
-                return Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const SizedBox(width: 4),
-                    SizedBox(
-                      height: 40,
-                      child: TextButton(
-                        onPressed: onSend,
-                        style: TextButton.styleFrom(
-                          foregroundColor: Colors.white,
-                          backgroundColor: _chatAckColor,
-                          padding: const EdgeInsets.symmetric(horizontal: 8),
-                          minimumSize: const Size(
-                            BimDimensions.composerControl,
-                            40,
+            if (!voiceMode)
+              ValueListenableBuilder<TextEditingValue>(
+                valueListenable: controller,
+                builder: (context, value, _) {
+                  if (!enabled || value.text.trim().isEmpty) {
+                    return const SizedBox.shrink();
+                  }
+                  return Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const SizedBox(width: 4),
+                      SizedBox(
+                        height: 40,
+                        child: TextButton(
+                          onPressed: onSend,
+                          style: TextButton.styleFrom(
+                            foregroundColor: Colors.white,
+                            backgroundColor: _chatAckColor,
+                            padding: const EdgeInsets.symmetric(horizontal: 8),
+                            minimumSize: const Size(
+                              BimDimensions.composerControl,
+                              40,
+                            ),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(6),
+                            ),
                           ),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(6),
-                          ),
-                        ),
-                        child: const Text(
-                          '发送',
-                          style: TextStyle(
-                            fontWeight: FontWeight.w700,
-                            fontSize: 13,
+                          child: const Text(
+                            '发送',
+                            style: TextStyle(
+                              fontWeight: FontWeight.w700,
+                              fontSize: 13,
+                            ),
                           ),
                         ),
                       ),
-                    ),
-                  ],
-                );
-              },
-            ),
+                    ],
+                  );
+                },
+              ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _VoiceRecordButton extends StatefulWidget {
+  const _VoiceRecordButton({
+    required this.enabled,
+    required this.disabledText,
+    required this.recording,
+    required this.onStart,
+    required this.onEnd,
+    required this.onCancel,
+  });
+
+  final bool enabled;
+  final String disabledText;
+  final bool recording;
+  final VoidCallback onStart;
+  final VoidCallback onEnd;
+  final VoidCallback onCancel;
+
+  @override
+  State<_VoiceRecordButton> createState() => _VoiceRecordButtonState();
+}
+
+class _VoiceRecordButtonState extends State<_VoiceRecordButton> {
+  bool _canceling = false;
+
+  void _updateCancel(Offset globalPosition) {
+    final box = context.findRenderObject() as RenderBox?;
+    if (box == null) {
+      return;
+    }
+    final local = box.globalToLocal(globalPosition);
+    final next =
+        local.dy < -22 ||
+        local.dx < -18 ||
+        local.dx > box.size.width + 18 ||
+        local.dy > box.size.height + 24;
+    if (next != _canceling && mounted) {
+      setState(() => _canceling = next);
+    }
+  }
+
+  void _finish() {
+    if (_canceling) {
+      widget.onCancel();
+    } else {
+      widget.onEnd();
+    }
+    if (mounted) {
+      setState(() => _canceling = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final label = !widget.enabled
+        ? widget.disabledText
+        : widget.recording
+        ? (_canceling ? '松开取消' : '松开发送，上滑取消')
+        : '按住说话';
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onLongPressStart: widget.enabled
+          ? (details) {
+              setState(() => _canceling = false);
+              widget.onStart();
+            }
+          : null,
+      onLongPressMoveUpdate: widget.enabled
+          ? (details) => _updateCancel(details.globalPosition)
+          : null,
+      onLongPressEnd: widget.enabled ? (_) => _finish() : null,
+      onLongPressCancel: widget.enabled ? widget.onCancel : null,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 140),
+        curve: Curves.easeOut,
+        height: BimDimensions.composerControl,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: !widget.enabled
+              ? const Color(0xffeeeeee)
+              : widget.recording
+              ? (_canceling ? const Color(0xffffece8) : const Color(0xffe8f7ee))
+              : _fillColor,
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(
+            color: widget.recording
+                ? (_canceling ? BimColors.redPacket : _chatAckColor)
+                : Colors.transparent,
+          ),
+        ),
+        child: Text(
+          label,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            color: !widget.enabled
+                ? _mutedColor
+                : _canceling
+                ? BimColors.redPacket
+                : _textColor,
+            fontSize: 15,
+            fontWeight: FontWeight.w700,
+          ),
         ),
       ),
     );

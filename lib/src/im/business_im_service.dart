@@ -144,13 +144,13 @@ class BusinessImService extends ChangeNotifier {
       return const [];
     }
     if (_latestConversations.isEmpty) {
-      _latestConversations = _dedupeConversations(
-        _cache.readConversations(chat.uid),
+      _latestConversations = _sortConversations(
+        _dedupeConversations(_cache.readConversations(chat.uid)),
       );
     }
-    return _latestConversations
-        .map((item) => Map<String, Object?>.from(item))
-        .toList(growable: false);
+    return _sortConversations(
+      _latestConversations,
+    ).map((item) => Map<String, Object?>.from(item)).toList(growable: false);
   }
 
   int messageVersion({required String channelID, required int channelType}) {
@@ -389,11 +389,13 @@ class BusinessImService extends ChangeNotifier {
     bool notify = true,
   }) async {
     final chat = _requireChat();
-    _latestConversations = _dedupeConversations(
-      _cache
-          .readConversations(chat.uid)
-          .map(_hydrateConversationProfile)
-          .toList(growable: false),
+    _latestConversations = _sortConversations(
+      _dedupeConversations(
+        _cache
+            .readConversations(chat.uid)
+            .map(_hydrateConversationProfile)
+            .toList(growable: false),
+      ),
     );
     _cache.writeConversations(
       uid: chat.uid,
@@ -408,6 +410,39 @@ class BusinessImService extends ChangeNotifier {
       data: {'count': _latestConversations.length, 'notify': notify},
     );
     return _latestConversations;
+  }
+
+  Future<void> setConversationPinned({
+    required String channelID,
+    required int channelType,
+    required bool pinned,
+  }) async {
+    final chat = _requireChat();
+    final channelId = _canonicalChannelId(channelID, channelType);
+    if (channelId.isEmpty || channelType <= 0) {
+      return;
+    }
+    _cache.setConversationPinned(
+      uid: chat.uid,
+      channelId: channelId,
+      channelType: channelType,
+      pinned: pinned,
+    );
+    _latestConversations = _sortConversations(
+      _latestConversations.isNotEmpty
+          ? _latestConversations
+          : _cache.readConversations(chat.uid),
+    );
+    _cache.writeConversations(
+      uid: chat.uid,
+      conversations: _latestConversations,
+    );
+    _bumpConversations(pinned ? 'pin_conversation' : 'unpin_conversation');
+    AppLogger.info(
+      'im',
+      pinned ? 'conversation pinned' : 'conversation unpinned',
+      data: {'channel_id': channelId, 'channel_type': channelType},
+    );
   }
 
   Future<List<Map<String, Object?>>> loadConversations() async {
@@ -672,6 +707,7 @@ class BusinessImService extends ChangeNotifier {
         .map(_normalizeConversation)
         .where(_conversationVisibleAfterClear)
         .toList(growable: false);
+    _latestConversations = _sortConversations(_latestConversations);
     _forgetChannelHistorySynced(channelID, channelType);
     _markMessageChannel(
       source: 'clear_channel_chat',
@@ -1032,14 +1068,15 @@ class BusinessImService extends ChangeNotifier {
           .where(_conversationVisibleAfterClear)
           .toList(growable: false);
       final freshLocal = _currentLocalConversations(chat);
-      _latestConversations =
-          _mergeConversationLists(
-                serverConversations,
-                _mergeConversationLists(freshLocal, latestBeforeMerge),
-              )
-              .map(_rememberConversationProfile)
-              .map(_hydrateConversationProfile)
-              .toList(growable: false);
+      _latestConversations = _sortConversations(
+        _mergeConversationLists(
+              serverConversations,
+              _mergeConversationLists(freshLocal, latestBeforeMerge),
+            )
+            .map(_rememberConversationProfile)
+            .map(_hydrateConversationProfile)
+            .toList(growable: false),
+      );
       _updateInitialHistorySyncProgress(0.94, '正在写入本地缓存');
       _cache.writeConversations(
         uid: chat.uid,
@@ -1094,6 +1131,39 @@ class BusinessImService extends ChangeNotifier {
       notifyListeners();
       return _latestConversations;
     }
+  }
+
+  List<Map<String, Object?>> cachedLocalMessages({
+    required String channelID,
+    required int channelType,
+    int limit = _messageCacheLimit,
+  }) {
+    final rawChannelId = channelID;
+    channelID = _canonicalChannelId(channelID, channelType);
+    final key = _messageKey(channelID, channelType);
+    if (_invalidMessageChannels.contains(key)) {
+      AppLogger.info(
+        'im',
+        'cached local messages skipped for invalid channel',
+        data: {'channel_id': channelID, 'channel_type': channelType},
+      );
+      return const <Map<String, Object?>>[];
+    }
+    final cached = _sortAndLimit(
+      _readMessagesForChannel(channelID, channelType),
+      limit,
+    );
+    AppLogger.info(
+      'im',
+      'cached local messages read',
+      data: {
+        'raw_channel_id': rawChannelId,
+        'channel_id': channelID,
+        'channel_type': channelType,
+        'result_count': cached.length,
+      },
+    );
+    return cached;
   }
 
   Future<List<Map<String, Object?>>> localMessages({
@@ -1673,11 +1743,13 @@ class BusinessImService extends ChangeNotifier {
   }
 
   List<Map<String, Object?>> _currentLocalConversations(ChatSession chat) {
-    return _cache
-        .readConversations(chat.uid)
-        .map(_normalizeConversation)
-        .where(_conversationVisibleAfterClear)
-        .toList(growable: false);
+    return _sortConversations(
+      _cache
+          .readConversations(chat.uid)
+          .map(_normalizeConversation)
+          .where(_conversationVisibleAfterClear)
+          .toList(growable: false),
+    );
   }
 
   Future<List<Map<String, Object?>>> _hydrateEmptyConversationsFromHistory(
@@ -1796,15 +1868,7 @@ class BusinessImService extends ChangeNotifier {
         merged.add(Map<String, Object?>.from(normalized));
       }
     }
-    final deduped = _dedupeConversations(merged);
-    deduped.sort(
-      (a, b) => _value(b, [
-        'msg_time',
-        'create_time',
-        'timestamp',
-      ]).compareTo(_value(a, ['msg_time', 'create_time', 'timestamp'])),
-    );
-    return deduped;
+    return _sortConversations(_dedupeConversations(merged));
   }
 
   List<Map<String, Object?>> _dedupeConversations(
@@ -1824,7 +1888,45 @@ class BusinessImService extends ChangeNotifier {
           ? item
           : _mergeConversationFields(current, item);
     }
-    return byChannel.values.toList(growable: false);
+    return _sortConversations(byChannel.values.toList(growable: false));
+  }
+
+  List<Map<String, Object?>> _sortConversations(
+    List<Map<String, Object?>> conversations,
+  ) {
+    final chat = _session?.chat;
+    final pinnedKeys = chat == null
+        ? const <String>{}
+        : _cache.readPinnedConversationKeys(chat.uid);
+    final list = conversations
+        .map((raw) {
+          final item = Map<String, Object?>.from(_normalizeConversation(raw));
+          final channelId = _value(item, ['channel_id']);
+          final channelType = _intValue(item, ['channel_type']);
+          final pinned = pinnedKeys.contains(
+            _messageKey(channelId, channelType),
+          );
+          item['is_pinned'] = pinned;
+          return item;
+        })
+        .where(_conversationVisibleAfterClear)
+        .toList(growable: false);
+    list.sort((a, b) {
+      final pinnedCompare =
+          (_boolValue(b['is_pinned']) ? 1 : 0) -
+          (_boolValue(a['is_pinned']) ? 1 : 0);
+      if (pinnedCompare != 0) {
+        return pinnedCompare;
+      }
+      return _objectTimestampMs(b, [
+        'msg_time',
+        'create_time',
+        'timestamp',
+      ]).compareTo(
+        _objectTimestampMs(a, ['msg_time', 'create_time', 'timestamp']),
+      );
+    });
+    return list;
   }
 
   Map<String, Object?> _mergeConversationFields(
@@ -2056,7 +2158,12 @@ class BusinessImService extends ChangeNotifier {
       }
     }
     final clientMsgNo = newClientMsgNo();
-    final serverPayload = Map<String, Object?>.from(payload)
+    final senderPayload = <String, Object?>{
+      'sender_id': session.userId.toString(),
+      'sender_uid': chat.uid,
+      ...payload,
+    };
+    final serverPayload = Map<String, Object?>.from(senderPayload)
       ..remove('file_path');
     final cleanPayload = _cleanPayload({
       ...serverPayload,
@@ -2065,7 +2172,7 @@ class BusinessImService extends ChangeNotifier {
       'client_msg_no': clientMsgNo,
     });
     final localPayload = _cleanPayload({
-      ...payload,
+      ...senderPayload,
       if (filePath.isNotEmpty) 'file_path': filePath,
       'protocol': 'blin.chat.v1',
       'content_type': contentType,
@@ -2120,19 +2227,24 @@ class BusinessImService extends ChangeNotifier {
         channelId: channelID,
         channelType: channelType,
       );
-      _upsertMessage(channelID, channelType, confirmed);
-      _upsertConversationFromMessage(confirmed);
-      _publishMessageEvent(
-        source: 'send_confirmed',
-        channelId: channelID,
-        channelType: channelType,
-        message: confirmed,
-      );
-      _markMessageChannel(
-        source: 'send_confirmed',
-        channelId: channelID,
-        channelType: channelType,
-      );
+      if (_isDisplayableChatPayload(
+        _asMap(confirmed['payload']),
+        contentType: contentType,
+      )) {
+        _upsertMessage(channelID, channelType, confirmed);
+        _upsertConversationFromMessage(confirmed);
+        _publishMessageEvent(
+          source: 'send_confirmed',
+          channelId: channelID,
+          channelType: channelType,
+          message: confirmed,
+        );
+        _markMessageChannel(
+          source: 'send_confirmed',
+          channelId: channelID,
+          channelType: channelType,
+        );
+      }
       AppLogger.info(
         'im',
         'business message sent',
@@ -2192,7 +2304,8 @@ class BusinessImService extends ChangeNotifier {
   }
 
   bool _messageMustWaitServerConfirm(String contentType) {
-    return contentType == ChatContentTypes.redPacket ||
+    return contentType == 'cmd' ||
+        contentType == ChatContentTypes.redPacket ||
         contentType == ChatContentTypes.transfer;
   }
 
@@ -4636,6 +4749,20 @@ class BusinessImService extends ChangeNotifier {
       }
       return true;
     }
+    if (cmd == 'burn_after_read_state') {
+      _publishMessageEvent(
+        source: 'burn_after_read_state_cmd',
+        channelId: channelId,
+        channelType: channelType,
+        message: <String, Object?>{
+          'client_msg_no': _value(payload, ['client_msg_no']),
+          'content_type': 'cmd',
+          'cmd': cmd,
+          'payload': Map<String, Object?>.from(payload),
+        },
+      );
+      return true;
+    }
     if (cmd == 'friend_deleted') {
       final friendId = _value(payload, ['friend_id', 'target_user_id']);
       if (friendId.isNotEmpty) {
@@ -6320,13 +6447,11 @@ class BusinessImService extends ChangeNotifier {
     } else {
       conversations.insert(0, next);
     }
-    conversations.sort(
-      (a, b) => (b['msg_time']?.toString() ?? '').compareTo(
-        a['msg_time']?.toString() ?? '',
-      ),
+    _latestConversations = _sortConversations(conversations);
+    _cache.writeConversations(
+      uid: chat.uid,
+      conversations: _latestConversations,
     );
-    _latestConversations = conversations;
-    _cache.writeConversations(uid: chat.uid, conversations: conversations);
     AppLogger.info(
       'im',
       'conversation upserted from message',
@@ -6341,7 +6466,7 @@ class BusinessImService extends ChangeNotifier {
         'is_current_read_visible': isCurrentReadVisible,
         'previous_unread': previousUnread,
         'unread_quantity': _intValue(next, ['unread_quantity']),
-        'conversation_count': conversations.length,
+        'conversation_count': _latestConversations.length,
         'message': _messageLogSummary(normalizedMessage),
       },
     );
@@ -6419,13 +6544,11 @@ class BusinessImService extends ChangeNotifier {
     } else {
       conversations.insert(0, next);
     }
-    conversations.sort(
-      (a, b) => (b['msg_time']?.toString() ?? '').compareTo(
-        a['msg_time']?.toString() ?? '',
-      ),
+    _latestConversations = _sortConversations(conversations);
+    _cache.writeConversations(
+      uid: chat.uid,
+      conversations: _latestConversations,
     );
-    _latestConversations = conversations;
-    _cache.writeConversations(uid: chat.uid, conversations: conversations);
     AppLogger.info(
       'im',
       'conversation last message replaced',
@@ -6491,8 +6614,11 @@ class BusinessImService extends ChangeNotifier {
       ...conversations[targetIndex],
       'unread_quantity': 0,
     };
-    _latestConversations = conversations;
-    _cache.writeConversations(uid: chat.uid, conversations: conversations);
+    _latestConversations = _sortConversations(conversations);
+    _cache.writeConversations(
+      uid: chat.uid,
+      conversations: _latestConversations,
+    );
     _bumpConversations(source);
     return true;
   }

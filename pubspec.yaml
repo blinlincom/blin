@@ -41,6 +41,7 @@ dependencies:
   video_player: ^2.11.1
   audioplayers: ^6.8.1
   livekit_client: ^2.8.1
+  record: ^7.1.1
 
 dev_dependencies:
   flutter_test:
@@ -61,6 +62,8 @@ flutter:
 
   assets:
     - assets/sounds/
+    - assets/emoji/
+    - assets/emoji/default/
 
   # To add assets to your application, add an assets section, like this:
   # assets:

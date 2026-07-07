@@ -6,7 +6,7 @@ String _mediaTitle(String contentType) {
     ChatContentTypes.emoji => '发送表情',
     ChatContentTypes.gif => '发送 GIF',
     ChatContentTypes.sticker => '发送贴纸',
-    ChatContentTypes.voice => '发送语音',
+    ChatContentTypes.voice => '录制语音',
     ChatContentTypes.video => '发送视频',
     ChatContentTypes.file => '发送文件',
     _ => '发送媒体',
@@ -31,6 +31,17 @@ String _mimeFromPath(String path, String contentType) {
       'm4v' => 'video/x-m4v',
       'webm' => 'video/webm',
       _ => 'video/*',
+    };
+  }
+  if (contentType == ChatContentTypes.voice) {
+    return switch (ext) {
+      'm4a' => 'audio/mp4',
+      'aac' => 'audio/aac',
+      'mp3' => 'audio/mpeg',
+      'wav' => 'audio/wav',
+      'amr' => 'audio/amr',
+      'ogg' => 'audio/ogg',
+      _ => 'audio/*',
     };
   }
   return switch (ext) {
@@ -179,15 +190,6 @@ List<ActionInputField> _mediaFields(String contentType) {
       break;
     case ChatContentTypes.sticker:
       fields.add(const ActionInputField(id: 'sticker_id', label: '贴纸 ID'));
-      break;
-    case ChatContentTypes.voice:
-      fields.add(
-        const ActionInputField(
-          id: 'duration',
-          label: '时长秒数',
-          keyboardType: TextInputType.number,
-        ),
-      );
       break;
     case ChatContentTypes.video:
       fields.add(

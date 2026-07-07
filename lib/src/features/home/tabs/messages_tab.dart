@@ -183,6 +183,82 @@ class _MessagesTabState extends State<MessagesTab> {
     }
   }
 
+  Future<void> _setConversationPinned(
+    Map<String, Object?> item, {
+    required bool pinned,
+  }) async {
+    final channelType = _channelTypeFromConversation(item);
+    final channelId = _conversationChannelId(item, channelType);
+    if (channelId.isEmpty) {
+      return;
+    }
+    await widget.controller.setConversationPinned(
+      channelId: channelId,
+      channelType: channelType,
+      pinned: pinned,
+    );
+    if (mounted) {
+      _applyCachedConversations();
+    }
+  }
+
+  Future<void> _deleteConversation(Map<String, Object?> item) async {
+    final confirmed = await _confirmDanger(
+      context,
+      title: '删除会话',
+      content: '将清空你自己看到的这个会话和聊天记录，不影响对方。',
+      confirmText: '删除',
+    );
+    if (!confirmed) {
+      return;
+    }
+    await widget.controller.deleteConversation(conversation: item);
+    if (mounted) {
+      _applyCachedConversations();
+    }
+  }
+
+  Future<void> _showConversationActions(Map<String, Object?> item) async {
+    final pinned = _conversationPinned(item);
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: _surfaceColor,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: Icon(
+                pinned ? Icons.push_pin_outlined : Icons.push_pin,
+                color: _textColor,
+              ),
+              title: Text(pinned ? '取消置顶' : '置顶'),
+              onTap: () => Navigator.of(context).pop('pin'),
+            ),
+            ListTile(
+              leading: const Icon(
+                Icons.delete_outline,
+                color: BimColors.danger,
+              ),
+              title: const Text('删除会话'),
+              onTap: () => Navigator.of(context).pop('delete'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (!mounted) {
+      return;
+    }
+    if (action == 'pin') {
+      await _setConversationPinned(item, pinned: !pinned);
+      return;
+    }
+    if (action == 'delete') {
+      await _deleteConversation(item);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final header = _SearchBar(
@@ -230,40 +306,118 @@ class _MessagesTabState extends State<MessagesTab> {
     final unread = _intValue(item, ['unread_quantity']);
     final channelType = _channelTypeFromConversation(item);
     final channelId = _conversationChannelId(item, channelType);
-    return _ConversationTile(
+    final pinned = _conversationPinned(item);
+    return Dismissible(
       key: ValueKey('conversation-$channelType-$channelId'),
-      title: title,
-      subtitle: content.isEmpty ? '暂无最新消息' : content,
-      time: time,
-      unread: unread,
-      isGroup: channelType == _groupChannelType,
-      avatarUrl: _conversationAvatarUrl(item),
-      onTap: () {
-        if (channelId.isEmpty) {
-          return;
-        }
-        unawaited(
-          Navigator.of(context)
-              .push(
-                MaterialPageRoute<void>(
-                  builder: (_) => ChatPage(
-                    controller: widget.controller,
-                    title: title,
-                    channelId: channelId,
-                    groupId: _value(item, [
-                      'group_id',
-                      'id',
-                    ], fallback: channelId),
-                    channelType: channelType,
-                  ),
-                ),
-              )
-              .then(
-                (_) => _refreshReadStateAfterChatPop(channelId, channelType),
-              ),
-        );
+      direction: DismissDirection.endToStart,
+      confirmDismiss: (_) async {
+        await _showConversationActions(item);
+        return false;
       },
+      background: _ConversationSwipeActions(pinned: pinned),
+      child: _ConversationTile(
+        title: title,
+        subtitle: content.isEmpty ? '暂无最新消息' : content,
+        time: time,
+        unread: unread,
+        isGroup: channelType == _groupChannelType,
+        isPinned: pinned,
+        avatarUrl: _conversationAvatarUrl(item),
+        onLongPress: () => _showConversationActions(item),
+        onTap: () {
+          if (channelId.isEmpty) {
+            return;
+          }
+          unawaited(
+            Navigator.of(context)
+                .push(
+                  _chatPageRoute(
+                    ChatPage(
+                      controller: widget.controller,
+                      title: title,
+                      channelId: channelId,
+                      groupId: _value(item, [
+                        'group_id',
+                        'id',
+                      ], fallback: channelId),
+                      channelType: channelType,
+                    ),
+                  ),
+                )
+                .then(
+                  (_) => _refreshReadStateAfterChatPop(channelId, channelType),
+                ),
+          );
+        },
+      ),
     );
+  }
+
+  bool _conversationPinned(Map<String, Object?> item) {
+    for (final key in const ['is_pinned', 'pinned', 'is_top', 'top']) {
+      final value = item[key];
+      if (value is bool) {
+        return value;
+      }
+      final text = value?.toString().toLowerCase() ?? '';
+      if (text == '1' || text == 'true' || text == 'yes') {
+        return true;
+      }
+      if (text == '0' || text == 'false' || text == 'no') {
+        return false;
+      }
+    }
+    return false;
+  }
+
+  Future<bool> _confirmDanger(
+    BuildContext context, {
+    required String title,
+    required String content,
+    required String confirmText,
+  }) async {
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(title),
+        content: Text(content),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: Text(
+              confirmText,
+              style: const TextStyle(color: BimColors.danger),
+            ),
+          ),
+        ],
+      ),
+    );
+    return result == true;
+  }
+
+  List<Map<String, Object?>> _sortConversationsForUi(
+    List<Map<String, Object?>> conversations,
+  ) {
+    final next = conversations
+        .map((item) => Map<String, Object?>.from(item))
+        .toList(growable: false);
+    next.sort((a, b) {
+      final pinnedCompare =
+          (_conversationPinned(b) ? 1 : 0) - (_conversationPinned(a) ? 1 : 0);
+      if (pinnedCompare != 0) {
+        return pinnedCompare;
+      }
+      return _value(b, [
+        'msg_time',
+        'create_time',
+        'timestamp',
+      ]).compareTo(_value(a, ['msg_time', 'create_time', 'timestamp']));
+    });
+    return next;
   }
 
   List<Map<String, Object?>> _upsertConversation(
@@ -285,9 +439,6 @@ class _MessagesTabState extends State<MessagesTab> {
     } else {
       next.insert(0, Map<String, Object?>.from(conversation));
     }
-    next.sort(
-      (a, b) => _value(b, ['msg_time']).compareTo(_value(a, ['msg_time'])),
-    );
-    return next;
+    return _sortConversationsForUi(next);
   }
 }

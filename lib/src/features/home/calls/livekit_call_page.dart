@@ -788,7 +788,7 @@ class _LiveKitCallPageState extends State<LiveKitCallPage> {
       return;
     }
     _pageClosing = true;
-    Navigator.of(context).pop();
+    Navigator.of(context).pop(_call?.callId ?? 0);
   }
 
   Future<void> _disconnectRoom() async {

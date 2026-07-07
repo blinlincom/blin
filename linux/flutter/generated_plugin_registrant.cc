@@ -10,6 +10,7 @@
 #include <flutter_webrtc/flutter_web_r_t_c_plugin.h>
 #include <livekit_client/live_kit_plugin.h>
 #include <mmkv_linux/mmkv_linux_plugin.h>
+#include <record_linux/record_linux_plugin.h>
 
 void fl_register_plugins(FlPluginRegistry* registry) {
   g_autoptr(FlPluginRegistrar) audioplayers_linux_registrar =
@@ -24,4 +25,7 @@ void fl_register_plugins(FlPluginRegistry* registry) {
   g_autoptr(FlPluginRegistrar) mmkv_linux_registrar =
       fl_plugin_registry_get_registrar_for_plugin(registry, "MmkvLinuxPlugin");
   mmkv_linux_plugin_register_with_registrar(mmkv_linux_registrar);
+  g_autoptr(FlPluginRegistrar) record_linux_registrar =
+      fl_plugin_registry_get_registrar_for_plugin(registry, "RecordLinuxPlugin");
+  record_linux_plugin_register_with_registrar(record_linux_registrar);
 }

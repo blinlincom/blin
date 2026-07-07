@@ -176,7 +176,8 @@ class _ConversationTile extends StatelessWidget {
     required this.isGroup,
     required this.avatarUrl,
     required this.onTap,
-    super.key,
+    this.onLongPress,
+    this.isPinned = false,
   });
 
   final String title;
@@ -186,19 +187,22 @@ class _ConversationTile extends StatelessWidget {
   final bool isGroup;
   final String avatarUrl;
   final VoidCallback onTap;
+  final VoidCallback? onLongPress;
+  final bool isPinned;
 
   @override
   Widget build(BuildContext context) {
     return InkWell(
       onTap: onTap,
+      onLongPress: onLongPress,
       child: Container(
         constraints: const BoxConstraints(
           minHeight: BimDimensions.conversationRow,
         ),
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
-        decoration: const BoxDecoration(
-          color: _surfaceColor,
-          border: Border(bottom: BorderSide(color: _lightBorderColor)),
+        decoration: BoxDecoration(
+          color: isPinned ? const Color(0xfff4f5f7) : _surfaceColor,
+          border: const Border(bottom: BorderSide(color: _lightBorderColor)),
         ),
         child: Row(
           children: [
@@ -234,15 +238,29 @@ class _ConversationTile extends StatelessWidget {
                 mainAxisAlignment: MainAxisAlignment.center,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: _textColor,
-                      fontSize: 15,
-                      fontWeight: FontWeight.w700,
-                    ),
+                  Row(
+                    children: [
+                      if (isPinned) ...[
+                        const Icon(
+                          Icons.push_pin,
+                          size: 13,
+                          color: Color(0xff8d95a3),
+                        ),
+                        const SizedBox(width: 4),
+                      ],
+                      Expanded(
+                        child: Text(
+                          title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: _textColor,
+                            fontSize: 15,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                   const SizedBox(height: 4),
                   _ConversationSubtitleText(text: subtitle),
@@ -271,6 +289,74 @@ class _ConversationTile extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _ConversationSwipeActions extends StatelessWidget {
+  const _ConversationSwipeActions({required this.pinned});
+
+  final bool pinned;
+
+  @override
+  Widget build(BuildContext context) {
+    return ColoredBox(
+      color: _surfaceColor,
+      child: Align(
+        alignment: Alignment.centerRight,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _ConversationSwipeActionCell(
+              color: const Color(0xff8d95a3),
+              icon: pinned ? Icons.push_pin_outlined : Icons.push_pin,
+              label: pinned ? '取消置顶' : '置顶',
+            ),
+            const _ConversationSwipeActionCell(
+              color: BimColors.danger,
+              icon: Icons.delete_outline,
+              label: '删除',
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ConversationSwipeActionCell extends StatelessWidget {
+  const _ConversationSwipeActionCell({
+    required this.color,
+    required this.icon,
+    required this.label,
+  });
+
+  final Color color;
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 74,
+      height: double.infinity,
+      color: color,
+      alignment: Alignment.center,
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(icon, color: Colors.white, size: 20),
+          const SizedBox(height: 3),
+          Text(
+            label,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
       ),
     );
   }

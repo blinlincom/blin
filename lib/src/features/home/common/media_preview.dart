@@ -58,16 +58,58 @@ class _MediaPreview extends StatelessWidget {
   }
 }
 
+class _EmojiMessagePreview extends StatelessWidget {
+  const _EmojiMessagePreview({required this.payload, required this.content});
+
+  final Map<String, Object?> payload;
+  final String content;
+
+  @override
+  Widget build(BuildContext context) {
+    final asset = _emojiAssetForPayload(payload);
+    if (asset.isNotEmpty) {
+      return SizedBox(
+        width: 64,
+        height: 64,
+        child: Image.asset(
+          asset,
+          fit: BoxFit.contain,
+          gaplessPlayback: true,
+          errorBuilder: (_, __, ___) => _fallbackText,
+        ),
+      );
+    }
+    return _fallbackText;
+  }
+
+  Widget get _fallbackText {
+    return Text(
+      _value(payload, [
+        'emoji_code',
+      ], fallback: content.isEmpty ? '[表情]' : content),
+      style: const TextStyle(fontSize: 24, height: 1.2),
+    );
+  }
+}
+
 class _ImageMessagePreview extends StatelessWidget {
   const _ImageMessagePreview({
     required this.payload,
     required this.status,
+    required this.readText,
+    required this.timeLabel,
+    required this.isMe,
+    required this.isGroupMessage,
     required this.onRetry,
     super.key,
   });
 
   final Map<String, Object?> payload;
   final String status;
+  final String readText;
+  final String timeLabel;
+  final bool isMe;
+  final bool isGroupMessage;
   final VoidCallback onRetry;
 
   @override
@@ -118,6 +160,13 @@ class _ImageMessagePreview extends StatelessWidget {
               progress: _uploadProgress(payload),
               onRetry: onRetry,
             ),
+            _MediaMessageMetaBar(
+              timeLabel: timeLabel,
+              status: status,
+              readText: readText,
+              isMe: isMe,
+              isGroupMessage: isGroupMessage,
+            ),
           ],
         ),
       ),
@@ -129,12 +178,20 @@ class _VideoMessagePreview extends StatelessWidget {
   const _VideoMessagePreview({
     required this.payload,
     required this.status,
+    required this.readText,
+    required this.timeLabel,
+    required this.isMe,
+    required this.isGroupMessage,
     required this.onRetry,
     super.key,
   });
 
   final Map<String, Object?> payload;
   final String status;
+  final String readText;
+  final String timeLabel;
+  final bool isMe;
+  final bool isGroupMessage;
   final VoidCallback onRetry;
 
   @override
@@ -189,12 +246,20 @@ class _VideoMessagePreview extends StatelessWidget {
           source: source,
           payload: payload,
           status: status,
+          readText: readText,
+          timeLabel: timeLabel,
+          isMe: isMe,
+          isGroupMessage: isGroupMessage,
           onRetry: onRetry,
         );
       }
       return _VideoPlaceholderPreview(
         payload: payload,
         status: status,
+        readText: readText,
+        timeLabel: timeLabel,
+        isMe: isMe,
+        isGroupMessage: isGroupMessage,
         onRetry: onRetry,
       );
     }
@@ -227,6 +292,13 @@ class _VideoMessagePreview extends StatelessWidget {
               status: status,
               progress: _uploadProgress(payload),
               onRetry: onRetry,
+            ),
+            _MediaMessageMetaBar(
+              timeLabel: timeLabel,
+              status: status,
+              readText: readText,
+              isMe: isMe,
+              isGroupMessage: isGroupMessage,
             ),
           ],
         ),
@@ -318,6 +390,10 @@ class _VideoFramePreview extends StatefulWidget {
     required this.source,
     required this.payload,
     required this.status,
+    required this.readText,
+    required this.timeLabel,
+    required this.isMe,
+    required this.isGroupMessage,
     required this.onRetry,
     super.key,
   });
@@ -325,6 +401,10 @@ class _VideoFramePreview extends StatefulWidget {
   final _VideoPreviewSource source;
   final Map<String, Object?> payload;
   final String status;
+  final String readText;
+  final String timeLabel;
+  final bool isMe;
+  final bool isGroupMessage;
   final VoidCallback onRetry;
 
   @override
@@ -407,6 +487,10 @@ class _VideoFramePreviewState extends State<_VideoFramePreview> {
       return _VideoPlaceholderPreview(
         payload: widget.payload,
         status: widget.status,
+        readText: widget.readText,
+        timeLabel: widget.timeLabel,
+        isMe: widget.isMe,
+        isGroupMessage: widget.isGroupMessage,
         onRetry: widget.onRetry,
       );
     }
@@ -451,6 +535,13 @@ class _VideoFramePreviewState extends State<_VideoFramePreview> {
               progress: _uploadProgress(widget.payload),
               onRetry: widget.onRetry,
             ),
+            _MediaMessageMetaBar(
+              timeLabel: widget.timeLabel,
+              status: widget.status,
+              readText: widget.readText,
+              isMe: widget.isMe,
+              isGroupMessage: widget.isGroupMessage,
+            ),
           ],
         ),
       ),
@@ -462,11 +553,19 @@ class _VideoPlaceholderPreview extends StatelessWidget {
   const _VideoPlaceholderPreview({
     required this.payload,
     required this.status,
+    required this.readText,
+    required this.timeLabel,
+    required this.isMe,
+    required this.isGroupMessage,
     required this.onRetry,
   });
 
   final Map<String, Object?> payload;
   final String status;
+  final String readText;
+  final String timeLabel;
+  final bool isMe;
+  final bool isGroupMessage;
   final VoidCallback onRetry;
 
   @override
@@ -518,9 +617,126 @@ class _VideoPlaceholderPreview extends StatelessWidget {
               progress: _uploadProgress(payload),
               onRetry: onRetry,
             ),
+            _MediaMessageMetaBar(
+              timeLabel: timeLabel,
+              status: status,
+              readText: readText,
+              isMe: isMe,
+              isGroupMessage: isGroupMessage,
+            ),
           ],
         ),
       ),
+    );
+  }
+}
+
+class _MediaMessageMetaBar extends StatelessWidget {
+  const _MediaMessageMetaBar({
+    required this.timeLabel,
+    required this.status,
+    required this.readText,
+    required this.isMe,
+    required this.isGroupMessage,
+  });
+
+  final String timeLabel;
+  final String status;
+  final String readText;
+  final bool isMe;
+  final bool isGroupMessage;
+
+  @override
+  Widget build(BuildContext context) {
+    final statusText = _statusText;
+    if (timeLabel.isEmpty && statusText.isEmpty) {
+      return const SizedBox.shrink();
+    }
+    return Positioned(
+      left: 0,
+      right: 0,
+      bottom: 0,
+      child: IgnorePointer(
+        child: DecoratedBox(
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [Color(0x00000000), Color(0x7d000000)],
+            ),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(8, 18, 8, 6),
+            child: Row(
+              children: [
+                if (timeLabel.isNotEmpty)
+                  Text(
+                    timeLabel,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: _textStyle(const Color(0xffffffff)),
+                  ),
+                if (timeLabel.isNotEmpty && statusText.isNotEmpty)
+                  const SizedBox(width: 8),
+                if (statusText.isNotEmpty)
+                  Expanded(
+                    child: Text(
+                      statusText,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.right,
+                      style: _textStyle(_statusColor),
+                    ),
+                  )
+                else
+                  const Spacer(),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  String get _statusText {
+    if (!isMe) {
+      return '';
+    }
+    return switch (status) {
+      'sending' => '发送中',
+      'queued' => '待发送',
+      'failed' => '发送失败',
+      'read' when isGroupMessage && readText.isNotEmpty => readText,
+      'sent' when isGroupMessage && readText.isNotEmpty => readText,
+      '' when isGroupMessage && readText.isNotEmpty => readText,
+      'read' when isGroupMessage => '0人已读',
+      'sent' when isGroupMessage => '0人已读',
+      '' when isGroupMessage => '0人已读',
+      'read' => '已读',
+      'sent' => '未读',
+      '' => '未读',
+      _ => '',
+    };
+  }
+
+  Color get _statusColor {
+    return switch (status) {
+      'failed' => const Color(0xffffd2d2),
+      'read' => const Color(0xffc9f7d5),
+      'sent' => const Color(0xffffffff),
+      _ => const Color(0xe6ffffff),
+    };
+  }
+
+  TextStyle _textStyle(Color color) {
+    return TextStyle(
+      color: color,
+      fontSize: 10.5,
+      fontWeight: FontWeight.w800,
+      height: 1,
+      shadows: const [
+        Shadow(color: Color(0x99000000), blurRadius: 3, offset: Offset(0, 1)),
+      ],
     );
   }
 }

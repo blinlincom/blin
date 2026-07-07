@@ -21,28 +21,12 @@ class QuickActionsPage extends StatelessWidget {
       _ActionEntry(
         Icons.phone_outlined,
         '语音会议',
-        () => _push(
-          context,
-          LiveKitCallPage.create(
-            controller: controller,
-            callType: 'meeting',
-            mediaType: 'audio',
-            title: '语音会议',
-          ),
-        ),
+        () => _startMeeting(context, controller, mediaType: 'audio'),
       ),
       _ActionEntry(
         Icons.videocam_outlined,
         '视频会议',
-        () => _push(
-          context,
-          LiveKitCallPage.create(
-            controller: controller,
-            callType: 'meeting',
-            mediaType: 'video',
-            title: '视频会议',
-          ),
-        ),
+        () => _startMeeting(context, controller, mediaType: 'video'),
       ),
     ];
     return Scaffold(
@@ -70,6 +54,170 @@ class QuickActionsPage extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+Future<void> _startMeeting(
+  BuildContext context,
+  SessionController controller, {
+  required String mediaType,
+}) async {
+  final selected = await Navigator.of(context).push<List<String>>(
+    MaterialPageRoute(
+      builder: (_) => _MeetingInvitePickerPage(
+        controller: controller,
+        mediaType: mediaType,
+      ),
+    ),
+  );
+  if (selected == null || selected.isEmpty || !context.mounted) {
+    return;
+  }
+  await _push(
+    context,
+    LiveKitCallPage.create(
+      controller: controller,
+      callType: 'meeting',
+      mediaType: mediaType,
+      title: mediaType == 'video' ? '视频会议' : '语音会议',
+      inviteUserIds: selected,
+    ),
+  );
+}
+
+class _MeetingInvitePickerPage extends StatefulWidget {
+  const _MeetingInvitePickerPage({
+    required this.controller,
+    required this.mediaType,
+  });
+
+  final SessionController controller;
+  final String mediaType;
+
+  @override
+  State<_MeetingInvitePickerPage> createState() =>
+      _MeetingInvitePickerPageState();
+}
+
+class _MeetingInvitePickerPageState extends State<_MeetingInvitePickerPage> {
+  late final Future<List<Map<String, Object?>>> _future;
+  final Set<String> _selectedIds = <String>{};
+
+  @override
+  void initState() {
+    super.initState();
+    _future = widget.controller.loadFriends(forceRefresh: true);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final title = widget.mediaType == 'video' ? '选择视频会议成员' : '选择语音会议成员';
+    final selected = _selectedIds.toList(growable: false);
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(title),
+        actions: [
+          TextButton(
+            onPressed: selected.isEmpty
+                ? null
+                : () => Navigator.of(context).pop(selected),
+            child: Text(selected.isEmpty ? '发起' : '发起(${selected.length})'),
+          ),
+        ],
+      ),
+      body: SafeArea(
+        child: FutureBuilder<List<Map<String, Object?>>>(
+          future: _future,
+          builder: (context, snapshot) {
+            if (snapshot.connectionState != ConnectionState.done) {
+              return const Center(child: CircularProgressIndicator());
+            }
+            if (snapshot.hasError) {
+              return _ErrorState(text: snapshot.error.toString());
+            }
+            final friends = snapshot.data ?? const <Map<String, Object?>>[];
+            if (friends.isEmpty) {
+              return const _EmptyRow(text: '暂无可邀请好友');
+            }
+            return ListView.separated(
+              itemCount: friends.length,
+              separatorBuilder: (_, _) => const Divider(height: 1),
+              itemBuilder: (context, index) {
+                final friend = friends[index];
+                final userId = _friendUserId(friend);
+                final checked = _selectedIds.contains(userId);
+                return InkWell(
+                  onTap: () => _toggle(userId),
+                  child: Container(
+                    constraints: const BoxConstraints(
+                      minHeight: BimDimensions.contactRow,
+                    ),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 8,
+                    ),
+                    color: _surfaceColor,
+                    child: Row(
+                      children: [
+                        _Avatar(
+                          label: _friendTitle(friend),
+                          imageUrl: _friendAvatarUrl(friend),
+                          size: 38,
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Text(
+                                _friendTitle(friend),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  color: _textColor,
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              const SizedBox(height: 3),
+                              Text(
+                                _friendSubtitle(friend),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  color: _mutedColor,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Checkbox(
+                          value: checked,
+                          onChanged: (_) => _toggle(userId),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  void _toggle(String userId) {
+    if (userId.isEmpty) {
+      return;
+    }
+    setState(() {
+      if (!_selectedIds.remove(userId)) {
+        _selectedIds.add(userId);
+      }
+    });
   }
 }
 

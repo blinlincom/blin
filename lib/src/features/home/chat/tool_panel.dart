@@ -7,7 +7,6 @@ class _ChatToolsPanel extends StatefulWidget {
     required this.onImage,
     required this.onEmoji,
     required this.onSticker,
-    required this.onVoice,
     required this.onVideo,
     required this.onFile,
     required this.onContactCard,
@@ -23,7 +22,6 @@ class _ChatToolsPanel extends StatefulWidget {
   final VoidCallback onImage;
   final VoidCallback onEmoji;
   final VoidCallback onSticker;
-  final VoidCallback onVoice;
   final VoidCallback onVideo;
   final VoidCallback onFile;
   final VoidCallback onContactCard;
@@ -117,12 +115,6 @@ class _ChatToolsPanelState extends State<_ChatToolsPanel> {
         '贴纸',
         widget.onSticker,
         const Color(0xff7c5cff),
-      ),
-      _ToolItem(
-        Icons.keyboard_voice_rounded,
-        '语音',
-        widget.onVoice,
-        const Color(0xff5ac8fa),
       ),
       _ToolItem(
         Icons.tune_rounded,
