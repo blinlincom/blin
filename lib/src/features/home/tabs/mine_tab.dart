@@ -89,6 +89,14 @@ class MineTab extends StatelessWidget {
               ),
               const _GroupGap(),
               _MenuTile(
+                icon: Icons.account_balance_wallet_outlined,
+                iconColor: const Color(0xff0f766e),
+                title: '钱包',
+                subtitle: '余额、收付款、账单',
+                onTap: () => _push(context, WalletPage(controller: controller)),
+              ),
+              const _GroupGap(),
+              _MenuTile(
                 icon: Icons.photo_library_outlined,
                 iconColor: const Color(0xff34c759),
                 title: '朋友圈',

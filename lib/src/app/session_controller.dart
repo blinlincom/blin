@@ -81,6 +81,8 @@ class SessionController extends ChangeNotifier {
   bool _backgroundReceiveProtectionEnabled = true;
   BackgroundReceiveStatus _backgroundReceiveStatus =
       BackgroundReceiveStatus.unsupported('unknown', '尚未检测');
+  WalletBalance? _walletBalance;
+  Future<WalletBalance>? _walletBalanceRequest;
 
   UserSession? get session => _session;
   AppInfo? get appInfo => _appInfo;
@@ -116,6 +118,17 @@ class SessionController extends ChangeNotifier {
   Stream<BusinessImPresenceEvent> get presenceEvents => _im.presenceEvents;
   Stream<BusinessImCallEvent> get callEvents => _im.callEvents;
   Stream<BusinessImFriendEvent> get friendEvents => _im.friendEvents;
+  WalletBalance? get walletBalance {
+    final current = _session ?? _store.readSession();
+    if (_walletBalance != null) {
+      return _walletBalance;
+    }
+    if (current == null) {
+      return null;
+    }
+    _walletBalance = _store.readWalletBalance(current.userId);
+    return _walletBalance;
+  }
 
   List<Map<String, Object?>> cachedConversations() {
     final memoryCache = _im.cachedConversations();
@@ -136,6 +149,9 @@ class SessionController extends ChangeNotifier {
     _backgroundReceiveProtectionEnabled = _store
         .readBackgroundReceiveProtectionEnabled();
     _lastSessionVerifiedAt = _store.readSessionVerifiedAt();
+    if (_session != null) {
+      _walletBalance = _store.readWalletBalance(_session!.userId);
+    }
     final chatUid = _session?.chat?.uid ?? '';
     if (chatUid.isNotEmpty) {
       _friendApplyUnreadCount = _cache.readFriendApplyUnread(chatUid);
@@ -736,6 +752,166 @@ class SessionController extends ChangeNotifier {
   Future<void> sendMobileCode(String mobile, {int type = 2}) {
     return _runBusy(
       () => _api.sendMobileCode(mobile, device: _device, type: type),
+    );
+  }
+
+  Future<WalletBalance> loadWalletBalance({bool refresh = true}) async {
+    final current = _requireSession();
+    if (!refresh) {
+      final cached = _store.readWalletBalance(current.userId);
+      if (cached != null) {
+        _walletBalance = cached;
+        notifyListeners();
+        return cached;
+      }
+    }
+    final running = _walletBalanceRequest;
+    if (running != null) {
+      return running;
+    }
+    final request = _api
+        .walletBalance(session: current, device: _device)
+        .then((value) {
+          _walletBalance = value;
+          _store.writeWalletBalance(userId: current.userId, data: value);
+          AppLogger.info(
+            'wallet',
+            'wallet balance loaded',
+            data: {
+              'balance': value.balance,
+              'pay_password_set': value.payPasswordSet,
+            },
+          );
+          notifyListeners();
+          return value;
+        })
+        .whenComplete(() => _walletBalanceRequest = null);
+    _walletBalanceRequest = request;
+    return request;
+  }
+
+  Future<List<WalletBill>> loadWalletBills({
+    String scene = 'all',
+    int page = 1,
+    int limit = 20,
+  }) {
+    final current = _requireSession();
+    return _api.walletBills(
+      session: current,
+      device: _device,
+      scene: scene,
+      page: page,
+      limit: limit,
+    );
+  }
+
+  Future<void> setWalletPayPassword(String password) async {
+    final current = _requireSession();
+    await _api.walletSetPayPassword(
+      session: current,
+      device: _device,
+      password: password,
+    );
+    await loadWalletBalance(refresh: true);
+  }
+
+  Future<void> rechargeWalletByKm(String km) async {
+    final current = _requireSession();
+    await _api.walletRechargeKm(session: current, device: _device, km: km);
+    await loadWalletBalance(refresh: true);
+  }
+
+  Future<void> withdrawWallet({
+    required String amount,
+    required String account,
+    required String name,
+    String remark = '',
+  }) async {
+    final current = _requireSession();
+    await _api.walletWithdraw(
+      session: current,
+      device: _device,
+      amount: amount,
+      account: account,
+      name: name,
+      remark: remark,
+    );
+    await loadWalletBalance(refresh: true);
+  }
+
+  Future<List<WalletWithdrawRecord>> loadWalletWithdrawRecords({
+    int page = 1,
+    int limit = 20,
+  }) {
+    final current = _requireSession();
+    return _api.walletWithdrawRecords(
+      session: current,
+      device: _device,
+      page: page,
+      limit: limit,
+    );
+  }
+
+  Future<WalletOrder> createWalletCollectCode({
+    required String amount,
+    String remark = '',
+  }) {
+    final current = _requireSession();
+    return _api.walletCreateCollectCode(
+      session: current,
+      device: _device,
+      amount: amount,
+      remark: remark,
+    );
+  }
+
+  Future<WalletOrder> createWalletPayCode({
+    required String amount,
+    required String payeeUsername,
+    required String payPassword,
+    String remark = '',
+  }) {
+    final current = _requireSession();
+    return _api.walletCreatePayCode(
+      session: current,
+      device: _device,
+      amount: amount,
+      payeeUsername: payeeUsername,
+      payPassword: payPassword,
+      remark: remark,
+    );
+  }
+
+  Future<WalletOrder> scanWalletQr(String qrToken) {
+    final current = _requireSession();
+    return _api.walletScanQr(
+      session: current,
+      device: _device,
+      qrToken: qrToken,
+    );
+  }
+
+  Future<WalletOrder> confirmWalletQrPay({
+    required String qrToken,
+    required String payPassword,
+  }) async {
+    final current = _requireSession();
+    final order = await _api.walletConfirmQrPay(
+      session: current,
+      device: _device,
+      qrToken: qrToken,
+      payPassword: payPassword,
+    );
+    await loadWalletBalance(refresh: true);
+    return order;
+  }
+
+  Future<WalletOrder> loadWalletOrderStatus(String orderNo) {
+    final current = _requireSession();
+    return _api.walletOrderStatus(
+      session: current,
+      device: _device,
+      orderNo: orderNo,
     );
   }
 
@@ -1455,6 +1631,13 @@ class SessionController extends ChangeNotifier {
     );
   }
 
+  Future<Map<String, Object?>> redPacketDetail(String redPacketId) {
+    return sendImAction(
+      'im_red_packet_detail',
+      params: {'red_packet_id': redPacketId},
+    );
+  }
+
   Future<void> markRedPacketReceivedLocal({
     required String channelId,
     required int channelType,
@@ -1478,6 +1661,13 @@ class SessionController extends ChangeNotifier {
         'transfer_id': transferId,
         'client_msg_no': _im.newClientMsgNo(),
       },
+    );
+  }
+
+  Future<Map<String, Object?>> transferDetail(String transferId) {
+    return sendImAction(
+      'im_transfer_detail',
+      params: {'transfer_id': transferId},
     );
   }
 

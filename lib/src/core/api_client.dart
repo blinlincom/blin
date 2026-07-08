@@ -182,6 +182,234 @@ class ApiClient {
     );
   }
 
+  Future<WalletBalance> walletBalance({
+    required UserSession session,
+    required String device,
+  }) async {
+    final result = await secureSignedImPost<Map<String, Object?>>(
+      'wallet_balance',
+      session: session,
+      device: device,
+      params: const {},
+      secureResponse: true,
+    );
+    if (!result.isSuccess) {
+      throw ApiException(result.message, code: result.code);
+    }
+    return WalletBalance.fromJson(result.data);
+  }
+
+  Future<List<WalletBill>> walletBills({
+    required UserSession session,
+    required String device,
+    String scene = 'all',
+    int page = 1,
+    int limit = 20,
+  }) async {
+    final result = await secureSignedImPost<Map<String, Object?>>(
+      'wallet_bill_list',
+      session: session,
+      device: device,
+      params: {
+        'scene': scene,
+        'page': page.toString(),
+        'limit': limit.toString(),
+      },
+      secureResponse: true,
+    );
+    if (!result.isSuccess) {
+      throw ApiException(result.message, code: result.code);
+    }
+    final list = result.data['list'];
+    if (list is! List) {
+      return const [];
+    }
+    return list.map(WalletBill.fromJson).toList(growable: false);
+  }
+
+  Future<void> walletSetPayPassword({
+    required UserSession session,
+    required String device,
+    required String password,
+  }) async {
+    final result = await secureSignedImPost<Object?>(
+      'wallet_pay_password_set',
+      session: session,
+      device: device,
+      params: {'new_pay_password': password},
+      secureResponse: true,
+    );
+    if (!result.isSuccess) {
+      throw ApiException(result.message, code: result.code);
+    }
+  }
+
+  Future<void> walletRechargeKm({
+    required UserSession session,
+    required String device,
+    required String km,
+  }) async {
+    final result = await secureSignedImPost<Object?>(
+      'wallet_recharge_km',
+      session: session,
+      device: device,
+      params: {'km': km},
+      secureResponse: true,
+    );
+    if (!result.isSuccess) {
+      throw ApiException(result.message, code: result.code);
+    }
+  }
+
+  Future<void> walletWithdraw({
+    required UserSession session,
+    required String device,
+    required String amount,
+    required String account,
+    required String name,
+    String remark = '',
+  }) async {
+    final result = await secureSignedImPost<Object?>(
+      'wallet_withdraw',
+      session: session,
+      device: device,
+      params: {
+        'money': amount,
+        'type': '0',
+        'account': account,
+        'name': name,
+        if (remark.isNotEmpty) 'remark': remark,
+      },
+      secureResponse: true,
+    );
+    if (!result.isSuccess) {
+      throw ApiException(result.message, code: result.code);
+    }
+  }
+
+  Future<List<WalletWithdrawRecord>> walletWithdrawRecords({
+    required UserSession session,
+    required String device,
+    int page = 1,
+    int limit = 20,
+  }) async {
+    final result = await secureSignedImPost<Map<String, Object?>>(
+      'wallet_withdraw_list',
+      session: session,
+      device: device,
+      params: {'page': page.toString(), 'limit': limit.toString()},
+      secureResponse: true,
+    );
+    if (!result.isSuccess) {
+      throw ApiException(result.message, code: result.code);
+    }
+    final list = result.data['list'];
+    if (list is! List) {
+      return const [];
+    }
+    return list.map(WalletWithdrawRecord.fromJson).toList(growable: false);
+  }
+
+  Future<WalletOrder> walletCreateCollectCode({
+    required UserSession session,
+    required String device,
+    required String amount,
+    String remark = '',
+  }) async {
+    final result = await secureSignedImPost<Map<String, Object?>>(
+      'wallet_collect_code_create',
+      session: session,
+      device: device,
+      params: {'amount': amount, if (remark.isNotEmpty) 'remark': remark},
+      secureResponse: true,
+    );
+    if (!result.isSuccess) {
+      throw ApiException(result.message, code: result.code);
+    }
+    return WalletOrder.fromJson(result.data);
+  }
+
+  Future<WalletOrder> walletCreatePayCode({
+    required UserSession session,
+    required String device,
+    required String amount,
+    required String payeeUsername,
+    required String payPassword,
+    String remark = '',
+  }) async {
+    final result = await secureSignedImPost<Map<String, Object?>>(
+      'wallet_pay_code_create',
+      session: session,
+      device: device,
+      params: {
+        'amount': amount,
+        'payee_username': payeeUsername,
+        'pay_password': payPassword,
+        if (remark.isNotEmpty) 'remark': remark,
+      },
+      secureResponse: true,
+    );
+    if (!result.isSuccess) {
+      throw ApiException(result.message, code: result.code);
+    }
+    return WalletOrder.fromJson(result.data);
+  }
+
+  Future<WalletOrder> walletScanQr({
+    required UserSession session,
+    required String device,
+    required String qrToken,
+  }) async {
+    final result = await secureSignedImPost<Map<String, Object?>>(
+      'wallet_qr_scan',
+      session: session,
+      device: device,
+      params: {'qr_token': qrToken},
+      secureResponse: true,
+    );
+    if (!result.isSuccess) {
+      throw ApiException(result.message, code: result.code);
+    }
+    return WalletOrder.fromJson(result.data);
+  }
+
+  Future<WalletOrder> walletConfirmQrPay({
+    required UserSession session,
+    required String device,
+    required String qrToken,
+    required String payPassword,
+  }) async {
+    final result = await secureSignedImPost<Map<String, Object?>>(
+      'wallet_qr_pay_confirm',
+      session: session,
+      device: device,
+      params: {'qr_token': qrToken, 'pay_password': payPassword},
+      secureResponse: true,
+    );
+    if (!result.isSuccess) {
+      throw ApiException(result.message, code: result.code);
+    }
+    return WalletOrder.fromJson(result.data['order']);
+  }
+
+  Future<WalletOrder> walletOrderStatus({
+    required UserSession session,
+    required String device,
+    required String orderNo,
+  }) async {
+    final result = await secureSignedImPost<Map<String, Object?>>(
+      'wallet_order_status',
+      session: session,
+      device: device,
+      params: {'order_no': orderNo},
+      secureResponse: true,
+    );
+    if (!result.isSuccess) {
+      throw ApiException(result.message, code: result.code);
+    }
+    return WalletOrder.fromJson(result.data);
+  }
+
   Future<ChatSession> connectIm({
     required UserSession session,
     required String device,

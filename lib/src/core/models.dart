@@ -267,6 +267,179 @@ class UserSession {
   }
 }
 
+class WalletBalance {
+  const WalletBalance({
+    this.balance = '0.00',
+    this.balanceLabel = '0.00',
+    this.payPasswordSet = false,
+    this.serverTime = 0,
+  });
+
+  final String balance;
+  final String balanceLabel;
+  final bool payPasswordSet;
+  final int serverTime;
+
+  factory WalletBalance.fromJson(Object? value) {
+    final map = _objectMap(value);
+    final balance = _decimalLabel(map['balance']);
+    return WalletBalance(
+      balance: balance,
+      balanceLabel:
+          _stringFromKeys(map, const ['balance_label', 'balance_text']) ??
+          balance,
+      payPasswordSet: _enabled(map['pay_password_set']),
+      serverTime: int.tryParse(map['server_time']?.toString() ?? '') ?? 0,
+    );
+  }
+
+  Map<String, Object?> toJson() => {
+    'balance': balance,
+    'balance_label': balanceLabel,
+    'pay_password_set': payPasswordSet ? 1 : 0,
+    'server_time': serverTime,
+  };
+}
+
+class WalletOrder {
+  const WalletOrder({
+    this.id = 0,
+    this.orderNo = '',
+    this.orderType = '',
+    this.amount = '0.00',
+    this.amountLabel = '0.00',
+    this.remark = '',
+    this.status = 0,
+    this.statusName = '',
+    this.payerId = 0,
+    this.payerName = '',
+    this.payeeId = 0,
+    this.payeeName = '',
+    this.qrToken = '',
+    this.qrPayload = '',
+    this.expireTime = '',
+    this.paidTime = '',
+    this.createTime = '',
+  });
+
+  final int id;
+  final String orderNo;
+  final String orderType;
+  final String amount;
+  final String amountLabel;
+  final String remark;
+  final int status;
+  final String statusName;
+  final int payerId;
+  final String payerName;
+  final int payeeId;
+  final String payeeName;
+  final String qrToken;
+  final String qrPayload;
+  final String expireTime;
+  final String paidTime;
+  final String createTime;
+
+  bool get isPaid => status == 1;
+  bool get isPending => status == 0;
+
+  factory WalletOrder.fromJson(Object? value) {
+    final map = _objectMap(value);
+    final amount = _decimalLabel(map['amount']);
+    return WalletOrder(
+      id: int.tryParse(map['id']?.toString() ?? '') ?? 0,
+      orderNo: map['order_no']?.toString() ?? '',
+      orderType: map['order_type']?.toString() ?? '',
+      amount: amount,
+      amountLabel:
+          _stringFromKeys(map, const ['amount_label', 'amount_text']) ?? amount,
+      remark: map['remark']?.toString() ?? '',
+      status: int.tryParse(map['status']?.toString() ?? '') ?? 0,
+      statusName: map['status_name']?.toString() ?? '',
+      payerId: int.tryParse(map['payer_id']?.toString() ?? '') ?? 0,
+      payerName: map['payer_name']?.toString() ?? '',
+      payeeId: int.tryParse(map['payee_id']?.toString() ?? '') ?? 0,
+      payeeName: map['payee_name']?.toString() ?? '',
+      qrToken: map['qr_token']?.toString() ?? '',
+      qrPayload: map['qr_payload']?.toString() ?? '',
+      expireTime: map['expire_time']?.toString() ?? '',
+      paidTime: map['paid_time']?.toString() ?? '',
+      createTime: map['create_time']?.toString() ?? '',
+    );
+  }
+}
+
+class WalletBill {
+  const WalletBill({
+    this.id = 0,
+    this.scene = '',
+    this.amountLabel = '',
+    this.direction = '',
+    this.remark = '',
+    this.time = '',
+  });
+
+  final int id;
+  final String scene;
+  final String amountLabel;
+  final String direction;
+  final String remark;
+  final String time;
+
+  factory WalletBill.fromJson(Object? value) {
+    final map = _objectMap(value);
+    return WalletBill(
+      id: int.tryParse(map['id']?.toString() ?? '') ?? 0,
+      scene: map['transaction_type']?.toString() ?? '',
+      amountLabel: map['amount_label']?.toString() ?? '',
+      direction: map['direction']?.toString() ?? '',
+      remark: map['remark']?.toString() ?? '',
+      time: map['transaction_date']?.toString() ?? '',
+    );
+  }
+}
+
+class WalletWithdrawRecord {
+  const WalletWithdrawRecord({
+    this.id = 0,
+    this.orderNo = '',
+    this.amount = '',
+    this.status = 0,
+    this.statusName = '',
+    this.account = '',
+    this.name = '',
+    this.createTime = '',
+  });
+
+  final int id;
+  final String orderNo;
+  final String amount;
+  final int status;
+  final String statusName;
+  final String account;
+  final String name;
+  final String createTime;
+
+  factory WalletWithdrawRecord.fromJson(Object? value) {
+    final map = _objectMap(value);
+    final status = int.tryParse(map['withdraw_status']?.toString() ?? '') ?? 0;
+    return WalletWithdrawRecord(
+      id: int.tryParse(map['id']?.toString() ?? '') ?? 0,
+      orderNo: map['withdrawal_note_number']?.toString() ?? '',
+      amount: _decimalLabel(map['withdraw_fee']),
+      status: status,
+      statusName: switch (status) {
+        1 => '已通过',
+        2 => '未通过',
+        _ => '审核中',
+      },
+      account: map['receivable_account']?.toString() ?? '',
+      name: map['name']?.toString() ?? '',
+      createTime: map['create_time']?.toString() ?? '',
+    );
+  }
+}
+
 class ImageCaptcha {
   const ImageCaptcha({this.image = '', this.token = ''});
 
@@ -650,4 +823,20 @@ bool _enabled(Object? value, {bool defaultValue = false}) {
     return false;
   }
   return int.tryParse(text) != null ? int.parse(text) != 0 : defaultValue;
+}
+
+String _decimalLabel(Object? value) {
+  final text = value?.toString().trim() ?? '';
+  if (text.isEmpty) {
+    return '0.00';
+  }
+  final negative = text.startsWith('-');
+  final unsigned = negative ? text.substring(1) : text;
+  if (!RegExp(r'^\d+(\.\d+)?$').hasMatch(unsigned)) {
+    return '0.00';
+  }
+  final parts = unsigned.split('.');
+  final yuan = parts.first.replaceFirst(RegExp(r'^0+(?=\d)'), '');
+  final cent = parts.length > 1 ? parts[1] : '';
+  return '${negative ? '-' : ''}${yuan.isEmpty ? '0' : yuan}.${cent.padRight(2, '0').substring(0, 2)}';
 }

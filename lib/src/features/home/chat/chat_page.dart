@@ -2989,10 +2989,10 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   VoidCallback? _messageTapHandler(Map<String, Object?> item) {
     final contentType = _messageContentType(item);
     if (contentType == ChatContentTypes.redPacket) {
-      return () => _receiveRedPacket(item);
+      return () => _openRedPacketDetail(item);
     }
     if (contentType == ChatContentTypes.transfer) {
-      return () => _receiveTransfer(item);
+      return () => _openTransferDetail(item);
     }
     if (contentType == ChatContentTypes.call) {
       return () => _redialFromCallMessage(item);
@@ -3003,6 +3003,51 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       return () => _openMediaMessage(item);
     }
     return null;
+  }
+
+  Future<void> _openRedPacketDetail(Map<String, Object?> item) async {
+    final payload = _asObjectMap(item['payload']);
+    final redPacketId = _redPacketReceiveId(payload);
+    if (redPacketId.isEmpty) {
+      setState(() => _error = '红包发送确认中，请稍后再试');
+      return;
+    }
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => _RedPacketDetailPage(
+          controller: widget.controller,
+          redPacketId: redPacketId,
+          group: _isGroup,
+          onReceive: () => _receiveRedPacket(
+            item,
+            showLocalMessage: false,
+            ignoreLocalAvailability: true,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openTransferDetail(Map<String, Object?> item) async {
+    final payload = _asObjectMap(item['payload']);
+    final transferId = _transferReceiveId(payload);
+    if (transferId.isEmpty) {
+      setState(() => _error = '转账发送确认中，请稍后再试');
+      return;
+    }
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => _TransferDetailPage(
+          controller: widget.controller,
+          transferId: transferId,
+          onReceive: () => _receiveTransfer(
+            item,
+            showLocalMessage: false,
+            ignoreLocalAvailability: true,
+          ),
+        ),
+      ),
+    );
   }
 
   Future<void> _openMediaMessage(Map<String, Object?> item) async {
@@ -3053,8 +3098,10 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       return;
     }
     final money = (data['money'] ?? '').trim();
-    if (!_isPositiveMoney(money)) {
-      setState(() => _error = '金额必须大于 0');
+    final assetType = (data['asset_type'] ?? 'money').trim();
+    final amountError = _paymentAmountInputError(money, assetType);
+    if (amountError.isNotEmpty) {
+      setState(() => _error = amountError);
       return;
     }
     await _runSending(() async {
@@ -3064,14 +3111,14 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
           channelId: widget.channelId,
           receiverId: data['receiver_id'] ?? '',
           money: money,
-          assetType: data['asset_type'] ?? 'money',
+          assetType: assetType.isEmpty ? 'money' : assetType,
           remark: data['remark'] ?? '',
         );
       } else {
         await widget.controller.sendPrivateTransfer(
           receiverId: _receiverId,
           money: money,
-          assetType: data['asset_type'] ?? 'money',
+          assetType: assetType.isEmpty ? 'money' : assetType,
           remark: data['remark'] ?? '',
         );
       }
@@ -3124,8 +3171,10 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       return;
     }
     final money = (data['money'] ?? '').trim();
-    if (!_isPositiveMoney(money)) {
-      setState(() => _error = '金额必须大于 0');
+    final assetType = (data['asset_type'] ?? 'money').trim();
+    final amountError = _paymentAmountInputError(money, assetType);
+    if (amountError.isNotEmpty) {
+      setState(() => _error = amountError);
       return;
     }
     await _runSending(() async {
@@ -3134,7 +3183,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
           groupId: _groupId,
           channelId: widget.channelId,
           money: money,
-          assetType: data['asset_type'] ?? 'money',
+          assetType: assetType.isEmpty ? 'money' : assetType,
           packetType: data['packet_type'] ?? 'ordinary',
           quantity: int.tryParse(data['quantity'] ?? '') ?? 1,
           receiverId: data['receiver_id'] ?? '',
@@ -3144,16 +3193,25 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         await widget.controller.sendPrivateRedPacket(
           receiverId: _receiverId,
           money: money,
-          assetType: data['asset_type'] ?? 'money',
+          assetType: assetType.isEmpty ? 'money' : assetType,
           remark: data['remark'] ?? '',
         );
       }
     });
   }
 
-  bool _isPositiveMoney(String value) {
+  String _paymentAmountInputError(String value, String assetType) {
+    final normalizedAsset = assetType.trim().isEmpty
+        ? 'money'
+        : assetType.trim().toLowerCase();
+    if (normalizedAsset == 'integral') {
+      return RegExp(r'^[1-9]\d*$').hasMatch(value) ? '' : '积分数量必须是正整数';
+    }
+    if (!RegExp(r'^\d+(\.\d{1,2})?$').hasMatch(value)) {
+      return '金额格式不正确，最多支持小数点后两位';
+    }
     final amount = double.tryParse(value);
-    return amount != null && amount > 0;
+    return amount != null && amount > 0 ? '' : '金额必须大于 0';
   }
 
   Future<void> _openTextOptions() async {
@@ -3297,7 +3355,11 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     });
   }
 
-  Future<void> _receiveRedPacket(Map<String, Object?> item) async {
+  Future<void> _receiveRedPacket(
+    Map<String, Object?> item, {
+    bool showLocalMessage = true,
+    bool ignoreLocalAvailability = false,
+  }) async {
     AppLogger.info(
       'ui',
       'red packet receive tapped',
@@ -3311,10 +3373,12 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     );
     final payload = _asObjectMap(item['payload']);
     if (item['is_me'] == true && !_canReceiveOwnRedPacket(payload, _isGroup)) {
-      setState(() {
-        _error = null;
-        _message = _isGroup ? '指定红包不能由发送者领取' : '不能领取自己发送的红包';
-      });
+      if (showLocalMessage) {
+        setState(() {
+          _error = null;
+          _message = _isGroup ? '指定红包不能由发送者领取' : '不能领取自己发送的红包';
+        });
+      }
       return;
     }
     final redPacketId = _redPacketReceiveId(payload);
@@ -3332,13 +3396,17 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
           'payload': payload,
         },
       );
-      setState(() {
-        _message = '';
-        _error = rawId.isEmpty ? '红包发送确认中，请稍后再试' : '红包数据异常，请重新进入会话';
-      });
+      if (showLocalMessage) {
+        setState(() {
+          _message = '';
+          _error = rawId.isEmpty ? '红包发送确认中，请稍后再试' : '红包数据异常，请重新进入会话';
+        });
+      }
       return;
     }
-    final unavailableText = _redPacketUnavailableText(payload);
+    final unavailableText = ignoreLocalAvailability
+        ? ''
+        : _redPacketUnavailableText(payload);
     if (unavailableText.isNotEmpty) {
       AppLogger.info(
         'ui',
@@ -3351,10 +3419,12 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
           'client_msg_no': _value(item, ['client_msg_no']),
         },
       );
-      setState(() {
-        _error = null;
-        _message = unavailableText;
-      });
+      if (showLocalMessage) {
+        setState(() {
+          _error = null;
+          _message = unavailableText;
+        });
+      }
       return;
     }
     if (_receivingRedPacketIds.contains(redPacketId)) {
@@ -3416,7 +3486,12 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         },
       );
       if (mounted) {
-        setState(() => _error = error.toString());
+        if (showLocalMessage) {
+          setState(() => _error = error.toString());
+        }
+      }
+      if (!showLocalMessage) {
+        rethrow;
       }
     } finally {
       if (mounted) {
@@ -3430,7 +3505,11 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     return id.isNotEmpty && _receivingRedPacketIds.contains(id);
   }
 
-  Future<void> _receiveTransfer(Map<String, Object?> item) async {
+  Future<void> _receiveTransfer(
+    Map<String, Object?> item, {
+    bool showLocalMessage = true,
+    bool ignoreLocalAvailability = false,
+  }) async {
     AppLogger.info(
       'ui',
       'transfer receive tapped',
@@ -3443,10 +3522,12 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       },
     );
     if (item['is_me'] == true) {
-      setState(() {
-        _error = null;
-        _message = '不能收取自己发出的转账';
-      });
+      if (showLocalMessage) {
+        setState(() {
+          _error = null;
+          _message = '不能收取自己发出的转账';
+        });
+      }
       return;
     }
     final payload = _asObjectMap(item['payload']);
@@ -3465,13 +3546,17 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
           'payload': payload,
         },
       );
-      setState(() {
-        _message = '';
-        _error = rawId.isEmpty ? '转账发送确认中，请稍后再试' : '转账数据异常，请重新进入会话';
-      });
+      if (showLocalMessage) {
+        setState(() {
+          _message = '';
+          _error = rawId.isEmpty ? '转账发送确认中，请稍后再试' : '转账数据异常，请重新进入会话';
+        });
+      }
       return;
     }
-    final unavailableText = _transferUnavailableText(payload);
+    final unavailableText = ignoreLocalAvailability
+        ? ''
+        : _transferUnavailableText(payload);
     if (unavailableText.isNotEmpty) {
       AppLogger.info(
         'ui',
@@ -3484,10 +3569,12 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
           'client_msg_no': _value(item, ['client_msg_no']),
         },
       );
-      setState(() {
-        _error = null;
-        _message = unavailableText;
-      });
+      if (showLocalMessage) {
+        setState(() {
+          _error = null;
+          _message = unavailableText;
+        });
+      }
       return;
     }
     if (_receivingTransferIds.contains(transferId)) {
@@ -3546,7 +3633,12 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         },
       );
       if (mounted) {
-        setState(() => _error = error.toString());
+        if (showLocalMessage) {
+          setState(() => _error = error.toString());
+        }
+      }
+      if (!showLocalMessage) {
+        rethrow;
       }
     } finally {
       if (mounted) {

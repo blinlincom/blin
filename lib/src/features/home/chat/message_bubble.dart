@@ -70,6 +70,7 @@ class _MessageBubble extends StatelessWidget {
 
   Color _bubbleColor(String contentType, Map<String, Object?> payload) {
     if (contentType == ChatContentTypes.redPacket ||
+        contentType == ChatContentTypes.transfer ||
         contentType == ChatContentTypes.sticker ||
         contentType == ChatContentTypes.video) {
       return Colors.transparent;
@@ -84,7 +85,8 @@ class _MessageBubble extends StatelessWidget {
   EdgeInsets _bubblePadding(String contentType, Map<String, Object?> payload) {
     final mediaLike = _messageRendersAsMedia(contentType, payload);
     return switch (contentType) {
-      ChatContentTypes.redPacket => EdgeInsets.zero,
+      ChatContentTypes.redPacket ||
+      ChatContentTypes.transfer => EdgeInsets.zero,
       ChatContentTypes.image ||
       ChatContentTypes.gif ||
       ChatContentTypes.sticker ||
@@ -96,7 +98,6 @@ class _MessageBubble extends StatelessWidget {
       ChatContentTypes.file ||
       ChatContentTypes.voice ||
       ChatContentTypes.contactCard ||
-      ChatContentTypes.transfer ||
       ChatContentTypes.call => const EdgeInsets.symmetric(
         horizontal: 11,
         vertical: 9,
@@ -113,13 +114,12 @@ class _MessageBubble extends StatelessWidget {
     final width = MediaQuery.sizeOf(context).width;
     final mediaLike = _messageRendersAsMedia(contentType, payload);
     return switch (contentType) {
-      ChatContentTypes.redPacket =>
+      ChatContentTypes.transfer || ChatContentTypes.redPacket =>
         (width * 0.72).clamp(220.0, 240.0).toDouble(),
       ChatContentTypes.file ||
       ChatContentTypes.video ||
       ChatContentTypes.contactCard ||
-      ChatContentTypes.call ||
-      ChatContentTypes.transfer => width * 0.62,
+      ChatContentTypes.call => width * 0.62,
       ChatContentTypes.voice => width * 0.46,
       ChatContentTypes.image ||
       ChatContentTypes.gif ||
@@ -222,7 +222,7 @@ class _RedPacketPreview extends StatelessWidget {
               padding: const EdgeInsets.symmetric(horizontal: 12),
               color: Colors.white,
               child: const Text(
-                'BIM红包',
+                '红包',
                 style: TextStyle(
                   color: Color(0xff9da5b1),
                   fontSize: 12,
@@ -316,11 +316,9 @@ class _MessageBubbleContent extends StatelessWidget {
       ),
       ChatContentTypes.file => _FilePreview(payload: payload, content: content),
       ChatContentTypes.contactCard => _ContactCardPreview(payload: payload),
-      ChatContentTypes.transfer => _PaymentPreview(
-        icon: Icons.payments_outlined,
-        title: '转账',
+      ChatContentTypes.transfer => _TransferPreviewCard(
         amount: _paymentAmount(payload),
-        isMe: isMe,
+        statusText: _transferStatusText(payload),
       ),
       ChatContentTypes.redPacket => _RedPacketPreview(
         remark: _redPacketRemark(payload),
@@ -746,51 +744,95 @@ class _ContactCardPreview extends StatelessWidget {
   }
 }
 
-class _PaymentPreview extends StatelessWidget {
-  const _PaymentPreview({
-    required this.icon,
-    required this.title,
-    required this.amount,
-    required this.isMe,
-  });
+class _TransferPreviewCard extends StatelessWidget {
+  const _TransferPreviewCard({required this.amount, required this.statusText});
 
-  final IconData icon;
-  final String title;
   final String amount;
-  final bool isMe;
+  final String statusText;
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Icon(icon, color: const Color(0xffd46b08), size: 24),
-        const SizedBox(width: 8),
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(8),
+      child: SizedBox(
+        width: 226,
+        child: Column(
           mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Text(
-              title,
-              style: const TextStyle(
-                color: _textColor,
-                fontSize: 15,
-                fontWeight: FontWeight.w700,
+            Container(
+              padding: const EdgeInsets.fromLTRB(14, 12, 14, 11),
+              color: const Color(0xffff8a00),
+              child: Row(
+                children: [
+                  Container(
+                    width: 42,
+                    height: 46,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: const Color(0xffffb04c),
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(color: const Color(0xffffe0a8)),
+                    ),
+                    child: const Icon(
+                      Icons.payments_outlined,
+                      color: Colors.white,
+                      size: 23,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          amount.isEmpty ? '转账' : amount,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 15,
+                            fontWeight: FontWeight.w800,
+                            height: 1.15,
+                          ),
+                        ),
+                        const SizedBox(height: 7),
+                        Text(
+                          statusText,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: Color(0xfffff1d7),
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            height: 1,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               ),
             ),
-            if (amount.isNotEmpty)
-              Text(
-                amount,
+            Container(
+              height: 27,
+              alignment: Alignment.centerLeft,
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              color: Colors.white,
+              child: const Text(
+                '转账',
                 style: TextStyle(
-                  color: isMe
-                      ? const Color(0xff477a35)
-                      : const Color(0xff8b929e),
+                  color: Color(0xff9da5b1),
                   fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  height: 1,
                 ),
               ),
+            ),
           ],
         ),
-      ],
+      ),
     );
   }
 }

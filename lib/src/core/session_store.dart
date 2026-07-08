@@ -18,6 +18,7 @@ class SessionStore {
   static const _launchAtKey = 'last_launch_at';
   static const _resumeAtKey = 'last_resume_at';
   static const _backgroundReceiveKey = 'background_receive_protection_enabled';
+  static const _walletBalancePrefix = 'wallet_balance';
 
   UserSession? readSession() {
     final raw = _kv.decodeString(_sessionKey);
@@ -111,6 +112,32 @@ class SessionStore {
 
   void writeBackgroundReceiveProtectionEnabled(bool enabled) {
     _kv.encodeString(_backgroundReceiveKey, enabled ? '1' : '0');
+  }
+
+  WalletBalance? readWalletBalance(int userId) {
+    if (userId <= 0) {
+      return null;
+    }
+    final raw = _kv.decodeString('$_walletBalancePrefix:$userId');
+    if (raw == null || raw.isEmpty) {
+      return null;
+    }
+    try {
+      return WalletBalance.fromJson(jsonDecode(raw));
+    } catch (_) {
+      _kv.removeValue('$_walletBalancePrefix:$userId');
+      return null;
+    }
+  }
+
+  void writeWalletBalance({required int userId, required WalletBalance data}) {
+    if (userId <= 0) {
+      return;
+    }
+    _kv.encodeString(
+      '$_walletBalancePrefix:$userId',
+      jsonEncode(data.toJson()),
+    );
   }
 
   String _newDeviceId() {

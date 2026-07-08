@@ -846,7 +846,7 @@ String _redPacketUnavailableText(Map<String, Object?> payload) {
   }
   final quantity = _intValue(redPacket, ['quantity']);
   final receiveCount = _intValue(redPacket, ['receive_count']);
-  final remaining = _intValue(redPacket, ['remaining_amount']);
+  final remaining = _moneyValue(redPacket, ['remaining_amount']);
   if (quantity > 0 && receiveCount >= quantity) {
     return '红包已领取完';
   }
@@ -911,6 +911,17 @@ String _transferUnavailableText(Map<String, Object?> payload) {
   return '';
 }
 
+String _transferStatusText(Map<String, Object?> payload) {
+  final unavailable = _transferUnavailableText(payload);
+  if (unavailable.isNotEmpty) {
+    return unavailable;
+  }
+  if (_transferReceiveId(payload).isEmpty) {
+    return '发送确认中';
+  }
+  return '点击收款';
+}
+
 bool _isValidRedPacketRemark(String value) {
   final text = value.trim();
   if (text.isEmpty ||
@@ -954,6 +965,14 @@ double _uploadProgress(Map<String, Object?> payload) {
     return (parsed / 100).clamp(0, 1).toDouble();
   }
   return parsed.clamp(0, 1).toDouble();
+}
+
+double _moneyValue(Map<String, Object?> source, List<String> keys) {
+  final raw = _value(source, keys);
+  if (raw.isEmpty) {
+    return 0;
+  }
+  return double.tryParse(raw) ?? 0;
 }
 
 String _fileSizeLabel(Object? raw) {
