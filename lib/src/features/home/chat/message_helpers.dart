@@ -168,6 +168,47 @@ String _messageContentText(
   return _value(payload, ['content', 'text', 'remark'], fallback: content);
 }
 
+bool _messageRendersAsMedia(String contentType, Map<String, Object?> payload) {
+  if (contentType == ChatContentTypes.image ||
+      contentType == ChatContentTypes.gif ||
+      contentType == ChatContentTypes.sticker ||
+      contentType == ChatContentTypes.video) {
+    return true;
+  }
+  if (contentType != ChatContentTypes.emoji) {
+    return false;
+  }
+  final media = _asObjectMap(payload['media']);
+  final content = _value(payload, ['content', 'text', 'emoji_text']);
+  if (content.isNotEmpty && content != '[表情]' && content != '[消息]') {
+    return false;
+  }
+  final packId = _value(payload, [
+    'pack_id',
+  ], fallback: _value(media, ['pack_id']));
+  final asset = _value(
+    payload,
+    ['emoji_asset', 'asset', 'emoji_path', 'sticker_asset'],
+    fallback: _value(media, [
+      'emoji_asset',
+      'asset',
+      'emoji_path',
+      'sticker_asset',
+    ]),
+  );
+  if (packId.isEmpty ||
+      packId == 'default' ||
+      asset.startsWith(_emojiAssetRoot)) {
+    return false;
+  }
+  final local = _mediaLocalPath(contentType, payload, media);
+  if (local.isNotEmpty) {
+    return true;
+  }
+  final remote = _mediaRemoteUrl(contentType, payload, media);
+  return remote.isNotEmpty;
+}
+
 Map<String, Object?> _messageQuote(Map<String, Object?> item) {
   final payload = _asObjectMap(item['payload']);
   final quote = _quoteMapFromPayload(payload);

@@ -5,6 +5,7 @@ class _ChatToolsPanel extends StatefulWidget {
     required this.height,
     required this.isGroup,
     required this.onTextOption,
+    required this.onVoiceInput,
     required this.onImage,
     required this.onEmoji,
     required this.onSticker,
@@ -21,6 +22,7 @@ class _ChatToolsPanel extends StatefulWidget {
   final double height;
   final bool isGroup;
   final VoidCallback onTextOption;
+  final VoidCallback onVoiceInput;
   final VoidCallback onImage;
   final VoidCallback onEmoji;
   final VoidCallback onSticker;
@@ -56,81 +58,26 @@ class _ChatToolsPanelState extends State<_ChatToolsPanel> {
   @override
   Widget build(BuildContext context) {
     final items = [
-      _ToolItem(
-        Icons.photo_library_rounded,
-        '相册',
-        widget.onImage,
-        const Color(0xff8e6df7),
-      ),
-      _ToolItem(
-        Icons.videocam_rounded,
-        '视频',
-        widget.onVideo,
-        const Color(0xff2fc86f),
-      ),
-      _ToolItem(
-        Icons.folder_rounded,
-        '文件',
-        widget.onFile,
-        const Color(0xff2f7df6),
-      ),
+      _ToolItem('相册', widget.onImage, Icons.photo_library_rounded),
+      _ToolItem('视频', widget.onVideo, Icons.video_library_rounded),
       if (widget.isGroup) ...[
+        _ToolItem('语音通话', widget.onGroupVoiceCall, Icons.phone_in_talk_rounded),
         _ToolItem(
-          Icons.call_rounded,
-          '语音通话',
-          widget.onGroupVoiceCall,
-          const Color(0xff34c759),
-        ),
-        _ToolItem(
-          Icons.video_call_rounded,
           '视频通话',
           widget.onGroupVideoCall,
-          BimColors.primary,
+          Icons.video_camera_back_rounded,
         ),
       ],
-      _ToolItem(
-        Icons.attach_money_rounded,
-        '转账',
-        widget.onTransfer,
-        BimColors.transfer,
-      ),
-      _ToolItem(
-        Icons.redeem_rounded,
-        '红包',
-        widget.onRedPacket,
-        BimColors.redPacket,
-      ),
-      _ToolItem(
-        Icons.contact_page_rounded,
-        '名片',
-        widget.onContactCard,
-        const Color(0xff347cff),
-      ),
-      _ToolItem(
-        Icons.emoji_emotions_rounded,
-        '表情',
-        widget.onEmoji,
-        const Color(0xffffc043),
-      ),
-      _ToolItem(
-        Icons.sticky_note_2_rounded,
-        '贴纸',
-        widget.onSticker,
-        const Color(0xff7c5cff),
-      ),
-      _ToolItem(
-        Icons.tune_rounded,
-        '文本选项',
-        widget.onTextOption,
-        const Color(0xff8e99a8),
-      ),
+      _ToolItem('文件', widget.onFile, Icons.insert_drive_file_rounded),
+      _ToolItem('红包', widget.onRedPacket, Icons.card_giftcard_rounded),
+      _ToolItem('转账', widget.onTransfer, Icons.swap_horiz_rounded),
+      _ToolItem('语音输入', widget.onVoiceInput, Icons.mic_rounded),
+      _ToolItem('名片', widget.onContactCard, Icons.badge_rounded),
+      _ToolItem('表情', widget.onEmoji, Icons.emoji_emotions_rounded),
+      _ToolItem('贴纸', widget.onSticker, Icons.sticky_note_2_rounded),
+      _ToolItem('文本选项', widget.onTextOption, Icons.tune_rounded),
       if (widget.isGroup && widget.onGroupMembers != null)
-        _ToolItem(
-          Icons.groups_rounded,
-          '群成员',
-          widget.onGroupMembers!,
-          const Color(0xff34c759),
-        ),
+        _ToolItem('群成员', widget.onGroupMembers!, Icons.groups_rounded),
     ];
     final pages = <List<_ToolItem>>[];
     for (var index = 0; index < items.length; index += 8) {
@@ -139,7 +86,7 @@ class _ChatToolsPanelState extends State<_ChatToolsPanel> {
     return Container(
       height: widget.height,
       decoration: const BoxDecoration(
-        color: _surfaceColor,
+        color: _fillColor,
         border: Border(top: BorderSide(color: _lightBorderColor)),
       ),
       child: Column(
@@ -153,37 +100,36 @@ class _ChatToolsPanelState extends State<_ChatToolsPanel> {
               itemBuilder: (context, pageIndex) {
                 final pageItems = pages[pageIndex];
                 return Padding(
-                  padding: const EdgeInsets.fromLTRB(18, 16, 18, 10),
+                  padding: const EdgeInsets.fromLTRB(28, 26, 28, 8),
                   child: _ToolPageGrid(items: pageItems),
                 );
               },
             ),
           ),
-          if (pages.length > 1)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 14),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  for (var index = 0; index < pages.length; index++)
-                    AnimatedContainer(
-                      duration: const Duration(milliseconds: 180),
-                      curve: Curves.easeOut,
-                      width: _pageIndex == index ? 13 : 5,
-                      height: 5,
-                      margin: const EdgeInsets.symmetric(horizontal: 3),
-                      decoration: BoxDecoration(
-                        color: _pageIndex == index
-                            ? const Color(0xff8f96a3)
-                            : const Color(0xffd5d9df),
-                        borderRadius: BorderRadius.circular(3),
-                      ),
+          Padding(
+            padding: EdgeInsets.only(
+              bottom: max(18.0, MediaQuery.viewPaddingOf(context).bottom + 6),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                for (var index = 0; index < pages.length; index++)
+                  AnimatedContainer(
+                    duration: const Duration(milliseconds: 180),
+                    curve: Curves.easeOut,
+                    width: 8,
+                    height: 8,
+                    margin: const EdgeInsets.symmetric(horizontal: 5),
+                    decoration: BoxDecoration(
+                      color: _pageIndex == index
+                          ? const Color(0xff7f858d)
+                          : const Color(0xffd9dce1),
+                      borderRadius: BorderRadius.circular(BimRadius.pill),
                     ),
-                ],
-              ),
-            )
-          else
-            const SizedBox(height: 14),
+                  ),
+              ],
+            ),
+          ),
         ],
       ),
     );
@@ -206,10 +152,7 @@ class _ToolPageGrid extends StatelessWidget {
                 for (var column = 0; column < 4; column++)
                   Expanded(
                     child: Padding(
-                      padding: EdgeInsets.only(
-                        left: column == 0 ? 0 : 6,
-                        right: column == 3 ? 0 : 6,
-                      ),
+                      padding: const EdgeInsets.symmetric(horizontal: 10),
                       child: Builder(
                         builder: (context) {
                           final index = row * 4 + column;
@@ -224,7 +167,7 @@ class _ToolPageGrid extends StatelessWidget {
               ],
             ),
           ),
-          if (row == 0) const SizedBox(height: 10),
+          if (row == 0) const SizedBox(height: 28),
         ],
       ],
     );
@@ -232,12 +175,11 @@ class _ToolPageGrid extends StatelessWidget {
 }
 
 class _ToolItem {
-  const _ToolItem(this.icon, this.label, this.onTap, this.color);
+  const _ToolItem(this.label, this.onTap, this.icon);
 
-  final IconData icon;
   final String label;
   final VoidCallback onTap;
-  final Color color;
+  final IconData icon;
 }
 
 class _ToolButton extends StatelessWidget {
@@ -258,23 +200,19 @@ class _ToolButton extends StatelessWidget {
             height: BimDimensions.toolIcon,
             alignment: Alignment.center,
             decoration: BoxDecoration(
-              color: item.color,
-              borderRadius: BorderRadius.circular(
-                item.icon == Icons.attach_money_rounded
-                    ? BimRadius.pill
-                    : BimRadius.md,
-              ),
+              color: _surfaceColor,
+              borderRadius: BorderRadius.circular(BimRadius.lg),
             ),
-            child: Icon(item.icon, size: 23, color: Colors.white),
+            child: Icon(item.icon, size: 31, color: _textColor),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 11),
           Text(
             item.label,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: const TextStyle(
-              fontSize: 12,
-              color: Color(0xff2f3338),
+              fontSize: 14,
+              color: _secondaryTextColor,
               fontWeight: FontWeight.w500,
               height: 1,
             ),

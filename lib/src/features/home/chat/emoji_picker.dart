@@ -435,18 +435,12 @@ class _EmojiAssetButton extends StatelessWidget {
   Widget build(BuildContext context) {
     return Semantics(
       button: true,
-      label: '发送表情 ${asset.id}',
+      label: '输入表情 ${asset.tag}',
       child: InkWell(
         onTap: () => onSelected(<String, String>{
-          'kind': ChatContentTypes.emoji,
-          'pack_id': 'default',
-          'format': 'png',
-          'emoji_id': asset.id,
-          'emoji_code': asset.id,
-          'sticker_id': asset.id,
-          'emoji_asset': asset.asset,
-          'sticker_asset': asset.asset,
-          'content': '[表情]',
+          'kind': ChatContentTypes.text,
+          'content': asset.tag,
+          'text': asset.tag,
         }),
         borderRadius: BorderRadius.circular(BimRadius.sm),
         child: Padding(

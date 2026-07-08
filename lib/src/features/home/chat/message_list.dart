@@ -35,14 +35,10 @@ class _MessageRow extends StatelessWidget {
         ? currentUserAvatarUrl
         : _messageSenderAvatarUrl(item);
     final contentType = _messageContentType(item);
+    final payload = _asObjectMap(item['payload']);
     final status = _messageStatus(item);
     final readText = _messageReadStatusText(item);
-    final statusInsideContent =
-        contentType == ChatContentTypes.image ||
-        contentType == ChatContentTypes.emoji ||
-        contentType == ChatContentTypes.gif ||
-        contentType == ChatContentTypes.sticker ||
-        contentType == ChatContentTypes.video;
+    final statusInsideContent = _messageRendersAsMedia(contentType, payload);
     final showExternalStatus =
         isMe &&
         !statusInsideContent &&

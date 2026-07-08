@@ -27,12 +27,7 @@ class _MessageBubble extends StatelessWidget {
     final timeLabel = _messageTimeLabel(item);
     final isGroupMessage =
         _intValue(item, ['channel_type']) == _groupChannelType;
-    final isImageLike =
-        contentType == ChatContentTypes.image ||
-        contentType == ChatContentTypes.emoji ||
-        contentType == ChatContentTypes.gif ||
-        contentType == ChatContentTypes.sticker ||
-        contentType == ChatContentTypes.video;
+    final isImageLike = _messageRendersAsMedia(contentType, payload);
     final bubble = _MessageBubbleContent(
       contentType: contentType,
       content: content,
@@ -62,35 +57,42 @@ class _MessageBubble extends StatelessWidget {
           );
     return Container(
       constraints: BoxConstraints(
-        maxWidth: _bubbleMaxWidth(context, contentType),
+        maxWidth: _bubbleMaxWidth(context, contentType, payload),
       ),
-      padding: _bubblePadding(contentType),
+      padding: _bubblePadding(contentType, payload),
       decoration: BoxDecoration(
-        color: _bubbleColor(contentType),
+        color: _bubbleColor(contentType, payload),
         borderRadius: BorderRadius.circular(isImageLike ? 8 : 9),
       ),
       child: child,
     );
   }
 
-  Color _bubbleColor(String contentType) {
+  Color _bubbleColor(String contentType, Map<String, Object?> payload) {
     if (contentType == ChatContentTypes.redPacket ||
-        contentType == ChatContentTypes.emoji ||
         contentType == ChatContentTypes.sticker ||
         contentType == ChatContentTypes.video) {
+      return Colors.transparent;
+    }
+    if (contentType == ChatContentTypes.emoji &&
+        _messageRendersAsMedia(contentType, payload)) {
       return Colors.transparent;
     }
     return isMe ? _chatMineBubbleColor : Colors.white;
   }
 
-  EdgeInsets _bubblePadding(String contentType) {
+  EdgeInsets _bubblePadding(String contentType, Map<String, Object?> payload) {
+    final mediaLike = _messageRendersAsMedia(contentType, payload);
     return switch (contentType) {
       ChatContentTypes.redPacket => EdgeInsets.zero,
       ChatContentTypes.image ||
-      ChatContentTypes.emoji ||
       ChatContentTypes.gif ||
       ChatContentTypes.sticker ||
       ChatContentTypes.video => const EdgeInsets.all(0),
+      ChatContentTypes.emoji =>
+        mediaLike
+            ? const EdgeInsets.all(0)
+            : const EdgeInsets.fromLTRB(12, 8, 9, 7),
       ChatContentTypes.file ||
       ChatContentTypes.voice ||
       ChatContentTypes.contactCard ||
@@ -103,8 +105,13 @@ class _MessageBubble extends StatelessWidget {
     };
   }
 
-  double _bubbleMaxWidth(BuildContext context, String contentType) {
+  double _bubbleMaxWidth(
+    BuildContext context,
+    String contentType,
+    Map<String, Object?> payload,
+  ) {
     final width = MediaQuery.sizeOf(context).width;
+    final mediaLike = _messageRendersAsMedia(contentType, payload);
     return switch (contentType) {
       ChatContentTypes.redPacket =>
         (width * 0.72).clamp(220.0, 240.0).toDouble(),
@@ -115,9 +122,9 @@ class _MessageBubble extends StatelessWidget {
       ChatContentTypes.transfer => width * 0.62,
       ChatContentTypes.voice => width * 0.46,
       ChatContentTypes.image ||
-      ChatContentTypes.emoji ||
       ChatContentTypes.gif ||
       ChatContentTypes.sticker => width * 0.62,
+      ChatContentTypes.emoji => mediaLike ? width * 0.62 : width * 0.58,
       _ => width * 0.58,
     };
   }
@@ -275,12 +282,23 @@ class _MessageBubbleContent extends StatelessWidget {
         status: status,
         onRetry: onRetry,
       ),
-      ChatContentTypes.emoji => _EmojiMessagePreview(
-        payload: payload,
-        content: content,
-        status: status,
-        onRetry: onRetry,
-      ),
+      ChatContentTypes.emoji =>
+        _messageRendersAsMedia(contentType, payload)
+            ? _EmojiMessagePreview(
+                payload: payload,
+                content: content,
+                status: status,
+                onRetry: onRetry,
+              )
+            : Text(
+                content.isEmpty ? '[消息]' : content,
+                style: const TextStyle(
+                  color: Colors.black,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700,
+                  height: 1.35,
+                ),
+              ),
       ChatContentTypes.voice => _VoicePreview(
         payload: payload,
         seconds: _value(payload, ['duration'], fallback: '0'),

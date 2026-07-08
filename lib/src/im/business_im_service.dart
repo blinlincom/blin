@@ -2331,6 +2331,9 @@ class BusinessImService extends ChangeNotifier {
   }) {
     if (filePath.isEmpty ||
         (contentType != ChatContentTypes.image &&
+            contentType != ChatContentTypes.gif &&
+            contentType != ChatContentTypes.sticker &&
+            contentType != ChatContentTypes.emoji &&
             contentType != ChatContentTypes.video)) {
       return null;
     }

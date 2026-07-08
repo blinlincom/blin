@@ -15,6 +15,7 @@ import android.view.WindowManager
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
+import java.io.ByteArrayOutputStream
 import java.security.KeyStore
 import java.security.SecureRandom
 import javax.crypto.Cipher
@@ -26,6 +27,7 @@ class MainActivity : FlutterActivity() {
     private val cacheSecurityChannelName = "bimotc.com/cache_security"
     private val backgroundReceiveChannelName = "bimotc.com/background_receive"
     private val realtimeNotificationChannelName = "bimotc.com/realtime_notifications"
+    private val keyboardContentChannelName = "bimotc.com/keyboard_content"
     private var realtimeNotificationChannel: MethodChannel? = null
     private var realtimeNotificationBridge: RealtimeNotificationBridge? = null
 
@@ -74,6 +76,17 @@ class MainActivity : FlutterActivity() {
                     true
                 }.onSuccess(result::success).onFailure {
                     result.error("OPEN_BATTERY_SETTINGS_ERROR", it.message, null)
+                }
+                else -> result.notImplemented()
+            }
+        }
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, keyboardContentChannelName).setMethodCallHandler { call, result ->
+            when (call.method) {
+                "readUri" -> runCatching {
+                    val uri = call.argument<String>("uri").orEmpty()
+                    readKeyboardContentUri(uri)
+                }.onSuccess(result::success).onFailure {
+                    result.error("KEYBOARD_CONTENT_READ_ERROR", it.message, null)
                 }
                 else -> result.notImplemented()
             }
@@ -161,6 +174,25 @@ class MainActivity : FlutterActivity() {
         }
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         startActivity(intent)
+    }
+
+    private fun readKeyboardContentUri(rawUri: String): ByteArray {
+        require(rawUri.isNotBlank()) { "uri is empty" }
+        val uri = Uri.parse(rawUri)
+        val resolver = applicationContext.contentResolver
+        resolver.openInputStream(uri).use { input ->
+            requireNotNull(input) { "input stream is null" }
+            val output = ByteArrayOutputStream()
+            val buffer = ByteArray(16 * 1024)
+            while (true) {
+                val read = input.read(buffer)
+                if (read <= 0) {
+                    break
+                }
+                output.write(buffer, 0, read)
+            }
+            return output.toByteArray()
+        }
     }
 
     companion object {

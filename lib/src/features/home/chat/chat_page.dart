@@ -27,7 +27,7 @@ double _chatPanelHeight(BuildContext context) {
   final viewportHeight = media.size.height;
   final usableHeight =
       viewportHeight - media.viewPadding.top - media.viewPadding.bottom;
-  final preferred = viewportHeight * 0.38;
+  final preferred = BimDimensions.chatToolsPanel + media.viewPadding.bottom;
   final availableLimit = max(
     220.0,
     usableHeight -
@@ -37,7 +37,7 @@ double _chatPanelHeight(BuildContext context) {
   );
   final upper = min(BimDimensions.chatToolsPanelMax, availableLimit);
   final compactMin = viewportHeight < 560
-      ? 236.0
+      ? 268.0
       : BimDimensions.chatToolsPanel;
   final lower = min(compactMin, upper);
   return preferred.clamp(lower, upper).toDouble();
@@ -1818,6 +1818,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                                 height: panelHeight,
                                 isGroup: _isGroup,
                                 onTextOption: _openTextOptions,
+                                onVoiceInput: _toggleVoiceMode,
                                 onImage: () =>
                                     _sendMedia(ChatContentTypes.image),
                                 onEmoji: () => _toggleEmojiPanel(initialTab: 0),
@@ -2215,29 +2216,91 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         'data_len': content.data?.length ?? 0,
       },
     );
-    final bytes = content.data;
+    var bytes = content.data;
+    if ((bytes == null || bytes.isEmpty) && content.uri.isNotEmpty) {
+      bytes = await _readKeyboardContentUri(content.uri);
+    }
     if (bytes == null || bytes.isEmpty) {
+      AppLogger.warn(
+        'ui',
+        'keyboard content has no readable bytes',
+        data: {'mime': mime, 'uri_len': content.uri.length},
+      );
       setState(() => _error = '输入法内容无法读取');
       return;
     }
-    final contentType = mime.contains('gif')
-        ? ChatContentTypes.gif
-        : ChatContentTypes.image;
+    final normalizedMime = _normalizeKeyboardMime(mime);
+    final contentType = ChatContentTypes.image;
     final ext = _keyboardContentExtension(mime);
     final dir = await getTemporaryDirectory();
     final file = File(
       '${dir.path}/bim_keyboard_${DateTime.now().microsecondsSinceEpoch}$ext',
     );
     await file.writeAsBytes(bytes, flush: true);
+    final name = file.uri.pathSegments.isEmpty
+        ? 'keyboard$ext'
+        : file.uri.pathSegments.last;
     await _sendMediaPayload(contentType, <String, String>{
       'file_path': file.path,
-      'mime': mime,
-      'name': file.uri.pathSegments.isEmpty
-          ? 'keyboard$ext'
-          : file.uri.pathSegments.last,
+      'mime': normalizedMime,
+      'name': name,
+      'size': bytes.length.toString(),
       'source': 'keyboard',
-      'content': contentType == ChatContentTypes.gif ? '[GIF]' : '[图片]',
+      'content': '[图片]',
+      'media_json': jsonEncode({
+        'mime': normalizedMime,
+        'name': name,
+        'size': bytes.length.toString(),
+        'source': 'keyboard',
+      }),
     });
+  }
+
+  static const MethodChannel _keyboardContentChannel = MethodChannel(
+    'bimotc.com/keyboard_content',
+  );
+
+  Future<Uint8List?> _readKeyboardContentUri(String uri) async {
+    try {
+      final bytes = await _keyboardContentChannel.invokeMethod<Uint8List>(
+        'readUri',
+        {'uri': uri},
+      );
+      AppLogger.info(
+        'ui',
+        'keyboard content uri read',
+        data: {'uri_len': uri.length, 'data_len': bytes?.length ?? 0},
+      );
+      return bytes;
+    } catch (error, stackTrace) {
+      AppLogger.warn(
+        'ui',
+        'keyboard content uri read failed',
+        data: {
+          'uri_len': uri.length,
+          'error': error.toString(),
+          'stack': stackTrace.toString(),
+        },
+      );
+      return null;
+    }
+  }
+
+  String _normalizeKeyboardMime(String mime) {
+    final normalized = mime.toLowerCase().trim();
+    if (normalized.contains('gif')) {
+      return 'image/gif';
+    }
+    if (normalized.contains('webp')) {
+      return 'image/webp';
+    }
+    if (normalized.contains('png')) {
+      return 'image/png';
+    }
+    if (normalized.contains('jpeg') || normalized.contains('jpg')) {
+      return 'image/jpeg';
+    }
+    return 'image/jpeg';
   }
 
   String _keyboardContentExtension(String mime) {
@@ -2280,6 +2343,24 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     final url = data['url'] ?? '';
     final filePath = data['file_path'] ?? '';
     final params = Map<String, Object?>.from(data)..remove('url');
+    final mediaJson = data['media_json'];
+    if (mediaJson != null && mediaJson.isNotEmpty) {
+      try {
+        final decoded = jsonDecode(mediaJson);
+        if (decoded is Map) {
+          params['media'] = decoded.map(
+            (key, value) => MapEntry(key.toString(), value),
+          );
+        }
+      } on Object catch (error, stackTrace) {
+        AppLogger.warn(
+          'ui',
+          'media json decode failed',
+          data: {'error': error.toString(), 'stack': stackTrace.toString()},
+        );
+      }
+      params.remove('media_json');
+    }
     if (_replyQuote.isNotEmpty) {
       params['quote'] = Map<String, Object?>.from(_replyQuote);
       params['quote_json'] = jsonEncode(_replyQuote);
@@ -2328,6 +2409,10 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       return;
     }
     final kind = (data['kind'] ?? ChatContentTypes.emoji).trim();
+    if (kind == ChatContentTypes.text) {
+      _insertTextAtCursor(data['text'] ?? data['content'] ?? '');
+      return;
+    }
     final contentType = switch (kind) {
       ChatContentTypes.gif => ChatContentTypes.gif,
       ChatContentTypes.sticker => ChatContentTypes.sticker,
@@ -2430,6 +2515,26 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         });
       },
     );
+  }
+
+  void _insertTextAtCursor(String text) {
+    if (text.isEmpty) {
+      return;
+    }
+    final value = _textController.value;
+    final selection = value.selection;
+    final start = selection.isValid ? selection.start : value.text.length;
+    final end = selection.isValid ? selection.end : value.text.length;
+    final nextText = value.text.replaceRange(start, end, text);
+    final cursor = start + text.length;
+    _textController.value = TextEditingValue(
+      text: nextText,
+      selection: TextSelection.collapsed(offset: cursor),
+      composing: TextRange.empty,
+    );
+    if (!_emojiOpen && !_inputFocusNode.hasFocus) {
+      _inputFocusNode.requestFocus();
+    }
   }
 
   Future<void> _startVoiceRecording() async {
@@ -2799,11 +2904,8 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     if (contentType == ChatContentTypes.call) {
       return () => _redialFromCallMessage(item);
     }
-    if (contentType == ChatContentTypes.image ||
-        contentType == ChatContentTypes.emoji ||
-        contentType == ChatContentTypes.gif ||
-        contentType == ChatContentTypes.sticker ||
-        contentType == ChatContentTypes.video ||
+    final payload = _asObjectMap(item['payload']);
+    if (_messageRendersAsMedia(contentType, payload) ||
         contentType == ChatContentTypes.file) {
       return () => _openMediaMessage(item);
     }

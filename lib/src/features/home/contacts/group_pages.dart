@@ -208,8 +208,9 @@ class GroupDetailPage extends StatefulWidget {
 }
 
 class _GroupDetailPageState extends State<GroupDetailPage> {
-  var _version = 0;
   int? _loadedMemberCount;
+  Future<Map<String, Object?>>? _membersFuture;
+  List<Map<String, Object?>> _members = const [];
   String _error = '';
   String _message = '';
   late bool _pinned;
@@ -218,6 +219,7 @@ class _GroupDetailPageState extends State<GroupDetailPage> {
   void initState() {
     super.initState();
     _pinned = _initialPinned();
+    _refreshMembers();
   }
 
   @override
@@ -239,23 +241,12 @@ class _GroupDetailPageState extends State<GroupDetailPage> {
           padding: const EdgeInsets.only(bottom: 28),
           children: [
             FutureBuilder<Map<String, Object?>>(
-              key: ValueKey(_version),
-              future: widget.controller.groupMembers(widget.groupId),
+              future: _membersFuture,
               builder: (context, snapshot) {
-                final members = snapshot.connectionState == ConnectionState.done
-                    ? _listFromResult(snapshot.data ?? const {})
-                    : const <Map<String, Object?>>[];
-                if (snapshot.connectionState == ConnectionState.done &&
-                    _loadedMemberCount != members.length) {
-                  WidgetsBinding.instance.addPostFrameCallback((_) {
-                    if (mounted) {
-                      setState(() => _loadedMemberCount = members.length);
-                    }
-                  });
-                }
+                final done = snapshot.connectionState == ConnectionState.done;
                 return _GroupInfoMemberGrid(
-                  loading: snapshot.connectionState != ConnectionState.done,
-                  members: members,
+                  loading: !done && _members.isEmpty,
+                  members: _members,
                   onOpenAll: _openMembers,
                   onAdd: _addMembers,
                 );
@@ -306,8 +297,41 @@ class _GroupDetailPageState extends State<GroupDetailPage> {
   }
 
   String _groupCountTitleSuffix() {
-    final count = widget.memberCount ?? _loadedMemberCount;
+    final count = _loadedMemberCount ?? widget.memberCount;
     return count == null || count <= 0 ? '' : '($count)';
+  }
+
+  void _refreshMembers() {
+    final future = widget.controller.groupMembers(widget.groupId);
+    _membersFuture = future;
+    unawaited(
+      future
+          .then((data) {
+            if (!mounted) {
+              return;
+            }
+            final members = _listFromResult(data);
+            if (_sameMapList(_members, members) &&
+                _loadedMemberCount == members.length) {
+              return;
+            }
+            setState(() => _syncLoadedMembers(members));
+          })
+          .catchError((Object error) {
+            if (mounted) {
+              setState(() => _error = error.toString());
+            }
+          }),
+    );
+  }
+
+  void _syncLoadedMembers(List<Map<String, Object?>> members) {
+    if (_sameMapList(_members, members) &&
+        _loadedMemberCount == members.length) {
+      return;
+    }
+    _members = members;
+    _loadedMemberCount = members.length;
   }
 
   bool _initialPinned() {
@@ -380,7 +404,7 @@ class _GroupDetailPageState extends State<GroupDetailPage> {
       ),
     );
     if (mounted) {
-      setState(() => _version++);
+      setState(_refreshMembers);
     }
   }
 
@@ -455,7 +479,7 @@ class _GroupDetailPageState extends State<GroupDetailPage> {
       setState(() {
         _message = _friendlyResult(result);
         _error = '';
-        _version++;
+        _refreshMembers();
       });
     } catch (error) {
       setState(() => _error = error.toString());
@@ -689,10 +713,15 @@ class _GroupInfoMemberGrid extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final width = MediaQuery.sizeOf(context).width;
-    final columns = width >= 720 ? 8 : 5;
-    final itemWidth = ((width - 40) / columns).clamp(58.0, 86.0);
-    final previewCount = max(columns * 3 - 1, columns);
+    const columns = 5;
+    const rows = 4;
+    const spacing = 8.0;
+    final availableWidth = max(0.0, width - 36);
+    final itemWidth = (availableWidth - spacing * (columns - 1)) / columns;
+    final avatarSize = min(56.0, itemWidth);
+    final previewCount = columns * rows - 1;
     final preview = members.take(previewCount).toList(growable: false);
+    final showMore = members.length > previewCount;
     return ColoredBox(
       color: _surfaceColor,
       child: Padding(
@@ -700,46 +729,60 @@ class _GroupInfoMemberGrid extends StatelessWidget {
         child: Column(
           children: [
             Wrap(
-              spacing: 8,
+              spacing: spacing,
               runSpacing: 18,
               children: [
                 for (final member in preview)
                   _GroupMemberGridItem(
                     width: itemWidth,
+                    avatarSize: avatarSize,
                     title: _memberTitle(member),
                     avatarUrl: _avatarUrlFromMap(member),
                     onTap: onOpenAll,
                   ),
-                _GroupMemberAddItem(width: itemWidth, onTap: onAdd),
+                _GroupMemberAddItem(
+                  width: itemWidth,
+                  avatarSize: avatarSize,
+                  onTap: onAdd,
+                ),
               ],
             ),
-            const SizedBox(height: 22),
-            InkWell(
-              onTap: onOpenAll,
-              child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 8),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      loading ? '加载群成员' : '更多群成员',
-                      style: const TextStyle(
-                        color: _secondaryTextColor,
-                        fontSize: 16,
-                        fontWeight: FontWeight.w700,
+            if (loading && members.isEmpty) ...[
+              const SizedBox(height: 18),
+              const SizedBox(
+                height: 24,
+                width: 24,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+            ] else if (showMore) ...[
+              const SizedBox(height: 22),
+              InkWell(
+                onTap: onOpenAll,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    mainAxisSize: MainAxisSize.min,
+                    children: const [
+                      Text(
+                        '更多群成员',
+                        style: TextStyle(
+                          color: _secondaryTextColor,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w700,
+                        ),
                       ),
-                    ),
-                    const SizedBox(width: 4),
-                    const Icon(
-                      Icons.keyboard_arrow_down,
-                      color: _mutedColor,
-                      size: 24,
-                    ),
-                  ],
+                      SizedBox(width: 4),
+                      Icon(
+                        Icons.keyboard_arrow_down,
+                        color: _mutedColor,
+                        size: 24,
+                      ),
+                    ],
+                  ),
                 ),
               ),
-            ),
+            ],
           ],
         ),
       ),
@@ -750,12 +793,14 @@ class _GroupInfoMemberGrid extends StatelessWidget {
 class _GroupMemberGridItem extends StatelessWidget {
   const _GroupMemberGridItem({
     required this.width,
+    required this.avatarSize,
     required this.title,
     required this.avatarUrl,
     required this.onTap,
   });
 
   final double width;
+  final double avatarSize;
   final String title;
   final String avatarUrl;
   final VoidCallback onTap;
@@ -771,7 +816,7 @@ class _GroupMemberGridItem extends StatelessWidget {
             _Avatar(
               label: title,
               imageUrl: avatarUrl,
-              size: 56,
+              size: avatarSize,
               color: const Color(0xff8e99a8),
             ),
             const SizedBox(height: 8),
@@ -790,9 +835,14 @@ class _GroupMemberGridItem extends StatelessWidget {
 }
 
 class _GroupMemberAddItem extends StatelessWidget {
-  const _GroupMemberAddItem({required this.width, required this.onTap});
+  const _GroupMemberAddItem({
+    required this.width,
+    required this.avatarSize,
+    required this.onTap,
+  });
 
   final double width;
+  final double avatarSize;
   final VoidCallback onTap;
 
   @override
@@ -804,8 +854,8 @@ class _GroupMemberAddItem extends StatelessWidget {
         child: Column(
           children: [
             Container(
-              width: 56,
-              height: 56,
+              width: avatarSize,
+              height: avatarSize,
               alignment: Alignment.center,
               decoration: BoxDecoration(
                 color: _surfaceColor,
