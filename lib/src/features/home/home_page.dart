@@ -5,6 +5,7 @@ import 'dart:math';
 import 'dart:ui' as ui;
 
 import 'package:audioplayers/audioplayers.dart';
+import 'package:barcode_widget/barcode_widget.dart' as bw;
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';

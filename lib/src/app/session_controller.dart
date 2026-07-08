@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 
 import 'package:flutter/widgets.dart';
 
@@ -805,6 +806,15 @@ class SessionController extends ChangeNotifier {
     );
   }
 
+  Future<WalletBill> loadWalletBillDetail(int billId) {
+    final current = _requireSession();
+    return _api.walletBillDetail(
+      session: current,
+      device: _device,
+      billId: billId,
+    );
+  }
+
   Future<void> setWalletPayPassword(String password) async {
     final current = _requireSession();
     await _api.walletSetPayPassword(
@@ -852,12 +862,12 @@ class SessionController extends ChangeNotifier {
     );
   }
 
-  Future<WalletOrder> createWalletCollectCode({
-    required String amount,
+  Future<WalletOrder> currentWalletCollectCode({
+    String amount = '',
     String remark = '',
   }) {
     final current = _requireSession();
-    return _api.walletCreateCollectCode(
+    return _api.walletCurrentCollectCode(
       session: current,
       device: _device,
       amount: amount,
@@ -865,18 +875,14 @@ class SessionController extends ChangeNotifier {
     );
   }
 
-  Future<WalletOrder> createWalletPayCode({
-    required String amount,
-    required String payeeUsername,
+  Future<WalletOrder> currentWalletPayCode({
     required String payPassword,
     String remark = '',
   }) {
     final current = _requireSession();
-    return _api.walletCreatePayCode(
+    return _api.walletCurrentPayCode(
       session: current,
       device: _device,
-      amount: amount,
-      payeeUsername: payeeUsername,
       payPassword: payPassword,
       remark: remark,
     );
@@ -894,6 +900,7 @@ class SessionController extends ChangeNotifier {
   Future<WalletOrder> confirmWalletQrPay({
     required String qrToken,
     required String payPassword,
+    String amount = '',
   }) async {
     final current = _requireSession();
     final order = await _api.walletConfirmQrPay(
@@ -901,6 +908,8 @@ class SessionController extends ChangeNotifier {
       device: _device,
       qrToken: qrToken,
       payPassword: payPassword,
+      amount: amount,
+      requestId: _walletRequestId(),
     );
     await loadWalletBalance(refresh: true);
     return order;
@@ -3538,6 +3547,15 @@ class SessionController extends ChangeNotifier {
   String _userIdFromUid(String uid) {
     final match = RegExp(r'user(\d+)$').firstMatch(uid);
     return match?.group(1) ?? '';
+  }
+
+  String _walletRequestId() {
+    final random = Random.secure();
+    final nonce = List<int>.generate(
+      8,
+      (_) => random.nextInt(256),
+    ).map((value) => value.toRadixString(16).padLeft(2, '0')).join();
+    return 'wallet_${DateTime.now().microsecondsSinceEpoch}_$nonce';
   }
 
   @override

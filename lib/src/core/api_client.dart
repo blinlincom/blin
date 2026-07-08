@@ -310,17 +310,38 @@ class ApiClient {
     return list.map(WalletWithdrawRecord.fromJson).toList(growable: false);
   }
 
-  Future<WalletOrder> walletCreateCollectCode({
+  Future<WalletBill> walletBillDetail({
     required UserSession session,
     required String device,
-    required String amount,
+    required int billId,
+  }) async {
+    final result = await secureSignedImPost<Map<String, Object?>>(
+      'wallet_bill_detail',
+      session: session,
+      device: device,
+      params: {'id': billId.toString()},
+      secureResponse: true,
+    );
+    if (!result.isSuccess) {
+      throw ApiException(result.message, code: result.code);
+    }
+    return WalletBill.fromJson(result.data);
+  }
+
+  Future<WalletOrder> walletCurrentCollectCode({
+    required UserSession session,
+    required String device,
+    String amount = '',
     String remark = '',
   }) async {
     final result = await secureSignedImPost<Map<String, Object?>>(
-      'wallet_collect_code_create',
+      'wallet_collect_code_current',
       session: session,
       device: device,
-      params: {'amount': amount, if (remark.isNotEmpty) 'remark': remark},
+      params: {
+        if (amount.isNotEmpty) 'amount': amount,
+        if (remark.isNotEmpty) 'remark': remark,
+      },
       secureResponse: true,
     );
     if (!result.isSuccess) {
@@ -329,21 +350,17 @@ class ApiClient {
     return WalletOrder.fromJson(result.data);
   }
 
-  Future<WalletOrder> walletCreatePayCode({
+  Future<WalletOrder> walletCurrentPayCode({
     required UserSession session,
     required String device,
-    required String amount,
-    required String payeeUsername,
     required String payPassword,
     String remark = '',
   }) async {
     final result = await secureSignedImPost<Map<String, Object?>>(
-      'wallet_pay_code_create',
+      'wallet_pay_code_current',
       session: session,
       device: device,
       params: {
-        'amount': amount,
-        'payee_username': payeeUsername,
         'pay_password': payPassword,
         if (remark.isNotEmpty) 'remark': remark,
       },
@@ -378,12 +395,19 @@ class ApiClient {
     required String device,
     required String qrToken,
     required String payPassword,
+    required String amount,
+    required String requestId,
   }) async {
     final result = await secureSignedImPost<Map<String, Object?>>(
       'wallet_qr_pay_confirm',
       session: session,
       device: device,
-      params: {'qr_token': qrToken, 'pay_password': payPassword},
+      params: {
+        'qr_token': qrToken,
+        'pay_password': payPassword,
+        'request_id': requestId,
+        if (amount.isNotEmpty) 'amount': amount,
+      },
       secureResponse: true,
     );
     if (!result.isSuccess) {

@@ -308,18 +308,25 @@ class WalletOrder {
     this.orderType = '',
     this.amount = '0.00',
     this.amountLabel = '0.00',
+    this.amountRequired = false,
     this.remark = '',
     this.status = 0,
     this.statusName = '',
     this.payerId = 0,
     this.payerName = '',
+    this.payerAvatar = '',
     this.payeeId = 0,
     this.payeeName = '',
+    this.payeeAvatar = '',
     this.qrToken = '',
     this.qrPayload = '',
+    this.barPayload = '',
     this.expireTime = '',
+    this.expireSeconds = 0,
+    this.refreshIn = 0,
     this.paidTime = '',
     this.createTime = '',
+    this.currentUserRole = '',
   });
 
   final int id;
@@ -327,21 +334,31 @@ class WalletOrder {
   final String orderType;
   final String amount;
   final String amountLabel;
+  final bool amountRequired;
   final String remark;
   final int status;
   final String statusName;
   final int payerId;
   final String payerName;
+  final String payerAvatar;
   final int payeeId;
   final String payeeName;
+  final String payeeAvatar;
   final String qrToken;
   final String qrPayload;
+  final String barPayload;
   final String expireTime;
+  final int expireSeconds;
+  final int refreshIn;
   final String paidTime;
   final String createTime;
+  final String currentUserRole;
 
   bool get isPaid => status == 1;
   bool get isPending => status == 0;
+  bool get isPayCode => orderType == 'pay';
+  bool get isCollectCode => orderType == 'collect';
+  bool get needsAmountInput => !amountRequired || amount == '0.00';
 
   factory WalletOrder.fromJson(Object? value) {
     final map = _objectMap(value);
@@ -353,18 +370,25 @@ class WalletOrder {
       amount: amount,
       amountLabel:
           _stringFromKeys(map, const ['amount_label', 'amount_text']) ?? amount,
+      amountRequired: _enabled(map['amount_required']),
       remark: map['remark']?.toString() ?? '',
       status: int.tryParse(map['status']?.toString() ?? '') ?? 0,
       statusName: map['status_name']?.toString() ?? '',
       payerId: int.tryParse(map['payer_id']?.toString() ?? '') ?? 0,
       payerName: map['payer_name']?.toString() ?? '',
+      payerAvatar: map['payer_avatar']?.toString() ?? '',
       payeeId: int.tryParse(map['payee_id']?.toString() ?? '') ?? 0,
       payeeName: map['payee_name']?.toString() ?? '',
+      payeeAvatar: map['payee_avatar']?.toString() ?? '',
       qrToken: map['qr_token']?.toString() ?? '',
       qrPayload: map['qr_payload']?.toString() ?? '',
+      barPayload: map['bar_payload']?.toString() ?? '',
       expireTime: map['expire_time']?.toString() ?? '',
+      expireSeconds: int.tryParse(map['expire_seconds']?.toString() ?? '') ?? 0,
+      refreshIn: int.tryParse(map['refresh_in']?.toString() ?? '') ?? 0,
       paidTime: map['paid_time']?.toString() ?? '',
       createTime: map['create_time']?.toString() ?? '',
+      currentUserRole: map['current_user_role']?.toString() ?? '',
     );
   }
 }
@@ -372,29 +396,68 @@ class WalletOrder {
 class WalletBill {
   const WalletBill({
     this.id = 0,
+    this.billNo = '',
+    this.orderNo = '',
     this.scene = '',
+    this.sceneName = '',
+    this.amount = '',
     this.amountLabel = '',
     this.direction = '',
+    this.directionName = '',
+    this.targetName = '',
+    this.targetAvatar = '',
+    this.status = 0,
+    this.statusName = '',
+    this.balanceAfter = '',
     this.remark = '',
     this.time = '',
+    this.order,
   });
 
   final int id;
+  final String billNo;
+  final String orderNo;
   final String scene;
+  final String sceneName;
+  final String amount;
   final String amountLabel;
   final String direction;
+  final String directionName;
+  final String targetName;
+  final String targetAvatar;
+  final int status;
+  final String statusName;
+  final String balanceAfter;
   final String remark;
   final String time;
+  final WalletOrder? order;
 
   factory WalletBill.fromJson(Object? value) {
     final map = _objectMap(value);
     return WalletBill(
       id: int.tryParse(map['id']?.toString() ?? '') ?? 0,
-      scene: map['transaction_type']?.toString() ?? '',
+      billNo: map['bill_no']?.toString() ?? '',
+      orderNo: map['order_no']?.toString() ?? '',
+      scene:
+          _stringFromKeys(map, const [
+            'scene',
+            'transaction_type',
+          ])?.toString() ??
+          '',
+      sceneName: map['scene_name']?.toString() ?? '',
+      amount: map['amount']?.toString() ?? '',
       amountLabel: map['amount_label']?.toString() ?? '',
       direction: map['direction']?.toString() ?? '',
+      directionName: map['direction_name']?.toString() ?? '',
+      targetName: map['target_name']?.toString() ?? '',
+      targetAvatar: map['target_avatar']?.toString() ?? '',
+      status: int.tryParse(map['status']?.toString() ?? '') ?? 0,
+      statusName: map['status_name']?.toString() ?? '',
+      balanceAfter: map['balance_after']?.toString() ?? '',
       remark: map['remark']?.toString() ?? '',
-      time: map['transaction_date']?.toString() ?? '',
+      time:
+          _stringFromKeys(map, const ['created_at', 'transaction_date']) ?? '',
+      order: map['order'] is Map ? WalletOrder.fromJson(map['order']) : null,
     );
   }
 }
