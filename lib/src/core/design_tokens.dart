@@ -61,7 +61,8 @@ abstract final class BimDimensions {
   static const appBar = 50.0;
   static const chatHeader = 58.0;
   static const composerControl = 42.0;
-  static const chatToolsPanel = 196.0;
+  static const chatToolsPanel = 304.0;
+  static const chatToolsPanelMax = 372.0;
   static const toolIcon = 40.0;
   static const touchTarget = 44.0;
 }

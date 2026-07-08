@@ -22,6 +22,27 @@ class ChatPage extends StatefulWidget {
   State<ChatPage> createState() => _ChatPageState();
 }
 
+double _chatPanelHeight(BuildContext context) {
+  final media = MediaQuery.of(context);
+  final viewportHeight = media.size.height;
+  final usableHeight =
+      viewportHeight - media.viewPadding.top - media.viewPadding.bottom;
+  final preferred = viewportHeight * 0.38;
+  final availableLimit = max(
+    220.0,
+    usableHeight -
+        BimDimensions.chatHeader -
+        BimDimensions.composerControl -
+        92,
+  );
+  final upper = min(BimDimensions.chatToolsPanelMax, availableLimit);
+  final compactMin = viewportHeight < 560
+      ? 236.0
+      : BimDimensions.chatToolsPanel;
+  final lower = min(compactMin, upper);
+  return preferred.clamp(lower, upper).toDouble();
+}
+
 class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   static const int _messageUiLimit = 1000;
 
@@ -1779,29 +1800,44 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                           onSend: _sendText,
                           onContentInserted: _handleKeyboardInsertedContent,
                         ),
-                        if (_emojiOpen)
-                          _EmojiPanel(
-                            key: ValueKey(_emojiInitialTab),
-                            controller: widget.controller,
-                            initialTab: _emojiInitialTab,
-                            onSelected: (payload) =>
-                                unawaited(_sendEmoji(payload)),
-                          ),
-                        if (_toolsOpen)
-                          _ChatToolsPanel(
-                            isGroup: _isGroup,
-                            onTextOption: _openTextOptions,
-                            onImage: () => _sendMedia(ChatContentTypes.image),
-                            onEmoji: () => _toggleEmojiPanel(initialTab: 0),
-                            onSticker: () => _toggleEmojiPanel(initialTab: 1),
-                            onVideo: () => _sendMedia(ChatContentTypes.video),
-                            onFile: () => _sendMedia(ChatContentTypes.file),
-                            onContactCard: _sendContactCard,
-                            onTransfer: _sendTransfer,
-                            onRedPacket: _sendRedPacket,
-                            onGroupVoiceCall: () => _startLiveKitCall('audio'),
-                            onGroupVideoCall: () => _startLiveKitCall('video'),
-                            onGroupMembers: _isGroup ? _openGroupMembers : null,
+                        if (_emojiOpen || _toolsOpen)
+                          Builder(
+                            builder: (context) {
+                              final panelHeight = _chatPanelHeight(context);
+                              if (_emojiOpen) {
+                                return _EmojiPanel(
+                                  key: ValueKey(_emojiInitialTab),
+                                  controller: widget.controller,
+                                  height: panelHeight,
+                                  initialTab: _emojiInitialTab,
+                                  onSelected: (payload) =>
+                                      unawaited(_sendEmoji(payload)),
+                                );
+                              }
+                              return _ChatToolsPanel(
+                                height: panelHeight,
+                                isGroup: _isGroup,
+                                onTextOption: _openTextOptions,
+                                onImage: () =>
+                                    _sendMedia(ChatContentTypes.image),
+                                onEmoji: () => _toggleEmojiPanel(initialTab: 0),
+                                onSticker: () =>
+                                    _toggleEmojiPanel(initialTab: 1),
+                                onVideo: () =>
+                                    _sendMedia(ChatContentTypes.video),
+                                onFile: () => _sendMedia(ChatContentTypes.file),
+                                onContactCard: _sendContactCard,
+                                onTransfer: _sendTransfer,
+                                onRedPacket: _sendRedPacket,
+                                onGroupVoiceCall: () =>
+                                    _startLiveKitCall('audio'),
+                                onGroupVideoCall: () =>
+                                    _startLiveKitCall('video'),
+                                onGroupMembers: _isGroup
+                                    ? _openGroupMembers
+                                    : null,
+                              );
+                            },
                           ),
                       ],
                     ),

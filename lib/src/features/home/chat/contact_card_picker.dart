@@ -102,7 +102,7 @@ class _ContactCardPickerPageState extends State<_ContactCardPickerPage> {
                     controller: _keyword,
                     textInputAction: TextInputAction.search,
                     decoration: InputDecoration(
-                      hintText: '搜索好友昵称或用户名',
+                      hintText: '搜索好友昵称或 @账号',
                       hintStyle: const TextStyle(
                         color: _mutedColor,
                         fontSize: 13,

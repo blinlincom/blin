@@ -2,6 +2,7 @@ part of 'package:bim/src/features/home/home_page.dart';
 
 class _ChatToolsPanel extends StatefulWidget {
   const _ChatToolsPanel({
+    required this.height,
     required this.isGroup,
     required this.onTextOption,
     required this.onImage,
@@ -17,6 +18,7 @@ class _ChatToolsPanel extends StatefulWidget {
     this.onGroupMembers,
   });
 
+  final double height;
   final bool isGroup;
   final VoidCallback onTextOption;
   final VoidCallback onImage;
@@ -135,7 +137,7 @@ class _ChatToolsPanelState extends State<_ChatToolsPanel> {
       pages.add(items.sublist(index, (index + 8).clamp(0, items.length)));
     }
     return Container(
-      height: BimDimensions.chatToolsPanel,
+      height: widget.height,
       decoration: const BoxDecoration(
         color: _surfaceColor,
         border: Border(top: BorderSide(color: _lightBorderColor)),

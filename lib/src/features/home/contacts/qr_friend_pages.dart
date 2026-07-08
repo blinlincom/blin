@@ -11,13 +11,13 @@ class FriendQrTarget {
   final String raw;
 }
 
-Uri _friendQrUri(UserSession session) {
+Uri _friendQrUriWithNonce(UserSession session, String nonce) {
   final username = session.username.trim();
   return Uri(
     scheme: _friendQrScheme,
     host: _friendQrHost,
     path: '/add',
-    queryParameters: {'username': username},
+    queryParameters: {'username': username, if (nonce.isNotEmpty) 'v': nonce},
   );
 }
 
@@ -94,125 +94,229 @@ String _normalizeFriendQrUsername(String value) {
   return valid ? username : '';
 }
 
-class MyFriendQrPage extends StatelessWidget {
+class MyFriendQrPage extends StatefulWidget {
   const MyFriendQrPage({required this.controller, super.key});
 
   final SessionController controller;
 
   @override
+  State<MyFriendQrPage> createState() => _MyFriendQrPageState();
+}
+
+class _MyFriendQrPageState extends State<MyFriendQrPage> {
+  final GlobalKey _qrCardKey = GlobalKey();
+  late String _nonce;
+  bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _nonce = _newQrNonce();
+  }
+
+  void _refreshQr() {
+    setState(() => _nonce = _newQrNonce());
+  }
+
+  Future<void> _saveQr() async {
+    if (_saving) {
+      return;
+    }
+    setState(() => _saving = true);
+    try {
+      final boundary =
+          _qrCardKey.currentContext?.findRenderObject()
+              as RenderRepaintBoundary?;
+      if (boundary == null) {
+        throw StateError('qr card is not ready');
+      }
+      final image = await boundary.toImage(pixelRatio: 3);
+      final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+      if (byteData == null) {
+        throw StateError('qr image is empty');
+      }
+      final permission = await PhotoManager.requestPermissionExtend();
+      if (!permission.hasAccess) {
+        if (!mounted) {
+          return;
+        }
+        _showChatSnack(context, '请允许访问相册后再保存', error: true);
+        return;
+      }
+      final bytes = byteData.buffer.asUint8List();
+      final filename =
+          'bim_qr_${DateTime.now().millisecondsSinceEpoch.toString()}.png';
+      await PhotoManager.editor.saveImage(bytes, filename: filename);
+      if (!mounted) {
+        return;
+      }
+      _showChatSnack(context, '已保存到相册');
+    } catch (error, stackTrace) {
+      AppLogger.error(
+        'ui',
+        'save friend qr failed',
+        error: error,
+        stackTrace: stackTrace,
+      );
+      if (mounted) {
+        _showChatSnack(context, '保存失败', error: true);
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _saving = false);
+      }
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final session = controller.session;
+    final session = widget.controller.session;
     if (session == null) {
       return const Scaffold(
         backgroundColor: _pageColor,
         body: SafeArea(child: Center(child: Text('请先登录'))),
       );
     }
-    final qrUri = _friendQrUri(session);
+    final qrUri = _friendQrUriWithNonce(session, _nonce);
     final displayName = _sessionDisplayName(session);
-    final username = session.username.trim();
+    final username = _atName(session.username);
     final qrSize = min(MediaQuery.sizeOf(context).width - 96, 280.0);
     return Scaffold(
       backgroundColor: _pageColor,
-      appBar: AppBar(title: const Text('我的二维码')),
+      appBar: AppBar(
+        title: const Text('我的二维码'),
+        actions: [
+          IconButton(
+            tooltip: '换二维码',
+            onPressed: _refreshQr,
+            icon: const Icon(Icons.refresh_rounded),
+          ),
+        ],
+      ),
       body: SafeArea(
         child: ListView(
           padding: const EdgeInsets.fromLTRB(20, 22, 20, 32),
           children: [
-            ColoredBox(
-              color: _surfaceColor,
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(18, 18, 18, 24),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        _Avatar(
-                          label: displayName,
-                          imageUrl: session.avatar,
-                          size: 58,
-                          color: const Color(0xff8e99a8),
-                        ),
-                        const SizedBox(width: 14),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                displayName,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  color: _textColor,
-                                  fontSize: 18,
-                                  fontWeight: FontWeight.w800,
+            RepaintBoundary(
+              key: _qrCardKey,
+              child: ColoredBox(
+                color: _surfaceColor,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(18, 18, 18, 24),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          _Avatar(
+                            label: displayName,
+                            imageUrl: session.avatar,
+                            size: 58,
+                            color: const Color(0xff8e99a8),
+                          ),
+                          const SizedBox(width: 14),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  displayName,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    color: _textColor,
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.w800,
+                                  ),
                                 ),
-                              ),
-                              const SizedBox(height: 6),
-                              Text(
-                                '用户名：$username',
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  color: _mutedColor,
-                                  fontSize: 13,
+                                const SizedBox(height: 6),
+                                Text(
+                                  username,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    color: _mutedColor,
+                                    fontSize: 13,
+                                  ),
                                 ),
-                              ),
-                            ],
+                              ],
+                            ),
                           ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 28),
-                    Center(
-                      child: Container(
-                        width: qrSize + 28,
-                        height: qrSize + 28,
-                        alignment: Alignment.center,
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          border: Border.all(color: _lightBorderColor),
-                        ),
-                        child: QrImageView(
-                          data: qrUri.toString(),
-                          version: QrVersions.auto,
-                          size: qrSize,
-                          backgroundColor: Colors.white,
-                          eyeStyle: const QrEyeStyle(
-                            eyeShape: QrEyeShape.square,
-                            color: _textColor,
+                        ],
+                      ),
+                      const SizedBox(height: 28),
+                      Center(
+                        child: Container(
+                          width: qrSize + 28,
+                          height: qrSize + 28,
+                          alignment: Alignment.center,
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            border: Border.all(color: _lightBorderColor),
                           ),
-                          dataModuleStyle: const QrDataModuleStyle(
-                            dataModuleShape: QrDataModuleShape.square,
-                            color: _textColor,
+                          child: QrImageView(
+                            data: qrUri.toString(),
+                            version: QrVersions.auto,
+                            size: qrSize,
+                            backgroundColor: Colors.white,
+                            eyeStyle: const QrEyeStyle(
+                              eyeShape: QrEyeShape.square,
+                              color: _textColor,
+                            ),
+                            dataModuleStyle: const QrDataModuleStyle(
+                              dataModuleShape: QrDataModuleShape.square,
+                              color: _textColor,
+                            ),
+                            semanticsLabel: '我的二维码',
+                            errorStateBuilder: (_, __) =>
+                                const Center(child: Text('二维码生成失败')),
                           ),
-                          semanticsLabel: 'BIM 好友二维码',
-                          errorStateBuilder: (_, __) =>
-                              const Center(child: Text('二维码生成失败')),
                         ),
                       ),
-                    ),
-                    const SizedBox(height: 18),
-                    const Center(
-                      child: Text(
-                        '扫一扫上面的二维码，加我为好友',
-                        style: TextStyle(color: _mutedColor, fontSize: 13),
+                      const SizedBox(height: 18),
+                      const Center(
+                        child: Text(
+                          '扫一扫，加我为好友',
+                          style: TextStyle(color: _mutedColor, fontSize: 13),
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
             ),
             const SizedBox(height: 16),
-            _PlainInfoBlock(
-              text: '二维码只用于跳转到好友查询，不展示用户 IMUID。外部扫码会尝试打开 BIM 并进入添加好友流程。',
+            _QrActionTile(
+              icon: Icons.refresh_rounded,
+              title: '换个二维码',
+              onTap: _refreshQr,
+            ),
+            _QrActionTile(
+              icon: Icons.save_alt_rounded,
+              title: _saving ? '正在保存' : '保存到相册',
+              onTap: _saving ? null : _saveQr,
             ),
           ],
         ),
       ),
     );
   }
+}
+
+String _newQrNonce() {
+  final random = Random.secure();
+  final value =
+      DateTime.now().millisecondsSinceEpoch.toRadixString(36) +
+      random.nextInt(0x7fffffff).toRadixString(36);
+  return value;
+}
+
+String _atName(String username) {
+  final value = username.trim();
+  if (value.isEmpty) {
+    return '';
+  }
+  return value.startsWith('@') ? value : '@$value';
 }
 
 class FriendQrScannerPage extends StatefulWidget {
@@ -226,8 +330,8 @@ class FriendQrScannerPage extends StatefulWidget {
 
 class _FriendQrScannerPageState extends State<FriendQrScannerPage> {
   late final MobileScannerController _scanner;
-  final _manual = TextEditingController();
   bool _handled = false;
+  bool _pickingImage = false;
   String _error = '';
 
   @override
@@ -242,7 +346,6 @@ class _FriendQrScannerPageState extends State<FriendQrScannerPage> {
 
   @override
   void dispose() {
-    _manual.dispose();
     _scanner.dispose();
     super.dispose();
   }
@@ -280,13 +383,52 @@ class _FriendQrScannerPageState extends State<FriendQrScannerPage> {
     );
   }
 
-  Future<void> _openManual() async {
-    final value = _manual.text.trim();
-    if (value.isEmpty) {
-      setState(() => _error = '请输入二维码内容或用户名');
+  Future<void> _pickFromAlbum() async {
+    if (_handled || _pickingImage) {
       return;
     }
-    await _openRaw(value);
+    setState(() {
+      _pickingImage = true;
+      _error = '';
+    });
+    await _scanner.stop();
+    try {
+      final path = await Navigator.of(context).push<String>(
+        MaterialPageRoute(builder: (_) => const _QrAlbumPickerPage()),
+      );
+      if (!mounted || path == null || path.isEmpty) {
+        return;
+      }
+      final capture = await _scanner.analyzeImage(
+        path,
+        formats: const [BarcodeFormat.qrCode],
+      );
+      final raw = _firstBarcodeRawValue(capture);
+      if (raw.isEmpty) {
+        setState(() => _error = '未识别到二维码');
+        return;
+      }
+      await _openRaw(raw);
+    } on UnsupportedError {
+      if (mounted) {
+        setState(() => _error = '当前平台不支持从相册识别');
+      }
+    } catch (error, stackTrace) {
+      AppLogger.error(
+        'ui',
+        'scan friend qr image failed',
+        error: error,
+        stackTrace: stackTrace,
+      );
+      if (mounted) {
+        setState(() => _error = '图片识别失败');
+      }
+    } finally {
+      if (mounted && !_handled) {
+        setState(() => _pickingImage = false);
+        unawaited(_scanner.start());
+      }
+    }
   }
 
   @override
@@ -298,6 +440,18 @@ class _FriendQrScannerPageState extends State<FriendQrScannerPage> {
         title: const Text('扫一扫'),
         backgroundColor: Colors.black,
         foregroundColor: Colors.white,
+        actions: [
+          TextButton(
+            onPressed: _pickingImage ? null : _pickFromAlbum,
+            child: const Text(
+              '相册',
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ],
       ),
       body: SafeArea(
         child: Column(
@@ -311,17 +465,24 @@ class _FriendQrScannerPageState extends State<FriendQrScannerPage> {
                     onDetect: _handleCapture,
                     errorBuilder: (context, error) => Center(
                       child: Text(
-                        '相机启动失败：${error.errorCode.name}',
+                        '相机不可用',
                         style: const TextStyle(color: Colors.white),
                       ),
                     ),
                   ),
+                  Positioned.fill(
+                    child: IgnorePointer(
+                      child: CustomPaint(painter: _ScannerOverlayPainter()),
+                    ),
+                  ),
                   Center(
-                    child: Container(
+                    child: SizedBox(
                       width: scanSize,
                       height: scanSize,
-                      decoration: BoxDecoration(
-                        border: Border.all(color: Colors.white, width: 2),
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          border: Border.all(color: Colors.white, width: 1.6),
+                        ),
                       ),
                     ),
                   ),
@@ -339,35 +500,47 @@ class _FriendQrScannerPageState extends State<FriendQrScannerPage> {
                       ),
                     ),
                   ),
+                  if (_pickingImage)
+                    const Positioned.fill(
+                      child: ColoredBox(
+                        color: Color(0x66000000),
+                        child: Center(
+                          child: SizedBox(
+                            width: 26,
+                            height: 26,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2.4,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
                 ],
               ),
             ),
             ColoredBox(
-              color: _surfaceColor,
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        controller: _manual,
-                        textInputAction: TextInputAction.search,
-                        onSubmitted: (_) => _openManual(),
-                        decoration: const InputDecoration(
-                          hintText: '粘贴二维码内容或输入用户名',
-                          prefixIcon: Icon(Icons.link),
+              color: Colors.black,
+              child: SafeArea(
+                top: false,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(18, 12, 18, 18),
+                  child: SizedBox(
+                    height: 50,
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: _pickingImage ? null : _pickFromAlbum,
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: Colors.white,
+                        side: const BorderSide(color: Color(0x66ffffff)),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
                         ),
                       ),
+                      icon: const Icon(Icons.photo_library_outlined),
+                      label: const Text('从相册选择'),
                     ),
-                    const SizedBox(width: 10),
-                    SizedBox(
-                      height: BimDimensions.touchTarget,
-                      child: FilledButton(
-                        onPressed: _openManual,
-                        child: const Text('查询'),
-                      ),
-                    ),
-                  ],
+                  ),
                 ),
               ),
             ),
@@ -582,6 +755,482 @@ class _FriendQrResultPageState extends State<FriendQrResultPage> {
   }
 }
 
+class _QrAlbumPickerPage extends StatefulWidget {
+  const _QrAlbumPickerPage();
+
+  @override
+  State<_QrAlbumPickerPage> createState() => _QrAlbumPickerPageState();
+}
+
+class _QrAlbumPickerPageState extends State<_QrAlbumPickerPage> {
+  static const _pageSize = 120;
+
+  final ScrollController _gridController = ScrollController();
+  List<AssetPathEntity> _albums = const [];
+  List<AssetEntity> _assets = const [];
+  AssetPathEntity? _selectedAlbum;
+  bool _loading = true;
+  bool _loadingAssets = false;
+  bool _loadingMore = false;
+  bool _hasMore = true;
+  int _page = 0;
+  String _error = '';
+  String _selectingAssetId = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _gridController.addListener(_onGridScroll);
+    unawaited(_loadAlbums());
+  }
+
+  @override
+  void dispose() {
+    _gridController
+      ..removeListener(_onGridScroll)
+      ..dispose();
+    super.dispose();
+  }
+
+  void _onGridScroll() {
+    if (!_hasMore ||
+        _loading ||
+        _loadingAssets ||
+        _loadingMore ||
+        _selectedAlbum == null) {
+      return;
+    }
+    if (_gridController.position.extentAfter < 520) {
+      unawaited(_loadMoreAssets());
+    }
+  }
+
+  Future<void> _loadAlbums() async {
+    setState(() {
+      _loading = true;
+      _error = '';
+    });
+    try {
+      final permission = await PhotoManager.requestPermissionExtend();
+      if (!permission.hasAccess) {
+        if (!mounted) {
+          return;
+        }
+        setState(() {
+          _loading = false;
+          _error = '需要允许访问相册';
+        });
+        return;
+      }
+      final albums = await PhotoManager.getAssetPathList(
+        type: RequestType.image,
+        hasAll: true,
+      );
+      if (!mounted) {
+        return;
+      }
+      if (albums.isEmpty) {
+        setState(() {
+          _loading = false;
+          _albums = const [];
+          _assets = const [];
+          _selectedAlbum = null;
+          _error = '';
+        });
+        return;
+      }
+      final selected = albums.firstWhere(
+        (item) => item.isAll,
+        orElse: () => albums.first,
+      );
+      setState(() {
+        _albums = albums;
+        _selectedAlbum = selected;
+      });
+      await _loadAssets(selected, showPageLoading: false);
+    } catch (error, stackTrace) {
+      AppLogger.error(
+        'ui',
+        'load qr album failed',
+        error: error,
+        stackTrace: stackTrace,
+      );
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _loading = false;
+        _error = '相册读取失败';
+      });
+    }
+  }
+
+  Future<void> _loadAssets(
+    AssetPathEntity album, {
+    bool showPageLoading = true,
+  }) async {
+    if (showPageLoading) {
+      setState(() {
+        _loadingAssets = true;
+        _error = '';
+      });
+    }
+    try {
+      final assets = await album.getAssetListPaged(page: 0, size: _pageSize);
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _selectedAlbum = album;
+        _assets = assets;
+        _page = 0;
+        _hasMore = assets.length >= _pageSize;
+        _loading = false;
+        _loadingAssets = false;
+        _loadingMore = false;
+      });
+      if (_gridController.hasClients) {
+        _gridController.jumpTo(0);
+      }
+    } catch (error, stackTrace) {
+      AppLogger.error(
+        'ui',
+        'load qr album assets failed',
+        error: error,
+        stackTrace: stackTrace,
+      );
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _loading = false;
+        _loadingAssets = false;
+        _loadingMore = false;
+        _error = '图片读取失败';
+      });
+    }
+  }
+
+  Future<void> _loadMoreAssets() async {
+    final album = _selectedAlbum;
+    if (album == null) {
+      return;
+    }
+    setState(() => _loadingMore = true);
+    try {
+      final nextPage = _page + 1;
+      final assets = await album.getAssetListPaged(
+        page: nextPage,
+        size: _pageSize,
+      );
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _assets = [..._assets, ...assets];
+        _page = nextPage;
+        _hasMore = assets.length >= _pageSize;
+        _loadingMore = false;
+      });
+    } catch (error, stackTrace) {
+      AppLogger.warn(
+        'ui',
+        'load more qr album assets failed',
+        data: {'error': error.toString(), 'stack': stackTrace.toString()},
+      );
+      if (mounted) {
+        setState(() => _loadingMore = false);
+      }
+    }
+  }
+
+  Future<void> _selectAsset(AssetEntity asset) async {
+    if (_selectingAssetId.isNotEmpty) {
+      return;
+    }
+    setState(() => _selectingAssetId = asset.id);
+    try {
+      final file = await asset.originFile ?? await asset.file;
+      if (file == null || file.path.isEmpty) {
+        throw const FileSystemException('asset file is unavailable');
+      }
+      if (!mounted) {
+        return;
+      }
+      Navigator.of(context).pop(file.path);
+    } catch (error, stackTrace) {
+      AppLogger.error(
+        'ui',
+        'select qr album image failed',
+        error: error,
+        stackTrace: stackTrace,
+        data: {'asset_id': asset.id},
+      );
+      if (!mounted) {
+        return;
+      }
+      setState(() => _selectingAssetId = '');
+      _showChatSnack(context, '图片读取失败', error: true);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: _pageColor,
+      appBar: const _PickerAppBar(title: '选择图片'),
+      body: SafeArea(
+        top: false,
+        bottom: false,
+        child: Column(
+          children: [
+            if (!_loading && _error.isEmpty && _albums.isNotEmpty)
+              _MediaAlbumStrip(
+                albums: _albums,
+                selected: _selectedAlbum,
+                loading: _loadingAssets,
+                onChanged: (album) => _loadAssets(album),
+              ),
+            Expanded(child: _buildBody()),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBody() {
+    if (_loading) {
+      return const _MediaGridSkeleton();
+    }
+    if (_error.isNotEmpty) {
+      return _ErrorState(
+        text: _error,
+        onRetry: _error.contains('相册')
+            ? () async {
+                await PhotoManager.openSetting();
+                if (mounted) {
+                  await _loadAlbums();
+                }
+              }
+            : _loadAlbums,
+      );
+    }
+    if (_assets.isEmpty && !_loadingAssets) {
+      return const _EmptyState(text: '暂无图片');
+    }
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final columns = _mediaGridColumns(context, constraints.maxWidth);
+        final contentWidth = min(constraints.maxWidth, 980.0);
+        return Align(
+          alignment: Alignment.topCenter,
+          child: SizedBox(
+            width: contentWidth,
+            child: Stack(
+              children: [
+                GridView.builder(
+                  controller: _gridController,
+                  padding: const EdgeInsets.fromLTRB(4, 4, 4, 12),
+                  gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: columns,
+                    mainAxisSpacing: 3,
+                    crossAxisSpacing: 3,
+                  ),
+                  itemCount: _assets.length + (_loadingMore ? columns : 0),
+                  itemBuilder: (context, index) {
+                    if (index >= _assets.length) {
+                      return const _MediaSkeletonTile();
+                    }
+                    final asset = _assets[index];
+                    return _QrAlbumImageTile(
+                      asset: asset,
+                      busy: _selectingAssetId == asset.id,
+                      onTap: () => _selectAsset(asset),
+                    );
+                  },
+                ),
+                if (_loadingAssets)
+                  const Positioned(
+                    left: 0,
+                    right: 0,
+                    top: 0,
+                    child: LinearProgressIndicator(minHeight: 2),
+                  ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _QrAlbumImageTile extends StatelessWidget {
+  const _QrAlbumImageTile({
+    required this.asset,
+    required this.busy,
+    required this.onTap,
+  });
+
+  final AssetEntity asset;
+  final bool busy;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      label: '选择图片',
+      child: Material(
+        color: const Color(0xffe8eaed),
+        child: InkWell(
+          onTap: busy ? null : onTap,
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              FutureBuilder<Uint8List?>(
+                future: asset.thumbnailDataWithSize(
+                  const ThumbnailSize.square(260),
+                  quality: 84,
+                ),
+                builder: (context, snapshot) {
+                  final bytes = snapshot.data;
+                  if (snapshot.hasError || bytes == null || bytes.isEmpty) {
+                    return const _MediaAssetPlaceholder(isVideo: false);
+                  }
+                  return Image.memory(
+                    bytes,
+                    fit: BoxFit.cover,
+                    gaplessPlayback: true,
+                    errorBuilder: (_, __, ___) =>
+                        const _MediaAssetPlaceholder(isVideo: false),
+                  );
+                },
+              ),
+              if (busy)
+                const Positioned.fill(
+                  child: ColoredBox(
+                    color: Color(0x66000000),
+                    child: Center(
+                      child: SizedBox(
+                        width: 24,
+                        height: 24,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2.2,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _QrActionTile extends StatelessWidget {
+  const _QrActionTile({
+    required this.icon,
+    required this.title,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String title;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: _surfaceColor,
+      child: InkWell(
+        onTap: onTap,
+        child: Container(
+          height: 52,
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          decoration: const BoxDecoration(
+            border: Border(bottom: BorderSide(color: _lightBorderColor)),
+          ),
+          child: Row(
+            children: [
+              Icon(icon, color: _textColor, size: 21),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  title,
+                  style: TextStyle(
+                    color: onTap == null ? _mutedColor : _textColor,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              Icon(Icons.chevron_right, color: _mutedColor, size: 20),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ScannerOverlayPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final scanSize = min(size.width - 64, 280.0);
+    final rect = Rect.fromCenter(
+      center: size.center(Offset.zero),
+      width: scanSize,
+      height: scanSize,
+    );
+    final overlay = Paint()..color = const Color(0x66000000);
+    final path = Path()
+      ..fillType = PathFillType.evenOdd
+      ..addRect(Offset.zero & size)
+      ..addRect(rect);
+    canvas.drawPath(path, overlay);
+
+    final cornerPaint = Paint()
+      ..color = Colors.white
+      ..strokeWidth = 4
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.square;
+    const length = 26.0;
+    final corners = <List<Offset>>[
+      [rect.topLeft, rect.topLeft + const Offset(length, 0)],
+      [rect.topLeft, rect.topLeft + const Offset(0, length)],
+      [rect.topRight, rect.topRight - const Offset(length, 0)],
+      [rect.topRight, rect.topRight + const Offset(0, length)],
+      [rect.bottomLeft, rect.bottomLeft + const Offset(length, 0)],
+      [rect.bottomLeft, rect.bottomLeft - const Offset(0, length)],
+      [rect.bottomRight, rect.bottomRight - const Offset(length, 0)],
+      [rect.bottomRight, rect.bottomRight - const Offset(0, length)],
+    ];
+    for (final line in corners) {
+      canvas.drawLine(line[0], line[1], cornerPaint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _ScannerOverlayPainter oldDelegate) => false;
+}
+
+String _firstBarcodeRawValue(BarcodeCapture? capture) {
+  if (capture == null) {
+    return '';
+  }
+  for (final barcode in capture.barcodes) {
+    final raw = barcode.rawValue?.trim() ?? '';
+    if (raw.isNotEmpty) {
+      return raw;
+    }
+  }
+  return '';
+}
+
 Map<String, Object?>? _firstExactUsername(
   List<Map<String, Object?>> items,
   String username,
@@ -597,28 +1246,4 @@ Map<String, Object?>? _firstExactUsername(
     }
   }
   return null;
-}
-
-class _PlainInfoBlock extends StatelessWidget {
-  const _PlainInfoBlock({required this.text});
-
-  final String text;
-
-  @override
-  Widget build(BuildContext context) {
-    return ColoredBox(
-      color: _surfaceColor,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
-        child: Text(
-          text,
-          style: const TextStyle(
-            color: _mutedColor,
-            fontSize: 13,
-            height: 1.45,
-          ),
-        ),
-      ),
-    );
-  }
 }

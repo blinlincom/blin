@@ -929,6 +929,21 @@ class SessionController extends ChangeNotifier {
     return data;
   }
 
+  Future<Map<String, Object?>> loadUserMoments({
+    required int userId,
+    int page = 1,
+    int limit = 4,
+  }) {
+    final current = _requireSession();
+    return _api.momentsUser(
+      session: current,
+      device: _device,
+      userId: userId,
+      page: page,
+      limit: limit,
+    );
+  }
+
   Future<Map<String, Object?>> publishMoment({
     required String content,
     required String mediaJson,
@@ -993,6 +1008,36 @@ class SessionController extends ChangeNotifier {
       duration: duration,
       onUploadProgress: onUploadProgress,
     );
+  }
+
+  Future<Map<String, Object?>> uploadProfileBackground({
+    required String filePath,
+    void Function(double progress)? onUploadProgress,
+  }) async {
+    final current = _requireSession();
+    final data = await _api.uploadProfileBackground(
+      session: current,
+      device: _device,
+      filePath: filePath,
+      onUploadProgress: onUploadProgress,
+    );
+    final url = _stringValue(data, const [
+      'url',
+      'userbg',
+      'profile_background',
+      'profile_background_url',
+      'moments_background',
+      'moments_cover',
+      'cover_url',
+      'background_url',
+    ]);
+    if (url.isNotEmpty) {
+      final updated = current.copyWith(profileBackground: url);
+      _session = updated;
+      _store.writeSession(updated);
+      notifyListeners();
+    }
+    return data;
   }
 
   Future<Map<String, Object?>> likeMoment(int postId, {required bool liked}) {
@@ -2347,6 +2392,23 @@ class SessionController extends ChangeNotifier {
         .whereType<Map>()
         .map((item) => item.cast<String, Object?>())
         .toList(growable: false);
+  }
+
+  String _stringValue(Map<String, Object?> source, List<String> keys) {
+    for (final key in keys) {
+      final value = source[key]?.toString().trim() ?? '';
+      if (value.isNotEmpty) {
+        return value;
+      }
+    }
+    final nested = source['data'];
+    if (nested is Map<String, Object?>) {
+      return _stringValue(nested, keys);
+    }
+    if (nested is Map) {
+      return _stringValue(nested.cast<String, Object?>(), keys);
+    }
+    return '';
   }
 
   String _stickerPackId(Map<String, Object?> item) {

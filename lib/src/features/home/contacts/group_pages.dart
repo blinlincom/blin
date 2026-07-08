@@ -209,65 +209,35 @@ class GroupDetailPage extends StatefulWidget {
 
 class _GroupDetailPageState extends State<GroupDetailPage> {
   var _version = 0;
+  int? _loadedMemberCount;
   String _error = '';
   String _message = '';
+  late bool _pinned;
+
+  @override
+  void initState() {
+    super.initState();
+    _pinned = _initialPinned();
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: _pageColor,
-      appBar: AppBar(title: const Text('群聊设置')),
+      appBar: AppBar(
+        title: Text('聊天信息${_groupCountTitleSuffix()}'),
+        actions: [
+          IconButton(
+            tooltip: '查找聊天记录',
+            icon: const Icon(Icons.search),
+            onPressed: _openMessageSearch,
+          ),
+        ],
+      ),
       body: SafeArea(
         child: ListView(
-          padding: const EdgeInsets.only(bottom: 24),
+          padding: const EdgeInsets.only(bottom: 28),
           children: [
-            ColoredBox(
-              color: _surfaceColor,
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),
-                child: InkWell(
-                  onTap: _openGroupProfile,
-                  child: Row(
-                    children: [
-                      _Avatar(
-                        label: widget.title,
-                        imageUrl: widget.avatarUrl,
-                        size: 62,
-                        color: const Color(0xff34c759),
-                        icon: Icons.groups,
-                      ),
-                      const SizedBox(width: 14),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              widget.title.isEmpty ? '群聊' : widget.title,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                color: _textColor,
-                                fontSize: 19,
-                                fontWeight: FontWeight.w800,
-                              ),
-                            ),
-                            const SizedBox(height: 7),
-                            Text(
-                              _groupMetaText,
-                              style: const TextStyle(
-                                color: _mutedColor,
-                                fontSize: 13,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const Icon(Icons.chevron_right, color: _mutedColor),
-                    ],
-                  ),
-                ),
-              ),
-            ),
             FutureBuilder<Map<String, Object?>>(
               key: ValueKey(_version),
               future: widget.controller.groupMembers(widget.groupId),
@@ -275,7 +245,15 @@ class _GroupDetailPageState extends State<GroupDetailPage> {
                 final members = snapshot.connectionState == ConnectionState.done
                     ? _listFromResult(snapshot.data ?? const {})
                     : const <Map<String, Object?>>[];
-                return _GroupMemberPreview(
+                if (snapshot.connectionState == ConnectionState.done &&
+                    _loadedMemberCount != members.length) {
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    if (mounted) {
+                      setState(() => _loadedMemberCount = members.length);
+                    }
+                  });
+                }
+                return _GroupInfoMemberGrid(
                   loading: snapshot.connectionState != ConnectionState.done,
                   members: members,
                   onOpenAll: _openMembers,
@@ -284,49 +262,38 @@ class _GroupDetailPageState extends State<GroupDetailPage> {
               },
             ),
             const _GroupGap(),
-            _PlainListTile(
-              icon: Icons.info_outline,
-              title: '群聊资料',
-              subtitle: '群名称、群公告、成员数量',
-              trailing: '',
-              onTap: _openGroupProfile,
-            ),
-            _PlainListTile(
-              icon: Icons.edit_outlined,
-              title: '更新群资料',
-              subtitle: '群名、头像、公告',
-              trailing: '',
+            _GroupSettingsInfoTile(
+              title: '群聊名称',
+              value: widget.title.isEmpty ? '群聊' : widget.title,
               onTap: _updateGroup,
             ),
-            _PlainListTile(
-              icon: Icons.person_add_alt_1,
-              title: '添加成员',
-              subtitle: '添加好友到群聊',
-              trailing: '',
-              onTap: _addMembers,
+            _GroupSettingsInfoTile(
+              title: '群公告',
+              value: '查看或更新群公告',
+              onTap: _updateGroup,
+            ),
+            _GroupSettingsNavTile(title: '添加成员', onTap: _addMembers),
+            const _GroupGap(),
+            _GroupSettingsNavTile(title: '查找聊天记录', onTap: _openMessageSearch),
+            const _GroupGap(),
+            _GroupSettingsSwitchTile(
+              title: '置顶聊天',
+              value: _pinned,
+              onChanged: _changePinned,
             ),
             const _GroupGap(),
-            _PlainListTile(
-              icon: Icons.delete_sweep_outlined,
-              title: '清空聊天',
-              subtitle: '只清空自己看到的群聊记录',
-              trailing: '',
+            _GroupSettingsDangerTile(
+              title: '清空聊天记录',
               onTap: _clearGroupConversation,
             ),
             const _GroupGap(),
-            _PlainListTile(
-              icon: Icons.logout,
+            _GroupSettingsDangerTile(
               title: '退出群聊',
-              subtitle: '群主需要先转让群主',
-              trailing: '',
               onTap: () =>
                   _run(() => widget.controller.leaveGroup(widget.groupId)),
             ),
-            _PlainListTile(
-              icon: Icons.delete_forever_outlined,
+            _GroupSettingsDangerTile(
               title: '解散群聊',
-              subtitle: '仅群主可操作',
-              trailing: '',
               onTap: () =>
                   _run(() => widget.controller.deleteGroup(widget.groupId)),
             ),
@@ -338,24 +305,68 @@ class _GroupDetailPageState extends State<GroupDetailPage> {
     );
   }
 
-  String get _groupMetaText {
-    final member = widget.memberCount == null ? '' : '${widget.memberCount}人';
-    final online = widget.onlineCount == null ? '' : '${widget.onlineCount}人在线';
-    final parts = [member, online].where((item) => item.isNotEmpty).toList();
-    return parts.isEmpty ? '群聊' : parts.join(' · ');
+  String _groupCountTitleSuffix() {
+    final count = widget.memberCount ?? _loadedMemberCount;
+    return count == null || count <= 0 ? '' : '($count)';
   }
 
-  Future<void> _openGroupProfile() async {
-    await _push(
+  bool _initialPinned() {
+    final conversation = _currentConversation();
+    if (conversation.isEmpty) {
+      return false;
+    }
+    for (final key in const ['is_pinned', 'pinned', 'is_top', 'top']) {
+      final value = conversation[key];
+      if (value != null) {
+        return _boolValue(value);
+      }
+    }
+    return false;
+  }
+
+  Map<String, Object?> _currentConversation() {
+    for (final item in widget.controller.cachedConversations()) {
+      final channelType = _channelTypeFromConversation(item);
+      final channelId = _value(item, ['channel_id', 'channelID', 'uid']);
+      final groupId = _value(item, ['group_id', 'id']);
+      if (channelType == _groupChannelType &&
+          (channelId == widget.channelId || groupId == widget.groupId)) {
+        return item;
+      }
+    }
+    return const {};
+  }
+
+  Future<void> _changePinned(bool value) async {
+    final previous = _pinned;
+    setState(() {
+      _pinned = value;
+      _message = '';
+      _error = '';
+    });
+    try {
+      await widget.controller.setConversationPinned(
+        channelId: widget.channelId,
+        channelType: _groupChannelType,
+        pinned: value,
+      );
+    } catch (error) {
+      setState(() {
+        _pinned = previous;
+        _error = error.toString();
+      });
+    }
+  }
+
+  void _openMessageSearch() {
+    _push(
       context,
-      GroupProfilePage(
+      ChatMessageSearchPage(
         controller: widget.controller,
         title: widget.title,
-        groupId: widget.groupId,
         channelId: widget.channelId,
-        avatarUrl: widget.avatarUrl,
-        memberCount: widget.memberCount,
-        onlineCount: widget.onlineCount,
+        channelType: _groupChannelType,
+        groupId: widget.groupId,
       ),
     );
   }
@@ -401,7 +412,7 @@ class _GroupDetailPageState extends State<GroupDetailPage> {
       context,
       title: '添加群成员',
       fields: const [
-        ActionInputField(id: 'member_ids', label: '成员用户名', hint: '多个用户名用逗号分隔'),
+        ActionInputField(id: 'member_ids', label: '成员账号', hint: '多个账号用逗号分隔'),
       ],
     );
     if (data == null) {
@@ -662,8 +673,8 @@ class _GroupMemberListPageState extends State<GroupMemberListPage> {
   }
 }
 
-class _GroupMemberPreview extends StatelessWidget {
-  const _GroupMemberPreview({
+class _GroupInfoMemberGrid extends StatelessWidget {
+  const _GroupInfoMemberGrid({
     required this.loading,
     required this.members,
     required this.onOpenAll,
@@ -677,112 +688,309 @@ class _GroupMemberPreview extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final preview = members.take(8).toList(growable: false);
+    final width = MediaQuery.sizeOf(context).width;
+    final columns = width >= 720 ? 8 : 5;
+    final itemWidth = ((width - 40) / columns).clamp(58.0, 86.0);
+    final previewCount = max(columns * 3 - 1, columns);
+    final preview = members.take(previewCount).toList(growable: false);
     return ColoredBox(
       color: _surfaceColor,
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 16, 16, 18),
+        padding: const EdgeInsets.fromLTRB(18, 18, 18, 20),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              children: [
-                const Expanded(
-                  child: Text(
-                    '群成员',
-                    style: TextStyle(
-                      color: _textColor,
-                      fontSize: 15,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                ),
-                InkWell(
-                  onTap: onOpenAll,
-                  child: Row(
-                    children: [
-                      Text(
-                        loading ? '加载中' : '${members.length}人',
-                        style: const TextStyle(
-                          color: _mutedColor,
-                          fontSize: 13,
-                        ),
-                      ),
-                      const Icon(
-                        Icons.chevron_right,
-                        size: 20,
-                        color: _mutedColor,
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 14),
             Wrap(
-              spacing: 14,
-              runSpacing: 14,
+              spacing: 8,
+              runSpacing: 18,
               children: [
                 for (final member in preview)
-                  SizedBox(
-                    width: 54,
-                    child: Column(
-                      children: [
-                        _Avatar(
-                          label: _memberTitle(member),
-                          imageUrl: _avatarUrlFromMap(member),
-                          size: 44,
-                          color: const Color(0xff8e99a8),
-                        ),
-                        const SizedBox(height: 6),
-                        Text(
-                          _memberTitle(member),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          textAlign: TextAlign.center,
-                          style: const TextStyle(
-                            color: _secondaryTextColor,
-                            fontSize: 11,
-                          ),
-                        ),
-                      ],
-                    ),
+                  _GroupMemberGridItem(
+                    width: itemWidth,
+                    title: _memberTitle(member),
+                    avatarUrl: _avatarUrlFromMap(member),
+                    onTap: onOpenAll,
                   ),
-                InkWell(
-                  onTap: onAdd,
-                  child: SizedBox(
-                    width: 54,
-                    child: Column(
-                      children: [
-                        Container(
-                          width: 44,
-                          height: 44,
-                          alignment: Alignment.center,
-                          decoration: BoxDecoration(
-                            color: _fillColor,
-                            border: Border.all(color: _lightBorderColor),
-                          ),
-                          child: const Icon(
-                            Icons.add,
-                            color: _mutedColor,
-                            size: 24,
-                          ),
-                        ),
-                        const SizedBox(height: 6),
-                        const Text(
-                          '添加',
-                          style: TextStyle(
-                            color: _secondaryTextColor,
-                            fontSize: 11,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
+                _GroupMemberAddItem(width: itemWidth, onTap: onAdd),
               ],
             ),
+            const SizedBox(height: 22),
+            InkWell(
+              onTap: onOpenAll,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      loading ? '加载群成员' : '更多群成员',
+                      style: const TextStyle(
+                        color: _secondaryTextColor,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    const Icon(
+                      Icons.keyboard_arrow_down,
+                      color: _mutedColor,
+                      size: 24,
+                    ),
+                  ],
+                ),
+              ),
+            ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _GroupMemberGridItem extends StatelessWidget {
+  const _GroupMemberGridItem({
+    required this.width,
+    required this.title,
+    required this.avatarUrl,
+    required this.onTap,
+  });
+
+  final double width;
+  final String title;
+  final String avatarUrl;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      child: SizedBox(
+        width: width,
+        child: Column(
+          children: [
+            _Avatar(
+              label: title,
+              imageUrl: avatarUrl,
+              size: 56,
+              color: const Color(0xff8e99a8),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: _mutedColor, fontSize: 13),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _GroupMemberAddItem extends StatelessWidget {
+  const _GroupMemberAddItem({required this.width, required this.onTap});
+
+  final double width;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      child: SizedBox(
+        width: width,
+        child: Column(
+          children: [
+            Container(
+              width: 56,
+              height: 56,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: _surfaceColor,
+                border: Border.all(color: _mutedColor.withValues(alpha: 0.45)),
+                borderRadius: BorderRadius.circular(_avatarRadius(56)),
+              ),
+              child: const Icon(Icons.add, color: _mutedColor, size: 30),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              '添加',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
+              style: TextStyle(color: _mutedColor, fontSize: 13),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _GroupSettingsNavTile extends StatelessWidget {
+  const _GroupSettingsNavTile({required this.title, required this.onTap});
+
+  final String title;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return ColoredBox(
+      color: _surfaceColor,
+      child: InkWell(
+        onTap: onTap,
+        child: Container(
+          constraints: const BoxConstraints(minHeight: 62),
+          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 17),
+          decoration: const BoxDecoration(
+            border: Border(bottom: BorderSide(color: _lightBorderColor)),
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  title,
+                  style: const TextStyle(
+                    color: _textColor,
+                    fontSize: 17,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              const Icon(Icons.chevron_right, color: _mutedColor, size: 24),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _GroupSettingsInfoTile extends StatelessWidget {
+  const _GroupSettingsInfoTile({
+    required this.title,
+    required this.value,
+    required this.onTap,
+  });
+
+  final String title;
+  final String value;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return ColoredBox(
+      color: _surfaceColor,
+      child: InkWell(
+        onTap: onTap,
+        child: Container(
+          constraints: const BoxConstraints(minHeight: 62),
+          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 17),
+          decoration: const BoxDecoration(
+            border: Border(bottom: BorderSide(color: _lightBorderColor)),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                title,
+                style: const TextStyle(
+                  color: _textColor,
+                  fontSize: 17,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Text(
+                  value,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.right,
+                  style: const TextStyle(
+                    color: _secondaryTextColor,
+                    fontSize: 16,
+                    height: 1.35,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 4),
+              const Icon(Icons.chevron_right, color: _mutedColor, size: 24),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _GroupSettingsSwitchTile extends StatelessWidget {
+  const _GroupSettingsSwitchTile({
+    required this.title,
+    required this.value,
+    required this.onChanged,
+  });
+
+  final String title;
+  final bool value;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return ColoredBox(
+      color: _surfaceColor,
+      child: DecoratedBox(
+        decoration: const BoxDecoration(
+          border: Border(bottom: BorderSide(color: _lightBorderColor)),
+        ),
+        child: SwitchListTile.adaptive(
+          value: value,
+          onChanged: onChanged,
+          title: Text(
+            title,
+            style: const TextStyle(
+              color: _textColor,
+              fontSize: 17,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          activeThumbColor: _primaryColor,
+          contentPadding: const EdgeInsets.symmetric(horizontal: 18),
+        ),
+      ),
+    );
+  }
+}
+
+class _GroupSettingsDangerTile extends StatelessWidget {
+  const _GroupSettingsDangerTile({required this.title, required this.onTap});
+
+  final String title;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return ColoredBox(
+      color: _surfaceColor,
+      child: InkWell(
+        onTap: onTap,
+        child: Container(
+          constraints: const BoxConstraints(minHeight: 62),
+          alignment: Alignment.centerLeft,
+          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 17),
+          decoration: const BoxDecoration(
+            border: Border(bottom: BorderSide(color: _lightBorderColor)),
+          ),
+          child: Text(
+            title,
+            style: const TextStyle(
+              color: _dangerColor,
+              fontSize: 17,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
         ),
       ),
     );

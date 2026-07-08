@@ -42,8 +42,8 @@ class _AddFriendPageState extends State<AddFriendPage> {
                       controller: _friendId,
                       textInputAction: TextInputAction.next,
                       decoration: const InputDecoration(
-                        labelText: '用户名',
-                        hintText: '只能通过用户名添加好友',
+                        labelText: '账号',
+                        hintText: '输入对方 @账号',
                         prefixIcon: Icon(Icons.alternate_email),
                       ),
                     ),
@@ -91,7 +91,7 @@ class _AddFriendPageState extends State<AddFriendPage> {
   Future<void> _checkStatus() async {
     final id = _friendId.text.trim();
     if (id.isEmpty) {
-      setState(() => _error = '用户名不能为空');
+      setState(() => _error = '账号不能为空');
       return;
     }
     await _run(() async {
@@ -103,7 +103,7 @@ class _AddFriendPageState extends State<AddFriendPage> {
   Future<void> _apply() async {
     final id = _friendId.text.trim();
     if (id.isEmpty) {
-      setState(() => _error = '用户名不能为空');
+      setState(() => _error = '账号不能为空');
       return;
     }
     await _run(() async {

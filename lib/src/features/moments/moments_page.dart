@@ -39,6 +39,7 @@ class _MomentsPageState extends State<MomentsPage> {
   bool _refreshing = false;
   bool _loadingMore = false;
   bool _appBarOnCover = true;
+  bool _coverUploading = false;
   String _error = '';
   String _profileBackgroundUrl = '';
   int _page = 1;
@@ -75,7 +76,7 @@ class _MomentsPageState extends State<MomentsPage> {
     if (!_scrollController.hasClients) {
       return;
     }
-    final onCover = _scrollController.offset < 148;
+    final onCover = _scrollController.offset < 220;
     if (onCover != _appBarOnCover && mounted) {
       setState(() => _appBarOnCover = onCover);
     }
@@ -187,6 +188,66 @@ class _MomentsPageState extends State<MomentsPage> {
       ];
     });
     _cacheCurrentFeed();
+  }
+
+  Future<void> _openCoverPreview(String imageUrl) async {
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute(
+        builder: (_) => _MomentCoverPreviewPage(
+          imageUrl: imageUrl,
+          onChangeCover: _pickAndUploadCover,
+        ),
+      ),
+    );
+  }
+
+  Future<String?> _pickAndUploadCover(ValueChanged<double> onProgress) async {
+    if (_coverUploading) {
+      return null;
+    }
+    final selected = await Navigator.of(context).push<_MomentLocalMedia>(
+      MaterialPageRoute(
+        builder: (_) => const _MomentMediaPickerPage(mediaType: 'image'),
+      ),
+    );
+    if (selected == null || !mounted) {
+      return null;
+    }
+    setState(() => _coverUploading = true);
+    onProgress(0);
+    try {
+      final data = await widget.controller.uploadProfileBackground(
+        filePath: selected.filePath,
+        onUploadProgress: onProgress,
+      );
+      final url = _uploadedProfileBackground(data);
+      if (!mounted) {
+        return url.isEmpty ? null : url;
+      }
+      if (url.isEmpty) {
+        await _loadFirst(showLoading: false);
+        _showMomentMessage(context, '封面已提交审核');
+        return null;
+      }
+      setState(() => _profileBackgroundUrl = url);
+      _showMomentMessage(context, '封面已更新');
+      return url;
+    } catch (error, stackTrace) {
+      AppLogger.error(
+        'moments',
+        'upload profile background failed',
+        error: error,
+        stackTrace: stackTrace,
+      );
+      if (mounted) {
+        _showMomentMessage(context, error.toString(), error: true);
+      }
+      return null;
+    } finally {
+      if (mounted) {
+        setState(() => _coverUploading = false);
+      }
+    }
   }
 
   void _replacePost(Map<String, Object?> post) {
@@ -367,7 +428,11 @@ class _MomentsPageState extends State<MomentsPage> {
         backgroundColor: _momentsPageColor,
         extendBodyBehindAppBar: true,
         appBar: AppBar(
-          title: const Text('朋友圈'),
+          title: AnimatedOpacity(
+            opacity: _appBarOnCover ? 0 : 1,
+            duration: const Duration(milliseconds: 180),
+            child: const Text('朋友圈'),
+          ),
           centerTitle: true,
           elevation: 0,
           scrolledUnderElevation: 0,
@@ -407,6 +472,7 @@ class _MomentsPageState extends State<MomentsPage> {
                   ),
                   avatarUrl: session?.avatar ?? '',
                   backgroundUrl: backgroundUrl,
+                  onCoverTap: () => _openCoverPreview(backgroundUrl),
                 ),
               ),
               if (_loading)
@@ -713,42 +779,110 @@ class _MomentHeader extends StatelessWidget {
     required this.name,
     required this.avatarUrl,
     required this.backgroundUrl,
+    required this.onCoverTap,
   });
 
   final String name;
   final String avatarUrl;
   final String backgroundUrl;
+  final VoidCallback onCoverTap;
 
   @override
   Widget build(BuildContext context) {
+    final viewport = MediaQuery.sizeOf(context);
+    final coverHeight = viewport.height
+        .clamp(640, 920)
+        .toDouble()
+        .lerp(292, 362, inverse: true);
+    final avatarSize = viewport.width < 360 ? 68.0 : 76.0;
     return SizedBox(
-      height: 216,
+      height: coverHeight + 82,
       child: Stack(
+        clipBehavior: Clip.none,
         children: [
-          _MomentCoverImage(
-            imageUrl: backgroundUrl,
-            height: 180,
-            child: const SizedBox.shrink(),
+          Positioned.fill(
+            top: coverHeight,
+            child: const ColoredBox(color: _momentsSurface),
+          ),
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: onCoverTap,
+            child: _MomentCoverImage(
+              imageUrl: backgroundUrl,
+              height: coverHeight,
+              child: DecoratedBox(
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      Color(0x4d000000),
+                      Color(0x0d000000),
+                      Color(0x59000000),
+                    ],
+                  ),
+                ),
+                child: const SizedBox.expand(),
+              ),
+            ),
           ),
           Positioned(
+            left: 20,
             right: 16,
-            top: 146,
-            child: Container(
-              width: 64,
-              height: 64,
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                border: Border.all(color: Colors.white, width: 2.5),
-                color: _momentsSurface,
-                borderRadius: BorderRadius.circular(_momentAvatarRadius(64)),
-              ),
-              clipBehavior: Clip.antiAlias,
-              child: _MomentAvatar(label: name, imageUrl: avatarUrl, size: 58),
+            top: coverHeight - avatarSize * 0.5,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Flexible(
+                  child: Padding(
+                    padding: EdgeInsets.only(top: avatarSize * 0.12),
+                    child: Text(
+                      name.isEmpty ? 'BIM' : name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.right,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 22,
+                        fontWeight: FontWeight.w700,
+                        height: 1.1,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Container(
+                  width: avatarSize,
+                  height: avatarSize,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    border: Border.all(color: Colors.white, width: 2.5),
+                    color: _momentsSurface,
+                    borderRadius: BorderRadius.circular(
+                      _momentAvatarRadius(avatarSize),
+                    ),
+                  ),
+                  clipBehavior: Clip.antiAlias,
+                  child: _MomentAvatar(
+                    label: name,
+                    imageUrl: avatarUrl,
+                    size: avatarSize - 5,
+                  ),
+                ),
+              ],
             ),
           ),
         ],
       ),
     );
+  }
+}
+
+extension _MomentDoubleLerp on double {
+  double lerp(double min, double max, {bool inverse = false}) {
+    final t = ((this - 640) / (920 - 640)).clamp(0, 1).toDouble();
+    return min + (max - min) * (inverse ? t : 1 - t);
   }
 }
 
@@ -766,30 +900,28 @@ class _MomentCoverImage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final url = _mediaUrl(imageUrl);
-    return SizedBox(
-      height: height,
-      width: double.infinity,
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          if (url.isNotEmpty)
-            Image.network(
-              url,
-              fit: BoxFit.cover,
-              gaplessPlayback: true,
-              errorBuilder: (_, __, ___) => const _MomentCoverFallback(),
-              loadingBuilder: (context, child, progress) =>
-                  progress == null ? child : const _MomentCoverFallback(),
-            )
-          else
-            const _MomentCoverFallback(),
-          const DecoratedBox(
-            decoration: BoxDecoration(color: Color(0x33000000)),
-          ),
-          child,
-        ],
-      ),
+    final content = Stack(
+      fit: StackFit.expand,
+      children: [
+        if (url.isNotEmpty)
+          Image.network(
+            url,
+            fit: BoxFit.cover,
+            gaplessPlayback: true,
+            errorBuilder: (_, __, ___) => const _MomentCoverFallback(),
+            loadingBuilder: (context, child, progress) =>
+                progress == null ? child : const _MomentCoverFallback(),
+          )
+        else
+          const _MomentCoverFallback(),
+        const DecoratedBox(decoration: BoxDecoration(color: Color(0x33000000))),
+        child,
+      ],
     );
+    if (height.isInfinite) {
+      return SizedBox.expand(child: content);
+    }
+    return SizedBox(height: height, width: double.infinity, child: content);
   }
 }
 
@@ -805,6 +937,144 @@ class _MomentCoverFallback extends StatelessWidget {
         child: Padding(
           padding: EdgeInsets.fromLTRB(20, 20, 20, 34),
           child: Icon(Icons.image_outlined, color: Color(0x66ffffff), size: 34),
+        ),
+      ),
+    );
+  }
+}
+
+class _MomentCoverPreviewPage extends StatefulWidget {
+  const _MomentCoverPreviewPage({
+    required this.imageUrl,
+    required this.onChangeCover,
+  });
+
+  final String imageUrl;
+  final Future<String?> Function(ValueChanged<double> onProgress) onChangeCover;
+
+  @override
+  State<_MomentCoverPreviewPage> createState() =>
+      _MomentCoverPreviewPageState();
+}
+
+class _MomentCoverPreviewPageState extends State<_MomentCoverPreviewPage> {
+  late String _imageUrl = widget.imageUrl;
+  bool _changing = false;
+  double _progress = 0;
+
+  Future<void> _changeCover() async {
+    if (_changing) {
+      return;
+    }
+    setState(() {
+      _changing = true;
+      _progress = 0;
+    });
+    final nextUrl = await widget.onChangeCover((value) {
+      if (!mounted) {
+        return;
+      }
+      setState(() => _progress = value.clamp(0, 1).toDouble());
+    });
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      if (nextUrl != null && nextUrl.isNotEmpty) {
+        _imageUrl = nextUrl;
+      }
+      _changing = false;
+      _progress = 0;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final overlayStyle = const SystemUiOverlayStyle(
+      statusBarColor: Colors.transparent,
+      statusBarIconBrightness: Brightness.light,
+      statusBarBrightness: Brightness.dark,
+      systemNavigationBarColor: Colors.black,
+      systemNavigationBarIconBrightness: Brightness.light,
+    );
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: overlayStyle,
+      child: Scaffold(
+        backgroundColor: Colors.black,
+        extendBodyBehindAppBar: true,
+        appBar: AppBar(
+          backgroundColor: Colors.transparent,
+          foregroundColor: Colors.white,
+          elevation: 0,
+          scrolledUnderElevation: 0,
+          systemOverlayStyle: overlayStyle,
+        ),
+        body: Stack(
+          fit: StackFit.expand,
+          children: [
+            _MomentCoverImage(
+              imageUrl: _imageUrl,
+              height: double.infinity,
+              child: const DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      Color(0x73000000),
+                      Color(0x22000000),
+                      Color(0xcc000000),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            SafeArea(
+              child: Align(
+                alignment: Alignment.bottomRight,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 20, 22, 34),
+                  child: InkWell(
+                    onTap: _changing ? null : _changeCover,
+                    child: SizedBox(
+                      width: 84,
+                      height: 64,
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          if (_changing)
+                            SizedBox(
+                              width: 26,
+                              height: 26,
+                              child: CircularProgressIndicator(
+                                value: _progress <= 0 ? null : _progress,
+                                color: Colors.white,
+                                strokeWidth: 2,
+                              ),
+                            )
+                          else
+                            const Icon(
+                              Icons.image_outlined,
+                              color: Colors.white,
+                              size: 30,
+                            ),
+                          const SizedBox(height: 6),
+                          Text(
+                            _changing ? '上传中' : '换封面',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -839,23 +1109,23 @@ class _MomentPostTile extends StatelessWidget {
     return ColoredBox(
       color: _momentsSurface,
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
+        padding: const EdgeInsets.fromLTRB(14, 14, 12, 0),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             _MomentAvatar(
               label: _displayName(user),
               imageUrl: _textValue(user, ['usertx', 'avatar']),
-              size: 40,
+              size: 42,
             ),
-            const SizedBox(width: 9),
+            const SizedBox(width: 10),
             Expanded(
               child: DecoratedBox(
                 decoration: const BoxDecoration(
                   border: Border(bottom: BorderSide(color: _momentsBorder)),
                 ),
                 child: Padding(
-                  padding: const EdgeInsets.only(bottom: 10),
+                  padding: const EdgeInsets.only(bottom: 12),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -865,7 +1135,7 @@ class _MomentPostTile extends StatelessWidget {
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
                           color: _momentsLike,
-                          fontSize: 14.5,
+                          fontSize: 15,
                           fontWeight: FontWeight.w700,
                         ),
                       ),
@@ -875,16 +1145,16 @@ class _MomentPostTile extends StatelessWidget {
                           _textValue(post, ['content']),
                           style: const TextStyle(
                             color: _momentsText,
-                            fontSize: 15,
-                            height: 1.36,
+                            fontSize: 15.5,
+                            height: 1.38,
                           ),
                         ),
                       ],
                       if (media.isNotEmpty) ...[
-                        const SizedBox(height: 6),
+                        const SizedBox(height: 8),
                         _MomentMediaGrid(media: media),
                       ],
-                      const SizedBox(height: 6),
+                      const SizedBox(height: 7),
                       Row(
                         children: [
                           Text(
@@ -949,62 +1219,70 @@ class _MomentActionButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return DecoratedBox(
-      decoration: const BoxDecoration(color: _momentsFill),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          _SmallTextAction(
+    return PopupMenuButton<String>(
+      tooltip: '更多',
+      elevation: 0,
+      color: const Color(0xff303644),
+      position: PopupMenuPosition.under,
+      onSelected: (value) {
+        if (value == 'like') {
+          onLike();
+          return;
+        }
+        if (value == 'comment') {
+          onComment();
+        }
+      },
+      itemBuilder: (context) => [
+        PopupMenuItem<String>(
+          value: 'like',
+          child: _MomentPopupAction(
             icon: liked ? Icons.favorite : Icons.favorite_border,
             label: liked ? '取消' : '赞',
-            onTap: onLike,
           ),
-          Container(width: 1, height: 18, color: _momentsBorder),
-          _SmallTextAction(
+        ),
+        const PopupMenuItem<String>(
+          value: 'comment',
+          child: _MomentPopupAction(
             icon: Icons.mode_comment_outlined,
             label: '评论',
-            onTap: onComment,
           ),
-        ],
+        ),
+      ],
+      child: Container(
+        width: 42,
+        height: 28,
+        alignment: Alignment.center,
+        color: _momentsFill,
+        child: const Icon(Icons.more_horiz, size: 21, color: _momentsLike),
       ),
     );
   }
 }
 
-class _SmallTextAction extends StatelessWidget {
-  const _SmallTextAction({
-    required this.icon,
-    required this.label,
-    required this.onTap,
-  });
+class _MomentPopupAction extends StatelessWidget {
+  const _MomentPopupAction({required this.icon, required this.label});
 
   final IconData icon;
   final String label;
-  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      child: SizedBox(
-        height: 34,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 10),
-          child: Row(
-            children: [
-              Icon(icon, size: 16, color: _momentsLike),
-              const SizedBox(width: 4),
-              Text(
-                label,
-                style: const TextStyle(
-                  color: _momentsLike,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ],
+    return SizedBox(
+      height: 32,
+      child: Row(
+        children: [
+          Icon(icon, size: 18, color: Colors.white),
+          const SizedBox(width: 8),
+          Text(
+            label,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+            ),
           ),
-        ),
+        ],
       ),
     );
   }
@@ -2298,6 +2576,33 @@ String _momentProfileBackground(Map<String, Object?> source) {
       continue;
     }
     final value = _momentProfileBackground(nested);
+    if (value.isNotEmpty) {
+      return value;
+    }
+  }
+  return '';
+}
+
+String _uploadedProfileBackground(Map<String, Object?> source) {
+  final direct = _textValue(source, const [
+    'url',
+    'userbg',
+    'profile_background',
+    'profile_background_url',
+    'moments_background',
+    'moments_cover',
+    'cover_url',
+    'background_url',
+  ]);
+  if (direct.isNotEmpty) {
+    return direct;
+  }
+  for (final key in const ['data', 'user', 'profile']) {
+    final nested = _mapValue(source, [key]);
+    if (nested.isEmpty) {
+      continue;
+    }
+    final value = _uploadedProfileBackground(nested);
     if (value.isNotEmpty) {
       return value;
     }

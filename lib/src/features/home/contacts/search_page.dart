@@ -66,7 +66,7 @@ class _SearchPageState extends State<SearchPage> {
   void _searchRemoteFriends() {
     final keyword = _keyword.text.trim();
     if (keyword.isEmpty) {
-      setState(() => _error = '请输入用户名');
+      setState(() => _error = '请输入账号');
       return;
     }
     setState(() {
@@ -113,7 +113,7 @@ class _SearchPageState extends State<SearchPage> {
             onSubmitted: (_) => _searchRemoteFriends(),
             decoration: const InputDecoration(
               prefixIcon: Icon(Icons.search),
-              hintText: '好友昵称/用户名，添加朋友用用户名',
+              hintText: '好友昵称或 @账号',
             ),
           ),
         ),
@@ -124,7 +124,7 @@ class _SearchPageState extends State<SearchPage> {
               FilledButton.icon(
                 onPressed: _acting ? null : _searchRemoteFriends,
                 icon: const Icon(Icons.person_search_outlined),
-                label: const Text('按用户名搜索'),
+                label: const Text('搜索账号'),
               ),
               OutlinedButton.icon(
                 onPressed: () => _refreshLocal(showLoading: false),
@@ -237,7 +237,7 @@ class _RemoteFriendSearchBlock extends StatelessWidget {
   Widget build(BuildContext context) {
     final request = future;
     if (request == null) {
-      return const _EmptyRow(text: '输入用户名后搜索');
+      return const _EmptyRow(text: '输入账号后搜索');
     }
     return FutureBuilder<Map<String, Object?>>(
       future: request,

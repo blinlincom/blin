@@ -47,7 +47,7 @@ class MineTab extends StatelessWidget {
                             _MineStatusLine(controller: controller),
                             const SizedBox(height: 6),
                             Text(
-                              '账号：${session?.username ?? ''}',
+                              _atName(session?.username ?? ''),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: const TextStyle(

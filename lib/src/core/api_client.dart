@@ -440,6 +440,27 @@ class ApiClient {
     );
   }
 
+  Future<Map<String, Object?>> uploadProfileBackground({
+    required UserSession session,
+    required String device,
+    required String filePath,
+    void Function(double progress)? onUploadProgress,
+  }) async {
+    final result = await secureSignedImPost<Map<String, Object?>>(
+      'upload_background',
+      session: session,
+      device: device,
+      params: const {},
+      filePath: filePath,
+      secureResponse: false,
+      onUploadProgress: onUploadProgress,
+    );
+    if (!result.isSuccess) {
+      throw ApiException(result.message, code: result.code);
+    }
+    return result.data;
+  }
+
   Future<Map<String, Object?>> deletePrivateConversation({
     required UserSession session,
     required String device,

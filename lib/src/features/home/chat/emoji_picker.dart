@@ -118,6 +118,7 @@ String _emojiAssetForPayload(Map<String, Object?> payload) {
 class _EmojiPanel extends StatefulWidget {
   const _EmojiPanel({
     required this.controller,
+    required this.height,
     required this.initialTab,
     required this.onSelected,
     super.key,
@@ -127,6 +128,7 @@ class _EmojiPanel extends StatefulWidget {
   State<_EmojiPanel> createState() => _EmojiPanelState();
 
   final SessionController controller;
+  final double height;
   final int initialTab;
   final ValueChanged<Map<String, String>> onSelected;
 }
@@ -235,7 +237,7 @@ class _EmojiPanelState extends State<_EmojiPanel> {
   @override
   Widget build(BuildContext context) {
     return Container(
-      height: BimDimensions.chatToolsPanel,
+      height: widget.height,
       decoration: const BoxDecoration(
         color: _surfaceColor,
         border: Border(top: BorderSide(color: _lightBorderColor)),
@@ -387,7 +389,9 @@ class _EmojiAssetGrid extends StatelessWidget {
         ? 10
         : width >= 520
         ? 8
-        : 7;
+        : width >= 390
+        ? 7
+        : 6;
     return FutureBuilder<List<_EmojiAsset>>(
       future: future,
       builder: (context, snapshot) {
@@ -539,7 +543,9 @@ class _StickerItemGrid extends StatelessWidget {
         ? 6
         : width >= 520
         ? 5
-        : 4;
+        : width >= 390
+        ? 4
+        : 3;
     return GridView.builder(
       keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
       padding: const EdgeInsets.fromLTRB(12, 12, 12, 18),

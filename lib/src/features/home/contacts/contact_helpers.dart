@@ -40,7 +40,7 @@ String _friendSubtitle(Map<String, Object?> item) {
   ], fallback: _value(item, ['signature']));
   return [
     _friendPresenceText(item),
-    if (username.isNotEmpty) '用户名 $username',
+    if (username.isNotEmpty) _atName(username),
     if (signature.isNotEmpty) signature,
   ].join(' · ');
 }
@@ -203,7 +203,7 @@ String _searchFriendSubtitle(Map<String, Object?> item) {
   final username = _value(user, ['username']);
   final signature = _value(user, ['signature']);
   return [
-    if (username.isNotEmpty) username,
+    if (username.isNotEmpty) _atName(username),
     if (signature.isNotEmpty) signature,
     _friendStatusText(item),
   ].join(' · ');
@@ -271,7 +271,7 @@ String _memberSubtitle(Map<String, Object?> item) {
   final username = _memberUsername(item);
   final parts = [
     if (username.isNotEmpty && username != _memberRoleText(item))
-      '用户名 $username',
+      _atName(username),
     _memberRoleText(item),
   ];
   final muted = _boolValue(item['muted']);
