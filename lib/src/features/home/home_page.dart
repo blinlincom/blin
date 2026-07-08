@@ -340,7 +340,7 @@ class _HomePageState extends State<HomePage> {
             ),
             const BottomNavigationBarItem(
               icon: Icon(Icons.contacts_outlined),
-              label: '通讯录',
+              label: '联系人',
             ),
             const BottomNavigationBarItem(
               icon: Icon(Icons.explore_outlined),
@@ -407,7 +407,7 @@ class _HomePageState extends State<HomePage> {
   String get _title {
     return switch (_index) {
       0 => _messagesTitle,
-      1 => '通讯录',
+      1 => '联系人',
       2 => '发现',
       _ => '我的',
     };

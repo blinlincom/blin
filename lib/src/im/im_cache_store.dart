@@ -12,6 +12,8 @@ class ImCacheStore {
   static const _conversationPrefix = 'im_conversations';
   static const _messagePrefix = 'im_messages';
   static const _friendListPrefix = 'im_friend_list';
+  static const _friendApplyListPrefix = 'im_friend_apply_list';
+  static const _friendApplyUnreadPrefix = 'im_friend_apply_unread';
   static const _groupListPrefix = 'im_group_list';
   static const _profilePrefix = 'im_profile';
   static const _pinnedConversationPrefix = 'im_pinned_conversations';
@@ -376,6 +378,33 @@ class ImCacheStore {
     _kv.encodeString('$_friendListPrefix:$uid', jsonEncode(friends));
   }
 
+  List<Map<String, Object?>> readFriendApplyList({
+    required String uid,
+    required String type,
+  }) {
+    return _readMapList(_friendApplyListKey(uid, type));
+  }
+
+  void writeFriendApplyList({
+    required String uid,
+    required String type,
+    required List<Map<String, Object?>> applications,
+  }) {
+    _kv.encodeString(_friendApplyListKey(uid, type), jsonEncode(applications));
+  }
+
+  int readFriendApplyUnread(String uid) {
+    return _kv.decodeInt('$_friendApplyUnreadPrefix:$uid');
+  }
+
+  void writeFriendApplyUnread({required String uid, required int count}) {
+    if (count <= 0) {
+      _kv.removeValue('$_friendApplyUnreadPrefix:$uid');
+      return;
+    }
+    _kv.encodeInt('$_friendApplyUnreadPrefix:$uid', count);
+  }
+
   void removeFriend({required String uid, required String friendId}) {
     if (friendId.isEmpty) {
       return;
@@ -384,6 +413,11 @@ class ImCacheStore {
       uid,
     ).where((item) => _profileUserId(item) != friendId).toList(growable: false);
     writeFriendList(uid: uid, friends: friends);
+  }
+
+  String _friendApplyListKey(String uid, String type) {
+    final normalized = type == 'out' ? 'out' : 'in';
+    return '$_friendApplyListPrefix:$uid:$normalized';
   }
 
   Map<String, Object?> readProfile({

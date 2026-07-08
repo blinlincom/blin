@@ -1,5 +1,7 @@
 part of 'package:bim/src/features/home/home_page.dart';
 
+const _mediaMaxImageSelection = 20;
+
 class _InAppMediaPickerPage extends StatefulWidget {
   const _InAppMediaPickerPage({required this.contentType});
 
@@ -11,7 +13,7 @@ class _InAppMediaPickerPage extends StatefulWidget {
 
 class _InAppMediaPickerPageState extends State<_InAppMediaPickerPage> {
   static const _pageSize = 120;
-  static const _maxImageSelection = 20;
+  static const _maxImageSelection = _mediaMaxImageSelection;
 
   final ScrollController _gridController = ScrollController();
   List<AssetPathEntity> _albums = const [];
@@ -26,10 +28,11 @@ class _InAppMediaPickerPageState extends State<_InAppMediaPickerPage> {
   String _error = '';
   String _selectingAssetId = '';
 
-  bool get _isVideo => widget.contentType == ChatContentTypes.video;
+  bool get _videoOnly => widget.contentType == ChatContentTypes.video;
   AssetEntity? get _selectedAsset =>
       _selectedAssets.isEmpty ? null : _selectedAssets.last;
   int get _selectedCount => _selectedAssets.length;
+  int get _maxSelection => _selectedMaxSelectionForAssets(_selectedAssets);
 
   @override
   void initState() {
@@ -73,12 +76,13 @@ class _InAppMediaPickerPageState extends State<_InAppMediaPickerPage> {
         }
         setState(() {
           _loading = false;
-          _error = '需要授权访问相册后才能选择${_isVideo ? '视频' : '图片'}';
+          _error = '需要授权访问相册后才能选择图片或视频';
         });
         return;
       }
       final albums = await PhotoManager.getAssetPathList(
-        type: _isVideo ? RequestType.video : RequestType.image,
+        type: _mediaRequestType,
+        filterOption: _mediaFilterOption,
         hasAll: true,
       );
       if (!mounted) {
@@ -138,6 +142,7 @@ class _InAppMediaPickerPageState extends State<_InAppMediaPickerPage> {
     }
     try {
       final assets = await album.getAssetListPaged(page: 0, size: _pageSize);
+      assets.sort(_mediaAssetRecentCompare);
       if (!mounted) {
         return;
       }
@@ -196,6 +201,7 @@ class _InAppMediaPickerPageState extends State<_InAppMediaPickerPage> {
         page: nextPage,
         size: _pageSize,
       );
+      assets.sort(_mediaAssetRecentCompare);
       if (!mounted) {
         return;
       }
@@ -247,7 +253,7 @@ class _InAppMediaPickerPageState extends State<_InAppMediaPickerPage> {
     try {
       final payloads = <Map<String, String>>[];
       for (final asset in selected) {
-        payloads.add(await _mediaAssetPayload(asset, widget.contentType));
+        payloads.add(_mediaAssetSelectionPayload(asset));
       }
       if (!mounted) {
         return;
@@ -257,6 +263,7 @@ class _InAppMediaPickerPageState extends State<_InAppMediaPickerPage> {
         'media assets selected for send',
         data: {
           'content_type': widget.contentType,
+          'media_mode': _mediaModeLogName,
           'count': payloads.length,
           'asset_ids': selected.map((item) => item.id).take(30).toList(),
         },
@@ -297,7 +304,11 @@ class _InAppMediaPickerPageState extends State<_InAppMediaPickerPage> {
       });
       return;
     }
-    if (_isVideo) {
+    if (_assetIsVideo(asset)) {
+      setState(() => _selectedAssets = [asset]);
+      return;
+    }
+    if (_selectedAssets.any(_assetIsVideo)) {
       setState(() => _selectedAssets = [asset]);
       return;
     }
@@ -313,7 +324,11 @@ class _InAppMediaPickerPageState extends State<_InAppMediaPickerPage> {
     if (existing >= 0) {
       return;
     }
-    if (_isVideo) {
+    if (_assetIsVideo(asset)) {
+      _selectedAssets = [asset];
+      return;
+    }
+    if (_selectedAssets.any(_assetIsVideo)) {
       _selectedAssets = [asset];
       return;
     }
@@ -338,7 +353,7 @@ class _InAppMediaPickerPageState extends State<_InAppMediaPickerPage> {
 
   @override
   Widget build(BuildContext context) {
-    final title = _isVideo ? '选择视频' : '选择图片';
+    final title = _videoOnly ? '选择视频' : '最近项目';
     return Scaffold(
       resizeToAvoidBottomInset: true,
       backgroundColor: _pageColor,
@@ -358,7 +373,8 @@ class _InAppMediaPickerPageState extends State<_InAppMediaPickerPage> {
             Expanded(child: _buildBody()),
             _MediaPickerFooter(
               selectedCount: _selectedCount,
-              maxSelection: _isVideo ? 1 : _maxImageSelection,
+              maxSelection: _maxSelection,
+              videoSelected: _selectedAssets.any(_assetIsVideo),
               sending: _selectingAssetId.isNotEmpty,
               onClear: _selectedCount == 0 ? null : _clearSelection,
               onPreview: _selectedAsset == null ? null : _openPreview,
@@ -388,7 +404,7 @@ class _InAppMediaPickerPageState extends State<_InAppMediaPickerPage> {
       );
     }
     if (_assets.isEmpty && !_loadingAssets) {
-      return _EmptyState(text: _isVideo ? '暂无可发送视频' : '暂无可发送图片');
+      return _EmptyState(text: _videoOnly ? '暂无可发送视频' : '暂无可发送图片或视频');
     }
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -441,6 +457,15 @@ class _InAppMediaPickerPageState extends State<_InAppMediaPickerPage> {
       },
     );
   }
+
+  RequestType get _mediaRequestType =>
+      _videoOnly ? RequestType.video : RequestType.common;
+
+  FilterOptionGroup get _mediaFilterOption => FilterOptionGroup(
+    orders: const [OrderOption(type: OrderOptionType.createDate, asc: false)],
+  );
+
+  String get _mediaModeLogName => _videoOnly ? 'video' : 'recent_common';
 }
 
 class _InAppFilePickerPage extends StatefulWidget {
@@ -767,7 +792,7 @@ class _MediaAlbumStrip extends StatelessWidget {
                 final current = selected?.id == album.id;
                 return Center(
                   child: _PickerFilterButton(
-                    label: album.isAll ? '全部' : album.name,
+                    label: album.isAll ? '最近' : album.name,
                     selected: current,
                     onTap: loading || current ? null : () => onChanged(album),
                   ),
@@ -1350,6 +1375,7 @@ class _MediaPickerFooter extends StatelessWidget {
   const _MediaPickerFooter({
     required this.selectedCount,
     required this.maxSelection,
+    required this.videoSelected,
     required this.sending,
     required this.onClear,
     required this.onPreview,
@@ -1358,6 +1384,7 @@ class _MediaPickerFooter extends StatelessWidget {
 
   final int selectedCount;
   final int maxSelection;
+  final bool videoSelected;
   final bool sending;
   final VoidCallback? onClear;
   final VoidCallback? onPreview;
@@ -1366,9 +1393,14 @@ class _MediaPickerFooter extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final enabled = selectedCount > 0 && !sending;
+    final leadingText = selectedCount == 0
+        ? '未选择'
+        : videoSelected
+        ? '已选择 1 个视频'
+        : '已选择 $selectedCount/$maxSelection 张';
     return _PickerFooterShell(
       leading: Text(
-        selectedCount == 0 ? '未选择' : '已选择 $selectedCount/$maxSelection 项',
+        leadingText,
         style: const TextStyle(
           color: _secondaryTextColor,
           fontSize: 13,
@@ -1923,6 +1955,23 @@ enum _FileTypeFilter {
 
 enum _FileTypeKind { document, image, video, archive, other }
 
+Map<String, String> _mediaAssetSelectionPayload(AssetEntity asset) {
+  final title = asset.title ?? '';
+  final contentType = _assetIsVideo(asset)
+      ? ChatContentTypes.video
+      : ChatContentTypes.image;
+  return <String, String>{
+    'asset_id': asset.id,
+    'content_type': contentType,
+    'name': title.isNotEmpty ? title : asset.id,
+    if ((asset.mimeType ?? '').isNotEmpty) 'mime': asset.mimeType!,
+    if (asset.width > 0) 'width': asset.width.toString(),
+    if (asset.height > 0) 'height': asset.height.toString(),
+    if (_assetIsVideo(asset) && asset.duration > 0)
+      'duration': asset.duration.toString(),
+  };
+}
+
 Future<Map<String, String>> _mediaAssetPayload(
   AssetEntity asset,
   String contentType,
@@ -1938,6 +1987,9 @@ Future<Map<String, String>> _mediaAssetPayload(
   final name = await asset.titleAsync;
   return <String, String>{
     'file_path': file.path,
+    'content_type': _assetIsVideo(asset)
+        ? ChatContentTypes.video
+        : ChatContentTypes.image,
     'name': name.isNotEmpty ? name : _fileName(file.path),
     'size': stat.size.toString(),
     'mime': asset.mimeType ?? _mimeFromPath(file.path, contentType),
@@ -1946,6 +1998,22 @@ Future<Map<String, String>> _mediaAssetPayload(
     if (contentType == ChatContentTypes.video)
       'duration': asset.duration.toString(),
   };
+}
+
+bool _assetIsVideo(AssetEntity asset) => asset.type == AssetType.video;
+
+int _mediaAssetRecentCompare(AssetEntity a, AssetEntity b) {
+  final bTime = b.createDateSecond ?? b.modifiedDateSecond ?? 0;
+  final aTime = a.createDateSecond ?? a.modifiedDateSecond ?? 0;
+  final byTime = bTime.compareTo(aTime);
+  if (byTime != 0) {
+    return byTime;
+  }
+  return b.id.compareTo(a.id);
+}
+
+int _selectedMaxSelectionForAssets(List<AssetEntity> assets) {
+  return assets.any(_assetIsVideo) ? 1 : _mediaMaxImageSelection;
 }
 
 int _mediaGridColumns(BuildContext context, double width) {

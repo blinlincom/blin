@@ -22,6 +22,7 @@ class RealtimeNotificationPayload {
 
   bool get isCall => type == 'call';
   bool get isMessage => type == 'message';
+  bool get isFriendRequest => type == 'friend_request';
 
   factory RealtimeNotificationPayload.fromMap(Map<Object?, Object?> map) {
     return RealtimeNotificationPayload(
@@ -161,6 +162,21 @@ class RealtimeNotificationBridge {
       'channel_id': channelId,
       'channel_type': channelType,
       'client_msg_no': clientMsgNo,
+      'title': title,
+      'text': text,
+    });
+  }
+
+  static Future<void> showFriendRequestNotification({
+    required String applyId,
+    required String title,
+    required String text,
+  }) async {
+    if (!Platform.isAndroid || applyId.isEmpty) {
+      return;
+    }
+    await _invoke('showFriendRequestNotification', {
+      'apply_id': applyId,
       'title': title,
       'text': text,
     });

@@ -61,6 +61,8 @@ class BusinessImService extends ChangeNotifier {
       StreamController<BusinessImPresenceEvent>.broadcast();
   final StreamController<BusinessImCallEvent> _callEvents =
       StreamController<BusinessImCallEvent>.broadcast();
+  final StreamController<BusinessImFriendEvent> _friendEvents =
+      StreamController<BusinessImFriendEvent>.broadcast();
 
   UserSession? _session;
   String _device = '';
@@ -116,6 +118,7 @@ class BusinessImService extends ChangeNotifier {
   Stream<BusinessImMessageEvent> get messageEvents => _messageEvents.stream;
   Stream<BusinessImPresenceEvent> get presenceEvents => _presenceEvents.stream;
   Stream<BusinessImCallEvent> get callEvents => _callEvents.stream;
+  Stream<BusinessImFriendEvent> get friendEvents => _friendEvents.stream;
   bool get isStarted => _started;
   String get statusText => _statusText;
   String? get lastError => _lastError;
@@ -2334,6 +2337,8 @@ class BusinessImService extends ChangeNotifier {
             contentType != ChatContentTypes.gif &&
             contentType != ChatContentTypes.sticker &&
             contentType != ChatContentTypes.emoji &&
+            contentType != ChatContentTypes.voice &&
+            contentType != ChatContentTypes.file &&
             contentType != ChatContentTypes.video)) {
       return null;
     }
@@ -4798,20 +4803,8 @@ class BusinessImService extends ChangeNotifier {
       );
       return true;
     }
-    if (cmd == 'friend_deleted') {
-      final friendId = _value(payload, ['friend_id', 'target_user_id']);
-      if (friendId.isNotEmpty) {
-        _cache.removeFriend(uid: chat.uid, friendId: friendId);
-      }
-      AppLogger.info(
-        'im',
-        'friend delete command handled without clearing chat history',
-        data: {
-          'friend_id': friendId,
-          'channel_id': channelId,
-          'channel_type': channelType,
-        },
-      );
+    if (_isFriendCommand(cmd)) {
+      _handleFriendCommandPayload(payload, channelId, channelType);
       return true;
     }
     if (_isActionReceiptCommand(cmd)) {
@@ -4878,6 +4871,78 @@ class BusinessImService extends ChangeNotifier {
     return normalized == 'read_receipt' ||
         normalized == 'message_read' ||
         normalized == 'message_read_receipt';
+  }
+
+  bool _isFriendCommand(String cmd) {
+    final normalized = cmd.toLowerCase();
+    return normalized == 'friend_apply' ||
+        normalized == 'friend_apply_created' ||
+        normalized == 'friend_accepted' ||
+        normalized == 'friend_apply_accepted' ||
+        normalized == 'friend_rejected' ||
+        normalized == 'friend_apply_rejected' ||
+        normalized == 'friend_deleted';
+  }
+
+  void _handleFriendCommandPayload(
+    Map<String, Object?> payload,
+    String channelId,
+    int channelType,
+  ) {
+    final chat = _requireChat();
+    final rawCmd = _value(payload, ['cmd']);
+    final event = _normalizeFriendCommand(rawCmd);
+    final detail = _asMap(payload['friend']);
+    final friendId = _value(detail, [
+      'friend_id',
+      'target_user_id',
+      'user_id',
+      'userid',
+    ], fallback: _value(payload, ['friend_id', 'target_user_id']));
+    if (event == 'friend_deleted' && friendId.isNotEmpty) {
+      _cache.removeFriend(uid: chat.uid, friendId: friendId);
+    }
+    final normalizedPayload = <String, Object?>{
+      ...payload,
+      'event': event,
+      'raw_cmd': rawCmd,
+      'friend': detail,
+      if (friendId.isNotEmpty) 'friend_id': friendId,
+      'channel_id': channelId,
+      'channel_type': channelType,
+    };
+    if (!_friendEvents.isClosed) {
+      _friendEvents.add(
+        BusinessImFriendEvent(
+          source: 'gateway_cmd',
+          event: event,
+          payload: normalizedPayload,
+        ),
+      );
+    }
+    AppLogger.info(
+      'im',
+      'friend command handled',
+      data: {
+        'event': event,
+        'raw_cmd': rawCmd,
+        'apply_id': _value(detail, ['apply_id', 'id']),
+        'friend_id': friendId,
+        'channel_id': channelId,
+        'channel_type': channelType,
+      },
+    );
+    notifyListeners();
+  }
+
+  String _normalizeFriendCommand(String cmd) {
+    final normalized = cmd.toLowerCase();
+    return switch (normalized) {
+      'friend_apply' => 'friend_apply_created',
+      'friend_accepted' => 'friend_apply_accepted',
+      'friend_rejected' => 'friend_apply_rejected',
+      _ => normalized,
+    };
   }
 
   bool _isActionReceiptCommand(String cmd) {
@@ -6875,6 +6940,12 @@ class BusinessImService extends ChangeNotifier {
     Map<String, Object?> payload,
   ) {
     final normalized = Map<String, Object?>.from(payload);
+    if (contentType == ChatContentTypes.image ||
+        contentType == ChatContentTypes.video ||
+        contentType == ChatContentTypes.voice ||
+        contentType == ChatContentTypes.file) {
+      return _normalizeOutgoingMediaPayload(contentType, normalized);
+    }
     if (contentType != ChatContentTypes.emoji &&
         contentType != ChatContentTypes.gif &&
         contentType != ChatContentTypes.sticker) {
@@ -6949,6 +7020,77 @@ class BusinessImService extends ChangeNotifier {
     nextMedia.putIfAbsent('pack_id', () => _value(normalized, ['pack_id']));
     nextMedia.putIfAbsent('format', () => _value(normalized, ['format']));
     normalized['media'] = nextMedia;
+    return normalized;
+  }
+
+  Map<String, Object?> _normalizeOutgoingMediaPayload(
+    String contentType,
+    Map<String, Object?> payload,
+  ) {
+    final normalized = Map<String, Object?>.from(payload);
+    final media = Map<String, Object?>.from(_asMap(normalized['media']));
+    for (final key in const [
+      'url',
+      'file_path',
+      'name',
+      'mime',
+      'size',
+      'width',
+      'height',
+      'duration',
+      'cover_url',
+      'voice_url',
+      'audio_url',
+      'video_url',
+      'file_url',
+    ]) {
+      final value = _value(normalized, [key], fallback: _value(media, [key]));
+      if (value.isNotEmpty) {
+        normalized[key] = value;
+        media[key] = value;
+      }
+    }
+    if (contentType == ChatContentTypes.voice) {
+      final filePath = _value(normalized, ['file_path']);
+      final voiceUrl = _value(normalized, [
+        'voice_url',
+        'audio_url',
+        'url',
+      ], fallback: filePath);
+      if (voiceUrl.isNotEmpty) {
+        normalized['voice_url'] = voiceUrl;
+        normalized['audio_url'] = voiceUrl;
+        media['voice_url'] = voiceUrl;
+        media['audio_url'] = voiceUrl;
+        media['url'] = _value(normalized, ['url'], fallback: voiceUrl);
+      }
+      final mime = _value(normalized, [
+        'mime',
+      ], fallback: _value(media, ['mime']));
+      if (mime.isEmpty || mime == 'audio/*') {
+        normalized['mime'] = 'audio/mp4';
+        media['mime'] = 'audio/mp4';
+      }
+      normalized['content'] = _value(normalized, ['content'], fallback: '[语音]');
+    }
+    if (contentType == ChatContentTypes.video) {
+      final videoUrl = _value(normalized, [
+        'video_url',
+        'url',
+      ], fallback: _value(normalized, ['file_path']));
+      if (videoUrl.isNotEmpty) {
+        normalized['video_url'] = videoUrl;
+        media['video_url'] = videoUrl;
+      }
+      normalized['content'] = _value(normalized, ['content'], fallback: '[视频]');
+    }
+    if (contentType == ChatContentTypes.image) {
+      normalized['content'] = _value(normalized, ['content'], fallback: '[图片]');
+    }
+    if (contentType == ChatContentTypes.file) {
+      normalized['content'] = _value(normalized, ['content'], fallback: '[文件]');
+    }
+    normalized['media'] = media;
     return normalized;
   }
 
@@ -7661,6 +7803,7 @@ class BusinessImService extends ChangeNotifier {
     unawaited(_messageEvents.close());
     unawaited(_presenceEvents.close());
     unawaited(_callEvents.close());
+    unawaited(_friendEvents.close());
     super.dispose();
   }
 }
@@ -7670,6 +7813,18 @@ class BusinessImCallEvent {
 
   final String source;
   final LiveKitCallEvent event;
+}
+
+class BusinessImFriendEvent {
+  const BusinessImFriendEvent({
+    required this.source,
+    required this.event,
+    required this.payload,
+  });
+
+  final String source;
+  final String event;
+  final Map<String, Object?> payload;
 }
 
 class BusinessImMessageEvent {

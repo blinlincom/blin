@@ -30,8 +30,10 @@ class RealtimeEventCoordinator {
   final Queue<RealtimeNotificationPayload> _pendingPayloads =
       Queue<RealtimeNotificationPayload>();
   final Set<String> _notifiedMessageKeys = <String>{};
+  final Set<String> _notifiedFriendApplyIds = <String>{};
   StreamSubscription<BusinessImCallEvent>? _callSub;
   StreamSubscription<BusinessImMessageEvent>? _messageSub;
+  StreamSubscription<BusinessImFriendEvent>? _friendSub;
   StreamSubscription<RealtimeNotificationPayload>? _tapSub;
   AppLifecycleState _lifecycleState = AppLifecycleState.resumed;
   bool _handlingPayload = false;
@@ -43,6 +45,7 @@ class RealtimeEventCoordinator {
     RealtimeNotificationBridge.configure();
     _callSub = _controller.callEvents.listen(_onCallEvent);
     _messageSub = _controller.messageEvents.listen(_onMessageEvent);
+    _friendSub = _controller.friendEvents.listen(_onFriendEvent);
     _tapSub = RealtimeNotificationBridge.taps.listen(_enqueuePayload);
     unawaited(_readLaunchPayload());
   }
@@ -51,6 +54,7 @@ class RealtimeEventCoordinator {
     _disposed = true;
     _callSub?.cancel();
     _messageSub?.cancel();
+    _friendSub?.cancel();
     _tapSub?.cancel();
   }
 
@@ -99,6 +103,8 @@ class RealtimeEventCoordinator {
             consumed = await _openCallFromNotification(payload.callId);
           } else if (payload.isMessage) {
             consumed = await _openMessageFromNotification(payload);
+          } else if (payload.isFriendRequest) {
+            consumed = await _openFriendRequestsFromNotification();
           }
           if (!consumed) {
             _pendingPayloads.addFirst(payload);
@@ -384,6 +390,30 @@ class RealtimeEventCoordinator {
     );
   }
 
+  void _onFriendEvent(BusinessImFriendEvent event) {
+    if (event.event != 'friend_apply_created' || _isForeground) {
+      return;
+    }
+    final detail = _asObjectMap(event.payload['friend']);
+    final applyId = _stringValue(detail, ['apply_id', 'id']);
+    if (applyId.isEmpty || !_notifiedFriendApplyIds.add(applyId)) {
+      return;
+    }
+    final title = _friendRequestTitle(event.payload, detail);
+    unawaited(
+      RealtimeNotificationBridge.showFriendRequestNotification(
+        applyId: applyId,
+        title: title,
+        text: '请求添加你为联系人',
+      ),
+    );
+    AppLogger.info(
+      'notification',
+      'friend request notification shown',
+      data: {'apply_id': applyId, 'title': title},
+    );
+  }
+
   bool _shouldNotifyMessage(BusinessImMessageEvent event) {
     if (_isForeground) {
       return false;
@@ -441,6 +471,20 @@ class RealtimeEventCoordinator {
     return true;
   }
 
+  Future<bool> _openFriendRequestsFromNotification() async {
+    final navigator = _navigatorKey.currentState;
+    if (navigator == null) {
+      return false;
+    }
+    navigator.push(
+      MaterialPageRoute<void>(
+        builder: (_) => FriendRequestsPage(controller: _controller),
+      ),
+    );
+    _controller.markFriendApplicationsRead();
+    return true;
+  }
+
   String _conversationTitle(BusinessImMessageEvent event) {
     final conversationTitle = _titleFromMap(event.conversation);
     if (conversationTitle.isNotEmpty) {
@@ -452,6 +496,26 @@ class RealtimeEventCoordinator {
       return fromUserTitle;
     }
     return event.channelType == _groupChannelType ? '群聊' : '新消息';
+  }
+
+  String _friendRequestTitle(
+    Map<String, Object?> payload,
+    Map<String, Object?> detail,
+  ) {
+    final fromUser = _asObjectMap(detail['from_user']);
+    final name = _titleFromMap(fromUser);
+    if (name.isNotEmpty) {
+      return name;
+    }
+    final senderName = _stringValue(payload, [
+      'sender_nickname',
+      'sender_name',
+      'sender_username',
+    ]);
+    if (senderName.isNotEmpty) {
+      return senderName;
+    }
+    return '新的朋友';
   }
 
   String _titleForChannel(String channelId, int channelType) {

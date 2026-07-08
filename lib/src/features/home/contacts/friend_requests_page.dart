@@ -14,6 +14,31 @@ class _FriendRequestsPageState extends State<FriendRequestsPage> {
   var _version = 0;
   String _error = '';
   String _message = '';
+  String _handlingApplyId = '';
+
+  @override
+  void initState() {
+    super.initState();
+    widget.controller.addListener(_onControllerChanged);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        widget.controller.markFriendApplicationsRead();
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    widget.controller.removeListener(_onControllerChanged);
+    super.dispose();
+  }
+
+  void _onControllerChanged() {
+    if (!mounted) {
+      return;
+    }
+    setState(() {});
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -54,38 +79,13 @@ class _FriendRequestsPageState extends State<FriendRequestsPage> {
             _ResultBlock(text: _message),
             _ErrorBlock(text: _error),
             Expanded(
-              child: FutureBuilder<Map<String, Object?>>(
+              child: _FriendRequestList(
                 key: ValueKey('$_type-$_version'),
-                future: widget.controller.friendApplyList(type: _type),
-                builder: (context, snapshot) {
-                  if (snapshot.connectionState != ConnectionState.done) {
-                    return const Center(child: CircularProgressIndicator());
-                  }
-                  if (snapshot.hasError) {
-                    return _ErrorState(text: snapshot.error.toString());
-                  }
-                  final items = _listFromResult(snapshot.data ?? const {});
-                  if (items.isEmpty) {
-                    return const _EmptyState(text: '暂无申请');
-                  }
-                  return ListView.builder(
-                    itemCount: items.length,
-                    itemBuilder: (context, index) {
-                      final item = items[index];
-                      final applyId = _value(item, ['apply_id', 'id']);
-                      final title = _requestTitle(item, _type);
-                      final status = _requestStatus(item);
-                      return _FriendRequestTile(
-                        title: title,
-                        remark: _value(item, ['remark', 'handle_msg']),
-                        status: status,
-                        pending: _type == 'in' && _requestPending(item),
-                        onAccept: () => _handle(applyId, true),
-                        onReject: () => _handle(applyId, false),
-                      );
-                    },
-                  );
-                },
+                controller: widget.controller,
+                type: _type,
+                handlingApplyId: _handlingApplyId,
+                onAccept: (applyId) => _handle(applyId, true),
+                onReject: (applyId) => _handle(applyId, false),
               ),
             ),
           ],
@@ -99,6 +99,13 @@ class _FriendRequestsPageState extends State<FriendRequestsPage> {
       setState(() => _error = '申请信息为空');
       return;
     }
+    if (_handlingApplyId.isNotEmpty) {
+      return;
+    }
+    setState(() {
+      _handlingApplyId = applyId;
+      _error = '';
+    });
     try {
       final result = await widget.controller.handleFriendApply(
         applyId: applyId,
@@ -111,7 +118,105 @@ class _FriendRequestsPageState extends State<FriendRequestsPage> {
       });
     } catch (error) {
       setState(() => _error = error.toString());
+    } finally {
+      if (mounted) {
+        setState(() => _handlingApplyId = '');
+      }
     }
+  }
+}
+
+class _FriendRequestList extends StatefulWidget {
+  const _FriendRequestList({
+    required this.controller,
+    required this.type,
+    required this.handlingApplyId,
+    required this.onAccept,
+    required this.onReject,
+    super.key,
+  });
+
+  final SessionController controller;
+  final String type;
+  final String handlingApplyId;
+  final ValueChanged<String> onAccept;
+  final ValueChanged<String> onReject;
+
+  @override
+  State<_FriendRequestList> createState() => _FriendRequestListState();
+}
+
+class _FriendRequestListState extends State<_FriendRequestList> {
+  late Future<Map<String, Object?>> _future;
+
+  @override
+  void initState() {
+    super.initState();
+    _future = widget.controller.friendApplyList(type: widget.type);
+  }
+
+  @override
+  void didUpdateWidget(_FriendRequestList oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.type != widget.type) {
+      _future = widget.controller.friendApplyList(type: widget.type);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cached = widget.controller.cachedFriendApplications(
+      type: widget.type,
+    );
+    return FutureBuilder<Map<String, Object?>>(
+      future: _future,
+      builder: (context, snapshot) {
+        final items =
+            snapshot.connectionState == ConnectionState.done && snapshot.hasData
+            ? _listFromResult(snapshot.data ?? const {})
+            : cached;
+        if (snapshot.connectionState != ConnectionState.done && items.isEmpty) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        if (snapshot.hasError && items.isEmpty) {
+          return _ErrorState(text: snapshot.error.toString(), onRetry: _reload);
+        }
+        if (items.isEmpty) {
+          return const _EmptyState(text: '暂无申请');
+        }
+        return RefreshIndicator(
+          onRefresh: () async => _reload(),
+          child: ListView.builder(
+            physics: const AlwaysScrollableScrollPhysics(
+              parent: ClampingScrollPhysics(),
+            ),
+            itemCount: items.length,
+            itemBuilder: (context, index) {
+              final item = items[index];
+              final applyId = _value(item, ['apply_id', 'id']);
+              final title = _requestTitle(item, widget.type);
+              final status = _requestStatus(item);
+              final busy = widget.handlingApplyId == applyId;
+              return _FriendRequestTile(
+                title: title,
+                remark: _value(item, ['remark', 'handle_msg']),
+                status: status,
+                pending: widget.type == 'in' && _requestPending(item),
+                busy: busy,
+                onAccept: busy ? null : () => widget.onAccept(applyId),
+                onReject: busy ? null : () => widget.onReject(applyId),
+              );
+            },
+          ),
+        );
+      },
+    );
+  }
+
+  void _reload() {
+    setState(() {
+      _future = widget.controller.friendApplyList(type: widget.type);
+    });
   }
 }
 
@@ -161,14 +266,16 @@ class _FriendRequestTile extends StatelessWidget {
     required this.pending,
     required this.onAccept,
     required this.onReject,
+    this.busy = false,
   });
 
   final String title;
   final String remark;
   final String status;
   final bool pending;
-  final VoidCallback onAccept;
-  final VoidCallback onReject;
+  final bool busy;
+  final VoidCallback? onAccept;
+  final VoidCallback? onReject;
 
   @override
   Widget build(BuildContext context) {
@@ -227,7 +334,13 @@ class _FriendRequestTile extends StatelessWidget {
                   minimumSize: const Size(58, 34),
                   padding: const EdgeInsets.symmetric(horizontal: 10),
                 ),
-                child: const Text('同意'),
+                child: busy
+                    ? const SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Text('同意'),
               ),
             ],
           ],

@@ -53,6 +53,16 @@ class RealtimeNotificationBridge(private val activity: Activity) {
                 }.onSuccess(result::success).onFailure {
                     result.error("SHOW_MESSAGE_NOTIFICATION_ERROR", it.message, null)
                 }
+                "showFriendRequestNotification" -> runCatching {
+                    showFriendRequestNotification(
+                        applyId = call.argument<String>("apply_id").orEmpty(),
+                        title = call.argument<String>("title").orEmpty(),
+                        text = call.argument<String>("text").orEmpty()
+                    )
+                    true
+                }.onSuccess(result::success).onFailure {
+                    result.error("SHOW_FRIEND_REQUEST_NOTIFICATION_ERROR", it.message, null)
+                }
                 "cancelMessageNotification" -> runCatching {
                     cancelMessageNotification(
                         channelId = call.argument<String>("channel_id").orEmpty(),
@@ -182,6 +192,42 @@ class RealtimeNotificationBridge(private val activity: Activity) {
         manager.cancel(messageNotificationId(channelId, channelType))
     }
 
+    private fun showFriendRequestNotification(applyId: String, title: String, text: String) {
+        if (applyId.isBlank() || !notificationsEnabled()) {
+            return
+        }
+        val safeTitle = title.ifBlank { "新的朋友" }
+        val safeText = text.ifBlank { "请求添加你为联系人" }
+        val intent = payloadIntent(
+            type = TYPE_FRIEND_REQUEST,
+            callId = 0,
+            channelId = "",
+            channelType = 0,
+            clientMsgNo = applyId
+        )
+        val notificationId = friendRequestNotificationId(applyId)
+        val pendingIntent = PendingIntent.getActivity(
+            activity,
+            FRIEND_REQUEST_BASE + abs(notificationId),
+            intent,
+            pendingIntentFlags()
+        )
+        val builder = notificationBuilder(MESSAGE_CHANNEL_ID)
+            .setSmallIcon(activity.applicationInfo.icon)
+            .setContentTitle(safeTitle)
+            .setContentText(safeText)
+            .setStyle(Notification.BigTextStyle().bigText(safeText))
+            .setCategory(Notification.CATEGORY_MESSAGE)
+            .setPriority(Notification.PRIORITY_HIGH)
+            .setAutoCancel(true)
+            .setShowWhen(true)
+            .setContentIntent(pendingIntent)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            builder.setVisibility(Notification.VISIBILITY_PRIVATE)
+        }
+        manager.notify(notificationId, builder.build())
+    }
+
     private fun payloadIntent(
         type: String,
         callId: Int,
@@ -292,6 +338,10 @@ class RealtimeNotificationBridge(private val activity: Activity) {
         return MESSAGE_NOTIFICATION_BASE + abs("$channelType:$channelId".hashCode() % 100000)
     }
 
+    private fun friendRequestNotificationId(applyId: String): Int {
+        return FRIEND_REQUEST_NOTIFICATION_BASE + abs(applyId.hashCode() % 100000)
+    }
+
     companion object {
         private const val REQUEST_POST_NOTIFICATIONS = 29001
         private const val CALL_CHANNEL_ID = "bim_realtime_calls"
@@ -299,6 +349,7 @@ class RealtimeNotificationBridge(private val activity: Activity) {
         private const val ACTION_NOTIFICATION_TAP = "bimotc.com.ACTION_NOTIFICATION_TAP"
         private const val TYPE_CALL = "call"
         private const val TYPE_MESSAGE = "message"
+        private const val TYPE_FRIEND_REQUEST = "friend_request"
         private const val EXTRA_TYPE = "type"
         private const val EXTRA_CALL_ID = "call_id"
         private const val EXTRA_CHANNEL_ID = "channel_id"
@@ -306,7 +357,9 @@ class RealtimeNotificationBridge(private val activity: Activity) {
         private const val EXTRA_CLIENT_MSG_NO = "client_msg_no"
         private const val CALL_NOTIFICATION_BASE = 910000
         private const val MESSAGE_NOTIFICATION_BASE = 920000
+        private const val FRIEND_REQUEST_NOTIFICATION_BASE = 925000
         private const val CALL_REQUEST_BASE = 930000
         private const val MESSAGE_REQUEST_BASE = 940000
+        private const val FRIEND_REQUEST_BASE = 950000
     }
 }

@@ -2190,12 +2190,45 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       return;
     }
     final payloads = _mediaPayloadBatch(data);
+    unawaited(_sendMediaPayloads(contentType, payloads));
+  }
+
+  Future<void> _sendMediaPayloads(
+    String contentType,
+    List<Map<String, String>> payloads,
+  ) async {
+    // Let the picker route finish its pop animation before resolving large
+    // photo/video files. This keeps the chat page responsive after tapping send.
+    await Future<void>.delayed(const Duration(milliseconds: 120));
     for (final payload in payloads) {
       if (!mounted) {
         return;
       }
-      await _sendMediaPayload(contentType, payload);
+      final payloadContentType = _payloadContentType(contentType, payload);
+      try {
+        await _sendMediaPayload(payloadContentType, payload);
+      } catch (error, stackTrace) {
+        AppLogger.error(
+          'ui',
+          'media payload send failed',
+          error: error,
+          stackTrace: stackTrace,
+          data: {
+            'content_type': payloadContentType,
+            'asset_id': payload['asset_id'] ?? '',
+            'file_path': payload['file_path'] ?? '',
+          },
+        );
+      }
     }
+  }
+
+  String _payloadContentType(String fallback, Map<String, String> payload) {
+    final value = (payload['content_type'] ?? '').trim();
+    if (value == ChatContentTypes.image || value == ChatContentTypes.video) {
+      return value;
+    }
+    return fallback;
   }
 
   Future<void> _handleKeyboardInsertedContent(
@@ -2340,10 +2373,13 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     String contentType,
     Map<String, String> data,
   ) async {
-    final url = data['url'] ?? '';
-    final filePath = data['file_path'] ?? '';
-    final params = Map<String, Object?>.from(data)..remove('url');
-    final mediaJson = data['media_json'];
+    final resolvedData = await _resolveMediaPayload(contentType, data);
+    final url = resolvedData['url'] ?? '';
+    final filePath = resolvedData['file_path'] ?? '';
+    final params = Map<String, Object?>.from(resolvedData)
+      ..remove('url')
+      ..remove('asset_id');
+    final mediaJson = resolvedData['media_json'];
     if (mediaJson != null && mediaJson.isNotEmpty) {
       try {
         final decoded = jsonDecode(mediaJson);
@@ -2401,6 +2437,47 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         });
       },
     );
+  }
+
+  Future<Map<String, String>> _resolveMediaPayload(
+    String contentType,
+    Map<String, String> data,
+  ) async {
+    final assetId = (data['asset_id'] ?? '').trim();
+    if (assetId.isEmpty || (data['file_path'] ?? '').isNotEmpty) {
+      return data;
+    }
+    try {
+      final asset = await AssetEntity.fromId(assetId);
+      if (asset == null) {
+        throw const FileSystemException('asset unavailable');
+      }
+      final resolved = await _mediaAssetPayload(asset, contentType);
+      AppLogger.info(
+        'ui',
+        'media asset resolved for send',
+        data: {
+          'content_type': contentType,
+          'asset_id': assetId,
+          'file_path': resolved['file_path'] ?? '',
+          'size': resolved['size'] ?? '',
+          'mime': resolved['mime'] ?? '',
+        },
+      );
+      return <String, String>{...data, ...resolved, 'asset_id': assetId};
+    } catch (error, stackTrace) {
+      AppLogger.error(
+        'ui',
+        'media asset resolve failed',
+        error: error,
+        stackTrace: stackTrace,
+        data: {'content_type': contentType, 'asset_id': assetId},
+      );
+      if (mounted) {
+        setState(() => _error = '媒体文件读取失败');
+      }
+      rethrow;
+    }
   }
 
   Future<void> _sendEmoji(Map<String, String> data) async {
@@ -2752,9 +2829,20 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     final params = <String, Object?>{
       'duration': durationSeconds.toString(),
       'name': _fileName(filePath),
-      'mime': _mimeFromPath(filePath, ChatContentTypes.voice),
+      'mime': _voiceMimeFromPath(filePath),
       'size': size.toString(),
       'file_path': filePath,
+      'voice_url': filePath,
+      'audio_url': filePath,
+      'media': {
+        'duration': durationSeconds,
+        'name': _fileName(filePath),
+        'mime': _voiceMimeFromPath(filePath),
+        'size': size,
+        'file_path': filePath,
+        'voice_url': filePath,
+        'audio_url': filePath,
+      },
     };
     if (_replyQuote.isNotEmpty) {
       params['quote'] = Map<String, Object?>.from(_replyQuote);
@@ -2794,6 +2882,11 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         });
       },
     );
+  }
+
+  String _voiceMimeFromPath(String filePath) {
+    final mime = _mimeFromPath(filePath, ChatContentTypes.voice);
+    return mime == 'audio/*' ? 'audio/mp4' : mime;
   }
 
   Future<Map<String, String>?> _selectMediaPayload(String contentType) {

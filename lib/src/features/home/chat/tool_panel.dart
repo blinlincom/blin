@@ -100,7 +100,7 @@ class _ChatToolsPanelState extends State<_ChatToolsPanel> {
               itemBuilder: (context, pageIndex) {
                 final pageItems = pages[pageIndex];
                 return Padding(
-                  padding: const EdgeInsets.fromLTRB(28, 26, 28, 8),
+                  padding: const EdgeInsets.fromLTRB(28, 22, 28, 8),
                   child: _ToolPageGrid(items: pageItems),
                 );
               },
@@ -167,7 +167,7 @@ class _ToolPageGrid extends StatelessWidget {
               ],
             ),
           ),
-          if (row == 0) const SizedBox(height: 28),
+          if (row == 0) const SizedBox(height: 22),
         ],
       ],
     );
@@ -203,15 +203,15 @@ class _ToolButton extends StatelessWidget {
               color: _surfaceColor,
               borderRadius: BorderRadius.circular(BimRadius.lg),
             ),
-            child: Icon(item.icon, size: 31, color: _textColor),
+            child: Icon(item.icon, size: 24, color: _textColor),
           ),
-          const SizedBox(height: 11),
+          const SizedBox(height: 9),
           Text(
             item.label,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: const TextStyle(
-              fontSize: 14,
+              fontSize: 13,
               color: _secondaryTextColor,
               fontWeight: FontWeight.w500,
               height: 1,

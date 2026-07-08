@@ -35,6 +35,7 @@ class SessionController extends ChangeNotifier {
     _lastImStatusText = _im.statusText;
     _im.addListener(_onImServiceChanged);
     _presenceSub = _im.presenceEvents.listen(_onPresenceEvent);
+    _friendSub = _im.friendEvents.listen(_onFriendEvent);
   }
 
   final ApiClient _api;
@@ -65,6 +66,9 @@ class SessionController extends ChangeNotifier {
   DateTime? _groupCacheAt;
   Future<List<Map<String, Object?>>>? _friendRequest;
   Future<List<Map<String, Object?>>>? _groupRequest;
+  List<Map<String, Object?>> _friendApplyInCache = const [];
+  List<Map<String, Object?>> _friendApplyOutCache = const [];
+  int _friendApplyUnreadCount = 0;
   final Map<String, Map<String, Object?>> _friendStatusCache =
       <String, Map<String, Object?>>{};
   final Map<String, DateTime> _friendStatusCacheAt = <String, DateTime>{};
@@ -73,6 +77,7 @@ class SessionController extends ChangeNotifier {
   final List<BusinessImPresenceEvent> _pendingPresenceEvents =
       <BusinessImPresenceEvent>[];
   StreamSubscription<BusinessImPresenceEvent>? _presenceSub;
+  StreamSubscription<BusinessImFriendEvent>? _friendSub;
   bool _backgroundReceiveProtectionEnabled = true;
   BackgroundReceiveStatus _backgroundReceiveStatus =
       BackgroundReceiveStatus.unsupported('unknown', '尚未检测');
@@ -106,9 +111,11 @@ class SessionController extends ChangeNotifier {
   BusinessImInitialSyncState get initialHistorySyncState =>
       _im.initialHistorySyncState;
   bool get hasLoadedFriends => _friendCacheAt != null;
+  int get friendApplyUnreadCount => _friendApplyUnreadCount;
   Stream<BusinessImMessageEvent> get messageEvents => _im.messageEvents;
   Stream<BusinessImPresenceEvent> get presenceEvents => _im.presenceEvents;
   Stream<BusinessImCallEvent> get callEvents => _im.callEvents;
+  Stream<BusinessImFriendEvent> get friendEvents => _im.friendEvents;
 
   List<Map<String, Object?>> cachedConversations() {
     final memoryCache = _im.cachedConversations();
@@ -129,6 +136,18 @@ class SessionController extends ChangeNotifier {
     _backgroundReceiveProtectionEnabled = _store
         .readBackgroundReceiveProtectionEnabled();
     _lastSessionVerifiedAt = _store.readSessionVerifiedAt();
+    final chatUid = _session?.chat?.uid ?? '';
+    if (chatUid.isNotEmpty) {
+      _friendApplyUnreadCount = _cache.readFriendApplyUnread(chatUid);
+      _friendApplyInCache = _cache.readFriendApplyList(
+        uid: chatUid,
+        type: 'in',
+      );
+      _friendApplyOutCache = _cache.readFriendApplyList(
+        uid: chatUid,
+        type: 'out',
+      );
+    }
     AppLogger.info(
       'session',
       'launch cache hydrated',
@@ -137,6 +156,7 @@ class SessionController extends ChangeNotifier {
         'device': _device,
         'background_receive_enabled': _backgroundReceiveProtectionEnabled,
         'last_session_verified_at': _lastSessionVerifiedAt,
+        'friend_apply_unread': _friendApplyUnreadCount,
       },
     );
   }
@@ -154,6 +174,33 @@ class SessionController extends ChangeNotifier {
     }
     _friendCache = _hydrateFriendList(_cache.readFriendList(uid), uid: uid);
     return _copyList(_friendCache);
+  }
+
+  List<Map<String, Object?>> cachedFriendApplications({
+    String type = 'in',
+    bool allowDisk = true,
+  }) {
+    final normalized = _friendApplyType(type);
+    final memory = normalized == 'out'
+        ? _friendApplyOutCache
+        : _friendApplyInCache;
+    if (memory.isNotEmpty) {
+      return _copyList(memory);
+    }
+    if (!allowDisk) {
+      return const [];
+    }
+    final uid = _chatUid();
+    if (uid.isEmpty) {
+      return const [];
+    }
+    final cached = _cache.readFriendApplyList(uid: uid, type: normalized);
+    if (normalized == 'out') {
+      _friendApplyOutCache = cached;
+    } else {
+      _friendApplyInCache = cached;
+    }
+    return _copyList(cached);
   }
 
   List<Map<String, Object?>> cachedGroups() {
@@ -1754,15 +1801,26 @@ class SessionController extends ChangeNotifier {
     required String applyId,
     required bool accept,
     String handleMsg = '',
-  }) {
+  }) async {
     final current = _requireSession();
-    return _chat.friendHandle(
+    final result = await _chat.friendHandle(
       session: current,
       device: _device,
       applyId: applyId,
       accept: accept,
       handleMsg: handleMsg,
     );
+    _upsertFriendApplyCache(
+      _friendApplyFromResult(result),
+      type: 'in',
+      statusOverride: accept ? 1 : 2,
+    );
+    if (accept) {
+      await loadFriends(forceRefresh: true);
+    }
+    _clearFriendApplyUnread();
+    notifyListeners();
+    return result;
   }
 
   Future<Map<String, Object?>> friendApplyList({
@@ -1770,16 +1828,26 @@ class SessionController extends ChangeNotifier {
     String status = '',
     int page = 1,
     int limit = 20,
-  }) {
+  }) async {
     final current = _requireSession();
-    return _chat.friendApplyList(
+    final normalized = _friendApplyType(type);
+    final result = await _chat.friendApplyList(
       session: current,
       device: _device,
-      type: type,
+      type: normalized,
       status: status,
       page: page,
       limit: limit,
     );
+    final items = _mapListFromPayload(result);
+    if (status.isEmpty && page == 1) {
+      _writeFriendApplyCache(normalized, items);
+      if (normalized == 'in') {
+        _syncFriendApplyUnreadWithPending(items);
+      }
+      notifyListeners();
+    }
+    return result;
   }
 
   Future<Map<String, Object?>> addGroupMembers({
@@ -2318,7 +2386,12 @@ class SessionController extends ChangeNotifier {
 
   Future<void> _warmBasicData() async {
     try {
-      await Future.wait([loadFriends(), loadGroups()]);
+      await Future.wait([
+        loadFriends(),
+        loadGroups(),
+        friendApplyList(type: 'in'),
+        friendApplyList(type: 'out'),
+      ]);
       AppLogger.info('session', 'basic data warmup success');
     } catch (error, stackTrace) {
       AppLogger.warn(
@@ -2392,6 +2465,281 @@ class SessionController extends ChangeNotifier {
         .whereType<Map>()
         .map((item) => item.cast<String, Object?>())
         .toList(growable: false);
+  }
+
+  Map<String, Object?> _friendApplyFromResult(Map<String, Object?> result) {
+    final direct = _normalizeMap(result['apply']);
+    if (direct.isNotEmpty) {
+      return direct;
+    }
+    final data = _normalizeMap(result['data']);
+    final nested = _normalizeMap(data['apply']);
+    if (nested.isNotEmpty) {
+      return nested;
+    }
+    return const <String, Object?>{};
+  }
+
+  Map<String, Object?> _normalizeMap(Object? value) {
+    if (value is Map<String, Object?>) {
+      return Map<String, Object?>.from(value);
+    }
+    if (value is Map) {
+      return value.map((key, item) => MapEntry(key.toString(), item));
+    }
+    return const <String, Object?>{};
+  }
+
+  String _friendApplyType(String type) {
+    return type == 'out' ? 'out' : 'in';
+  }
+
+  void _writeFriendApplyCache(
+    String type,
+    List<Map<String, Object?>> applications,
+  ) {
+    final uid = _chatUid();
+    if (uid.isEmpty) {
+      return;
+    }
+    final normalized = _friendApplyType(type);
+    final next = _dedupeFriendApplications(applications);
+    if (normalized == 'out') {
+      _friendApplyOutCache = next;
+    } else {
+      _friendApplyInCache = next;
+    }
+    _cache.writeFriendApplyList(uid: uid, type: normalized, applications: next);
+  }
+
+  void _upsertFriendApplyCache(
+    Map<String, Object?> application, {
+    required String type,
+    int? statusOverride,
+  }) {
+    if (application.isEmpty) {
+      return;
+    }
+    final normalized = _friendApplyType(type);
+    final nextItem = Map<String, Object?>.from(application);
+    if (statusOverride != null) {
+      nextItem['status'] = statusOverride;
+    }
+    final list = normalized == 'out'
+        ? List<Map<String, Object?>>.from(_friendApplyOutCache)
+        : List<Map<String, Object?>>.from(_friendApplyInCache);
+    final id = _friendApplyId(nextItem);
+    final index = id.isEmpty
+        ? -1
+        : list.indexWhere((item) => _friendApplyId(item) == id);
+    if (index >= 0) {
+      list[index] = {...list[index], ...nextItem};
+    } else {
+      list.insert(0, nextItem);
+    }
+    _writeFriendApplyCache(normalized, list);
+  }
+
+  List<Map<String, Object?>> _dedupeFriendApplications(
+    List<Map<String, Object?>> applications,
+  ) {
+    final seen = <String>{};
+    final next = <Map<String, Object?>>[];
+    for (final item in applications) {
+      final normalized = Map<String, Object?>.from(item);
+      final id = _friendApplyId(normalized);
+      final key = id.isNotEmpty
+          ? id
+          : '${normalized['from_user_id']}:${normalized['to_user_id']}:${normalized['create_time']}';
+      if (!seen.add(key)) {
+        continue;
+      }
+      next.add(normalized);
+    }
+    return next;
+  }
+
+  String _friendApplyId(Map<String, Object?> item) {
+    for (final key in ['apply_id', 'id']) {
+      final value = item[key]?.toString() ?? '';
+      if (value.trim().isNotEmpty) {
+        return value.trim();
+      }
+    }
+    return '';
+  }
+
+  bool _friendApplyPending(Map<String, Object?> item) {
+    final status = item['status']?.toString() ?? '';
+    return status.isEmpty || status == '0' || status == 'pending';
+  }
+
+  void _syncFriendApplyUnreadWithPending(
+    List<Map<String, Object?>> applications,
+  ) {
+    final uid = _chatUid();
+    if (uid.isEmpty) {
+      return;
+    }
+    final pendingCount = applications.where(_friendApplyPending).length;
+    if (_friendApplyUnreadCount > pendingCount) {
+      _friendApplyUnreadCount = pendingCount;
+      _cache.writeFriendApplyUnread(uid: uid, count: _friendApplyUnreadCount);
+    }
+  }
+
+  void _clearFriendApplyUnread() {
+    final uid = _chatUid();
+    if (uid.isEmpty || _friendApplyUnreadCount == 0) {
+      return;
+    }
+    _friendApplyUnreadCount = 0;
+    _cache.writeFriendApplyUnread(uid: uid, count: 0);
+  }
+
+  void markFriendApplicationsRead() {
+    _clearFriendApplyUnread();
+    notifyListeners();
+  }
+
+  void _onFriendEvent(BusinessImFriendEvent event) {
+    final uid = _chatUid();
+    if (uid.isEmpty) {
+      AppLogger.warn(
+        'session',
+        'friend event ignored without chat uid',
+        data: {'event': event.event, 'payload': event.payload},
+      );
+      return;
+    }
+    final detail = _normalizeMap(event.payload['friend']);
+    final apply = _friendApplyFromFriendEvent(event, detail);
+    final currentUserId = _session?.userId.toString() ?? '';
+    AppLogger.info(
+      'session',
+      'friend event received',
+      data: {
+        'event': event.event,
+        'apply_id': _friendApplyId(apply),
+        'friend_id': event.payload['friend_id']?.toString() ?? '',
+      },
+    );
+    if (event.event == 'friend_apply_created') {
+      final existed =
+          _friendApplyId(apply).isNotEmpty &&
+          _friendApplyInCache.any(
+            (item) => _friendApplyId(item) == _friendApplyId(apply),
+          );
+      _upsertFriendApplyCache(apply, type: 'in', statusOverride: 0);
+      if (_friendApplyId(apply).isNotEmpty && !existed) {
+        _friendApplyUnreadCount += 1;
+        _cache.writeFriendApplyUnread(uid: uid, count: _friendApplyUnreadCount);
+      }
+      notifyListeners();
+      return;
+    }
+    if (event.event == 'friend_apply_accepted' ||
+        event.event == 'friend_apply_rejected') {
+      final accepted = event.event == 'friend_apply_accepted';
+      final type = _friendApplyTypeForEventApply(apply, currentUserId);
+      _upsertFriendApplyCache(
+        apply,
+        type: type,
+        statusOverride: accepted ? 1 : 2,
+      );
+      if (accepted) {
+        _friendCacheAt = null;
+        unawaited(loadFriends(forceRefresh: true));
+      }
+      notifyListeners();
+      return;
+    }
+    if (event.event == 'friend_deleted') {
+      final friendId = event.payload['friend_id']?.toString() ?? '';
+      if (friendId.isNotEmpty) {
+        _cache.removeFriend(uid: uid, friendId: friendId);
+        _friendCache = _hydrateFriendList(_cache.readFriendList(uid), uid: uid);
+        _friendCacheAt = DateTime.now();
+      }
+      notifyListeners();
+    }
+  }
+
+  Map<String, Object?> _friendApplyFromFriendEvent(
+    BusinessImFriendEvent event,
+    Map<String, Object?> detail,
+  ) {
+    final payload = event.payload;
+    final currentUserId = _session?.userId.toString() ?? '';
+    final senderId = payload['sender_id']?.toString() ?? '';
+    final receiverId = payload['receiver_id']?.toString() ?? '';
+    final fromUserId =
+        detail['from_user_id']?.toString().trim().isNotEmpty == true
+        ? detail['from_user_id']?.toString()
+        : senderId;
+    final toUserId = detail['to_user_id']?.toString().trim().isNotEmpty == true
+        ? detail['to_user_id']?.toString()
+        : receiverId;
+    return <String, Object?>{
+      ...detail,
+      if ((detail['id']?.toString() ?? '').isEmpty &&
+          (detail['apply_id']?.toString() ?? '').isNotEmpty)
+        'id': detail['apply_id'],
+      if ((detail['apply_id']?.toString() ?? '').isEmpty &&
+          (detail['id']?.toString() ?? '').isNotEmpty)
+        'apply_id': detail['id'],
+      if ((detail['from_user_id']?.toString() ?? '').isEmpty)
+        'from_user_id': fromUserId,
+      if ((detail['to_user_id']?.toString() ?? '').isEmpty)
+        'to_user_id': toUserId,
+      if ((detail['friend_id']?.toString() ?? '').isEmpty)
+        'friend_id': payload['friend_id']?.toString() ?? senderId,
+      if ((detail['status']?.toString() ?? '').isEmpty)
+        'status': event.event == 'friend_apply_rejected'
+            ? 2
+            : event.event == 'friend_apply_accepted'
+            ? 1
+            : 0,
+      if ((detail['from_user']?.toString() ?? '').isEmpty &&
+          payload['sender_id']?.toString() == fromUserId)
+        'from_user': _friendEventUserFromPayload(payload, prefix: 'sender'),
+      if ((detail['to_user']?.toString() ?? '').isEmpty &&
+          payload['receiver_id']?.toString() == toUserId)
+        'to_user': _friendEventUserFromPayload(payload, prefix: 'receiver'),
+      if ((detail['create_time']?.toString() ?? '').isEmpty)
+        'create_time': DateTime.now().toIso8601String(),
+      if (currentUserId.isNotEmpty) 'current_user_id': currentUserId,
+    };
+  }
+
+  Map<String, Object?> _friendEventUserFromPayload(
+    Map<String, Object?> payload, {
+    required String prefix,
+  }) {
+    final user = <String, Object?>{};
+    final id = payload['${prefix}_id']?.toString() ?? '';
+    final uid = payload['${prefix}_uid']?.toString() ?? '';
+    if (id.isNotEmpty) {
+      user['id'] = id;
+      user['userid'] = id;
+      user['user_id'] = id;
+    }
+    if (uid.isNotEmpty) {
+      user['uid'] = uid;
+      user['channel_id'] = uid;
+    }
+    return user;
+  }
+
+  String _friendApplyTypeForEventApply(
+    Map<String, Object?> apply,
+    String currentUserId,
+  ) {
+    if (currentUserId.isEmpty) {
+      return 'in';
+    }
+    final from = apply['from_user_id']?.toString() ?? '';
+    return from == currentUserId ? 'out' : 'in';
   }
 
   String _stringValue(Map<String, Object?> source, List<String> keys) {
@@ -3006,6 +3354,7 @@ class SessionController extends ChangeNotifier {
   void dispose() {
     _im.removeListener(_onImServiceChanged);
     unawaited(_presenceSub?.cancel());
+    unawaited(_friendSub?.cancel());
     unawaited(_im.stop());
     super.dispose();
   }
