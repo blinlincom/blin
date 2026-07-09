@@ -13,6 +13,7 @@ class PaymentServicePage extends StatefulWidget {
     required this.title,
     required this.channelId,
     required this.channelType,
+    this.serviceAccount = const {},
     super.key,
   });
 
@@ -20,6 +21,7 @@ class PaymentServicePage extends StatefulWidget {
   final String title;
   final String channelId;
   final int channelType;
+  final Map<String, Object?> serviceAccount;
 
   @override
   State<PaymentServicePage> createState() => _PaymentServicePageState();
@@ -38,11 +40,14 @@ class _PaymentServicePageState extends State<PaymentServicePage>
   String _query = '';
   String _error = '';
   int _messageRevision = 0;
+  Map<String, Object?> _serviceAccount = const {};
+  bool _serviceConfigLoading = false;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _serviceAccount = Map<String, Object?>.from(widget.serviceAccount);
     _messageRevision = _currentMessageRevision();
     _hydrateCachedMessages();
     widget.controller.addListener(_onControllerChanged);
@@ -56,6 +61,7 @@ class _PaymentServicePageState extends State<PaymentServicePage>
     );
     unawaited(_markVisibleRead('open_payment_service'));
     unawaited(_loadMessagesIntoState(showLoading: _messages.isEmpty));
+    unawaited(_loadServiceAccountConfig());
   }
 
   @override
@@ -77,6 +83,8 @@ class _PaymentServicePageState extends State<PaymentServicePage>
       _messageSub = widget.controller.messageEvents.listen(_onMessageEvent);
       _messageRevision = _currentMessageRevision();
       _runningLoad = null;
+      _serviceAccount = Map<String, Object?>.from(widget.serviceAccount);
+      _serviceConfigLoading = false;
       _hydrateCachedMessages();
       unawaited(
         widget.controller.openConversation(
@@ -86,6 +94,13 @@ class _PaymentServicePageState extends State<PaymentServicePage>
       );
       unawaited(_markVisibleRead('payment_service_updated'));
       unawaited(_loadMessagesIntoState(showLoading: _messages.isEmpty));
+      unawaited(_loadServiceAccountConfig());
+    } else if (jsonEncode(oldWidget.serviceAccount) !=
+        jsonEncode(widget.serviceAccount)) {
+      setState(() {
+        _serviceAccount = Map<String, Object?>.from(widget.serviceAccount);
+      });
+      unawaited(_loadServiceAccountConfig());
     }
   }
 
@@ -273,10 +288,67 @@ class _PaymentServicePageState extends State<PaymentServicePage>
     }
   }
 
+  Future<void> _loadServiceAccountConfig() async {
+    if (_serviceConfigLoading) {
+      return;
+    }
+    _serviceConfigLoading = true;
+    try {
+      final serviceId = int.tryParse(_serviceAccountId(_serviceAccount)) ?? 0;
+      Map<String, Object?> next = const {};
+      if (serviceId > 0) {
+        next = await widget.controller.loadServiceAccountDetail(serviceId);
+      } else {
+        final accounts = await widget.controller.loadServiceAccounts();
+        next = _findServiceAccountForChannel(accounts);
+      }
+      if (!mounted || next.isEmpty) {
+        return;
+      }
+      setState(() {
+        _serviceAccount = {
+          ..._serviceAccount,
+          ...next,
+          'menus': _serviceMenuList(next['menus']).isNotEmpty
+              ? next['menus']
+              : _serviceAccount['menus'],
+        };
+      });
+    } catch (error, stackTrace) {
+      AppLogger.warn(
+        'ui',
+        'service account config load failed',
+        data: {
+          'channel_id': widget.channelId,
+          'channel_type': widget.channelType,
+          'service_id': _serviceAccountId(_serviceAccount),
+          'error': error.toString(),
+          'stack': stackTrace.toString(),
+        },
+      );
+    } finally {
+      _serviceConfigLoading = false;
+    }
+  }
+
+  Map<String, Object?> _findServiceAccountForChannel(
+    List<Map<String, Object?>> accounts,
+  ) {
+    for (final account in accounts) {
+      if (_serviceAccountChannelId(account) == widget.channelId &&
+          _serviceAccountChannelType(account) == widget.channelType) {
+        return account;
+      }
+    }
+    return const {};
+  }
+
   List<Map<String, Object?>> get _visibleMessages {
-    final notices = _messages
-        .where(_paymentServiceIsWalletNotice)
-        .toList(growable: false);
+    final notices =
+        (_isPaymentServiceAccount
+                ? _messages.where(_paymentServiceIsWalletNotice)
+                : _messages)
+            .toList(growable: false);
     if (_query.isEmpty) {
       return _paymentServiceSortedMessages(notices);
     }
@@ -298,6 +370,7 @@ class _PaymentServicePageState extends State<PaymentServicePage>
                 'trade_no',
               ]),
               _value(item, ['content', 'text']),
+              _value(payload, ['text', 'content', 'summary', 'title']),
             ].join(' ').toLowerCase();
             return fields.contains(query);
           })
@@ -348,6 +421,80 @@ class _PaymentServicePageState extends State<PaymentServicePage>
     );
   }
 
+  Future<void> _openSettings() async {
+    await _push(
+      context,
+      ServiceAccountSettingsPage(
+        controller: widget.controller,
+        serviceAccount: _serviceAccount,
+      ),
+    );
+    unawaited(_loadServiceAccountConfig());
+  }
+
+  List<Map<String, Object?>> get _serviceMenus {
+    final configured = _serviceMenuList(_serviceAccount['menus']);
+    if (configured.isNotEmpty) {
+      return configured;
+    }
+    if (_isPaymentServiceAccount) {
+      return _defaultPaymentServiceMenus;
+    }
+    return const [];
+  }
+
+  bool get _isPaymentServiceAccount {
+    final code = _value(_serviceAccount, ['code']);
+    return code == 'payment_service' ||
+        widget.title == '支付通知' ||
+        _serviceAccountName(_serviceAccount) == '支付通知';
+  }
+
+  String get _serviceTitle {
+    final name = _serviceAccountName(_serviceAccount);
+    if (_serviceAccount.isNotEmpty && name.isNotEmpty && name != '服务号') {
+      return name;
+    }
+    return widget.title.isEmpty ? '支付通知' : widget.title;
+  }
+
+  bool get _showServiceMenus {
+    return _value(_serviceAccount, ['menu_mode'], fallback: 'menu') != 'none' &&
+        _serviceMenus.isNotEmpty;
+  }
+
+  void _handleServiceMenu(Map<String, Object?> menu) {
+    final actionType = _value(menu, ['action_type', 'type', 'action']);
+    final actionValue = _value(menu, ['action_value', 'value', 'url', 'page']);
+    switch (actionType) {
+      case 'wallet_home':
+        _openWalletHome();
+        return;
+      case 'wallet_bills':
+        _openBills();
+        return;
+      case 'wallet_pay_receive':
+        _openPayReceive();
+        return;
+      case 'scan':
+        unawaited(
+          _push(context, WalletScanPage(controller: widget.controller)),
+        );
+        return;
+      case 'url':
+      case 'page':
+        AppLogger.info(
+          'ui',
+          'service account menu action not opened by client',
+          data: {'action_type': actionType, 'action_value': actionValue},
+        );
+        _showWalletMessage(context, '该功能暂不可用');
+        return;
+      default:
+        _showWalletMessage(context, '该功能暂不可用');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final messages = _visibleMessages;
@@ -363,19 +510,19 @@ class _PaymentServicePageState extends State<PaymentServicePage>
           child: Column(
             children: [
               _PaymentServiceHeader(
-                title: widget.title.isEmpty ? '支付通知' : widget.title,
+                title: _serviceTitle,
                 searching: _searching,
                 searchController: _searchController,
                 onBack: () => Navigator.of(context).maybePop(),
                 onSearch: _toggleSearch,
-                onWallet: _openWalletHome,
+                onSettings: () => unawaited(_openSettings()),
               ),
               Expanded(child: _buildBody(messages)),
-              _PaymentServiceBottomBar(
-                onWallet: _openWalletHome,
-                onBills: _openBills,
-                onPayReceive: _openPayReceive,
-              ),
+              if (_showServiceMenus)
+                _PaymentServiceBottomBar(
+                  menus: _serviceMenus,
+                  onMenuTap: _handleServiceMenu,
+                ),
             ],
           ),
         ),
@@ -402,7 +549,9 @@ class _PaymentServicePageState extends State<PaymentServicePage>
     if (messages.isEmpty) {
       return Center(
         child: Text(
-          _query.isEmpty ? '暂无支付通知' : '没有找到相关通知',
+          _query.isEmpty
+              ? (_isPaymentServiceAccount ? '暂无支付通知' : '暂无服务通知')
+              : '没有找到相关通知',
           style: const TextStyle(
             color: _paymentServiceMuted,
             fontSize: 14,
@@ -435,10 +584,17 @@ class _PaymentServicePageState extends State<PaymentServicePage>
                 _PaymentServiceTimeDivider(
                   text: _paymentServiceTimeLabel(item),
                 ),
-              _PaymentServiceNoticeCard(
-                item: item,
-                onTap: () => _showPaymentNoticeDetail(item),
-              ),
+              if (_paymentServiceIsWalletNotice(item))
+                _PaymentServiceNoticeCard(
+                  item: item,
+                  onTap: () => _showPaymentNoticeDetail(item),
+                )
+              else
+                _ServiceAccountMessageCard(
+                  item: item,
+                  serviceName: _serviceTitle,
+                  serviceAvatar: _serviceAccountAvatar(_serviceAccount),
+                ),
               const SizedBox(height: 16),
             ],
           );
@@ -548,7 +704,7 @@ class _PaymentServiceHeader extends StatelessWidget {
     required this.searchController,
     required this.onBack,
     required this.onSearch,
-    required this.onWallet,
+    required this.onSettings,
   });
 
   final String title;
@@ -556,7 +712,7 @@ class _PaymentServiceHeader extends StatelessWidget {
   final TextEditingController searchController;
   final VoidCallback onBack;
   final VoidCallback onSearch;
-  final VoidCallback onWallet;
+  final VoidCallback onSettings;
 
   @override
   Widget build(BuildContext context) {
@@ -605,8 +761,8 @@ class _PaymentServiceHeader extends StatelessWidget {
                   right: 4,
                   child: _PaymentHeaderIconButton(
                     icon: Icons.settings_outlined,
-                    label: '钱包',
-                    onTap: onWallet,
+                    label: '设置',
+                    onTap: onSettings,
                   ),
                 ),
               ],
@@ -629,7 +785,7 @@ class _PaymentServiceHeader extends StatelessWidget {
                   decoration: InputDecoration(
                     filled: true,
                     fillColor: _surfaceColor,
-                    hintText: '搜索支付通知',
+                    hintText: '搜索相关通知',
                     hintStyle: const TextStyle(
                       color: _paymentServiceMuted,
                       fontSize: 14,
@@ -829,6 +985,90 @@ class _PaymentServiceNoticeCard extends StatelessWidget {
   }
 }
 
+class _ServiceAccountMessageCard extends StatelessWidget {
+  const _ServiceAccountMessageCard({
+    required this.item,
+    required this.serviceName,
+    required this.serviceAvatar,
+  });
+
+  final Map<String, Object?> item;
+  final String serviceName;
+  final String serviceAvatar;
+
+  @override
+  Widget build(BuildContext context) {
+    final payload = _asObjectMap(item['payload']);
+    final title = _value(
+      payload,
+      ['title', 'summary_title'],
+      fallback: _messageSenderName(item) == '成员'
+          ? serviceName
+          : _messageSenderName(item),
+    );
+    final text = _messageContentText(item, payload).trim();
+    final content = text.isEmpty ? '服务通知' : text;
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(
+          maxWidth: _paymentServiceContentMaxWidth,
+        ),
+        child: Material(
+          color: _surfaceColor,
+          borderRadius: BorderRadius.circular(_paymentServiceCardRadius),
+          clipBehavior: Clip.antiAlias,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(18, 15, 18, 15),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _Avatar(
+                  label: title,
+                  imageUrl: serviceAvatar.isNotEmpty
+                      ? serviceAvatar
+                      : _messageSenderAvatarUrl(item),
+                  size: 34,
+                  color: _primaryColor,
+                  icon: Icons.verified_user_outlined,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: _paymentServiceText,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w700,
+                          height: 1.2,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        content,
+                        style: const TextStyle(
+                          color: _secondaryTextColor,
+                          fontSize: 14,
+                          height: 1.45,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _PaymentServiceDetailLink extends StatelessWidget {
   const _PaymentServiceDetailLink({required this.label});
 
@@ -916,17 +1156,21 @@ class _PaymentServiceRemarkRow extends StatelessWidget {
 
 class _PaymentServiceBottomBar extends StatelessWidget {
   const _PaymentServiceBottomBar({
-    required this.onWallet,
-    required this.onBills,
-    required this.onPayReceive,
+    required this.menus,
+    required this.onMenuTap,
   });
 
-  final VoidCallback onWallet;
-  final VoidCallback onBills;
-  final VoidCallback onPayReceive;
+  final List<Map<String, Object?>> menus;
+  final ValueChanged<Map<String, Object?>> onMenuTap;
 
   @override
   Widget build(BuildContext context) {
+    final visibleMenus = menus
+        .where((item) => _serviceMenuLabel(item).isNotEmpty)
+        .toList(growable: false);
+    if (visibleMenus.isEmpty) {
+      return const SizedBox.shrink();
+    }
     return Container(
       height: 56,
       decoration: const BoxDecoration(
@@ -939,22 +1183,50 @@ class _PaymentServiceBottomBar extends StatelessWidget {
             width: 64,
             child: _PaymentServiceMenuButton(
               icon: Icons.apps,
-              label: '支付服务',
+              label: '服务',
               showText: false,
-              onTap: onWallet,
+              onTap: () => onMenuTap(visibleMenus.first),
             ),
           ),
           const _PaymentServiceVerticalDivider(),
           Expanded(
-            child: _PaymentServiceMenuButton(label: '我的账单', onTap: onBills),
-          ),
-          const _PaymentServiceVerticalDivider(),
-          Expanded(
-            child: _PaymentServiceMenuButton(label: '支付服务', onTap: onWallet),
-          ),
-          const _PaymentServiceVerticalDivider(),
-          Expanded(
-            child: _PaymentServiceMenuButton(label: '收付款', onTap: onPayReceive),
+            child: visibleMenus.length <= 3
+                ? Row(
+                    children: [
+                      for (var index = 0; index < visibleMenus.length; index++)
+                        Expanded(
+                          child: Row(
+                            children: [
+                              if (index > 0)
+                                const _PaymentServiceVerticalDivider(),
+                              Expanded(
+                                child: _PaymentServiceMenuButton(
+                                  label: _serviceMenuLabel(visibleMenus[index]),
+                                  onTap: () => onMenuTap(visibleMenus[index]),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                    ],
+                  )
+                : ListView.separated(
+                    scrollDirection: Axis.horizontal,
+                    physics: const ClampingScrollPhysics(),
+                    itemCount: visibleMenus.length,
+                    separatorBuilder: (_, __) =>
+                        const _PaymentServiceVerticalDivider(),
+                    itemBuilder: (context, index) {
+                      final item = visibleMenus[index];
+                      return SizedBox(
+                        width: 108,
+                        child: _PaymentServiceMenuButton(
+                          label: _serviceMenuLabel(item),
+                          onTap: () => onMenuTap(item),
+                        ),
+                      );
+                    },
+                  ),
           ),
         ],
       ),
@@ -1202,6 +1474,261 @@ class _PaymentServiceDetailRow extends StatelessWidget {
       ),
     );
   }
+}
+
+class ServiceAccountSettingsPage extends StatefulWidget {
+  const ServiceAccountSettingsPage({
+    required this.controller,
+    required this.serviceAccount,
+    super.key,
+  });
+
+  final SessionController controller;
+  final Map<String, Object?> serviceAccount;
+
+  @override
+  State<ServiceAccountSettingsPage> createState() =>
+      _ServiceAccountSettingsPageState();
+}
+
+class _ServiceAccountSettingsPageState
+    extends State<ServiceAccountSettingsPage> {
+  late Map<String, Object?> _serviceAccount;
+  bool _busy = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _serviceAccount = Map<String, Object?>.from(widget.serviceAccount);
+  }
+
+  int get _serviceId => int.tryParse(_serviceAccountId(_serviceAccount)) ?? 0;
+  bool get _muted => _boolValue(_serviceAccount['muted']);
+  bool get _pinned => _boolValue(_serviceAccount['pinned']);
+  bool get _following =>
+      !_serviceAccount.containsKey('following') ||
+      _boolValue(_serviceAccount['following']);
+
+  Future<void> _update({bool? muted, bool? pinned, bool? following}) async {
+    if (_busy || _serviceId <= 0) {
+      return;
+    }
+    setState(() => _busy = true);
+    try {
+      final updated = await widget.controller.updateServiceAccountSettings(
+        serviceId: _serviceId,
+        muted: muted,
+        pinned: pinned,
+        following: following,
+      );
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _serviceAccount = {..._serviceAccount, ...updated};
+        _busy = false;
+      });
+      _showWalletMessage(context, '设置已更新');
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() => _busy = false);
+      _showWalletMessage(context, error.toString());
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final name = _serviceAccountName(_serviceAccount);
+    final subtitle = _serviceAccountSubtitle(_serviceAccount);
+    return Scaffold(
+      backgroundColor: _pageColor,
+      appBar: AppBar(title: const Text('服务号设置')),
+      body: SafeArea(
+        child: ListView(
+          physics: const ClampingScrollPhysics(),
+          padding: const EdgeInsets.only(bottom: 28),
+          children: [
+            Container(
+              color: _surfaceColor,
+              padding: const EdgeInsets.fromLTRB(16, 18, 16, 18),
+              child: Row(
+                children: [
+                  _Avatar(
+                    label: name,
+                    imageUrl: _serviceAccountAvatar(_serviceAccount),
+                    size: 52,
+                    color: _primaryColor,
+                    icon: Icons.verified_user_outlined,
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: _textColor,
+                            fontSize: 17,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        if (subtitle.isNotEmpty) ...[
+                          const SizedBox(height: 5),
+                          Text(
+                            subtitle,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: _mutedColor,
+                              fontSize: 13,
+                              height: 1.3,
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 10),
+            _ServiceAccountSwitchTile(
+              title: '消息免打扰',
+              value: _muted,
+              enabled: !_busy && _serviceId > 0 && _following,
+              onChanged: (value) => _update(muted: value),
+            ),
+            _ServiceAccountSwitchTile(
+              title: '置顶服务号',
+              value: _pinned,
+              enabled: !_busy && _serviceId > 0 && _following,
+              onChanged: (value) => _update(pinned: value),
+            ),
+            if (_serviceAccountAllowUnfollow(_serviceAccount) &&
+                _following) ...[
+              const SizedBox(height: 10),
+              _ServiceAccountActionTile(
+                title: '不再关注',
+                color: _dangerColor,
+                enabled: !_busy && _serviceId > 0,
+                onTap: () => _update(following: false),
+              ),
+            ],
+            if (_busy)
+              const Padding(
+                padding: EdgeInsets.only(top: 18),
+                child: Center(
+                  child: SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ServiceAccountSwitchTile extends StatelessWidget {
+  const _ServiceAccountSwitchTile({
+    required this.title,
+    required this.value,
+    required this.enabled,
+    required this.onChanged,
+  });
+
+  final String title;
+  final bool value;
+  final bool enabled;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      color: _surfaceColor,
+      child: SwitchListTile.adaptive(
+        value: value,
+        onChanged: enabled ? onChanged : null,
+        title: Text(
+          title,
+          style: TextStyle(
+            color: enabled ? _textColor : _mutedColor,
+            fontSize: 15,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+      ),
+    );
+  }
+}
+
+class _ServiceAccountActionTile extends StatelessWidget {
+  const _ServiceAccountActionTile({
+    required this.title,
+    required this.color,
+    required this.enabled,
+    required this.onTap,
+  });
+
+  final String title;
+  final Color color;
+  final bool enabled;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: _surfaceColor,
+      child: InkWell(
+        onTap: enabled ? onTap : null,
+        child: SizedBox(
+          height: 52,
+          child: Center(
+            child: Text(
+              title,
+              style: TextStyle(
+                color: enabled ? color : _mutedColor,
+                fontSize: 15,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+const List<Map<String, Object?>> _defaultPaymentServiceMenus = [
+  {'name': '我的账单', 'action_type': 'wallet_bills', 'action_value': ''},
+  {'name': '支付服务', 'action_type': 'wallet_home', 'action_value': ''},
+  {'name': '收付款', 'action_type': 'wallet_pay_receive', 'action_value': ''},
+];
+
+List<Map<String, Object?>> _serviceMenuList(Object? value) {
+  if (value is List) {
+    return value
+        .whereType<Map>()
+        .map(
+          (item) => item.map((key, value) => MapEntry(key.toString(), value)),
+        )
+        .where((item) => _serviceMenuLabel(item).isNotEmpty)
+        .toList(growable: false);
+  }
+  return const [];
+}
+
+String _serviceMenuLabel(Map<String, Object?> item) {
+  return _value(item, ['name', 'title', 'label']);
 }
 
 bool _paymentServiceIsDeleteEvent(String source) {

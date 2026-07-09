@@ -63,10 +63,13 @@ class SessionController extends ChangeNotifier {
   Future<void>? _cachedImStartRequest;
   List<Map<String, Object?>> _friendCache = const [];
   List<Map<String, Object?>> _groupCache = const [];
+  List<Map<String, Object?>> _serviceAccountCache = const [];
   DateTime? _friendCacheAt;
   DateTime? _groupCacheAt;
+  DateTime? _serviceAccountCacheAt;
   Future<List<Map<String, Object?>>>? _friendRequest;
   Future<List<Map<String, Object?>>>? _groupRequest;
+  Future<List<Map<String, Object?>>>? _serviceAccountRequest;
   List<Map<String, Object?>> _friendApplyInCache = const [];
   List<Map<String, Object?>> _friendApplyOutCache = const [];
   int _friendApplyUnreadCount = 0;
@@ -114,6 +117,7 @@ class SessionController extends ChangeNotifier {
   BusinessImInitialSyncState get initialHistorySyncState =>
       _im.initialHistorySyncState;
   bool get hasLoadedFriends => _friendCacheAt != null;
+  bool get hasLoadedServiceAccounts => _serviceAccountCacheAt != null;
   int get friendApplyUnreadCount => _friendApplyUnreadCount;
   Stream<BusinessImMessageEvent> get messageEvents => _im.messageEvents;
   Stream<BusinessImPresenceEvent> get presenceEvents => _im.presenceEvents;
@@ -230,6 +234,21 @@ class SessionController extends ChangeNotifier {
     }
     _groupCache = _cache.readGroupList(uid);
     return _copyList(_groupCache);
+  }
+
+  List<Map<String, Object?>> cachedServiceAccounts({bool allowDisk = true}) {
+    if (_serviceAccountCache.isNotEmpty) {
+      return _copyList(_serviceAccountCache);
+    }
+    if (!allowDisk) {
+      return const [];
+    }
+    final uid = _chatUid();
+    if (uid.isEmpty) {
+      return const [];
+    }
+    _serviceAccountCache = _cache.readServiceAccounts(uid);
+    return _copyList(_serviceAccountCache);
   }
 
   Map<String, Object?> groupMuteState({
@@ -1199,6 +1218,72 @@ class SessionController extends ChangeNotifier {
       data: {'count': list.length},
     );
     return _copyList(list);
+  }
+
+  Future<List<Map<String, Object?>>> loadServiceAccounts({
+    bool forceRefresh = false,
+  }) async {
+    final current = _requireSession();
+    if (!forceRefresh && _isCacheFresh(_serviceAccountCacheAt)) {
+      AppLogger.info(
+        'session',
+        'load service accounts memory cache',
+        data: {'count': _serviceAccountCache.length},
+      );
+      return _copyList(_serviceAccountCache);
+    }
+    if (_serviceAccountRequest != null) {
+      AppLogger.info('session', 'reuse service accounts request');
+      return _serviceAccountRequest!;
+    }
+    AppLogger.info('session', 'load service accounts start');
+    _serviceAccountRequest = _api
+        .serviceAccounts(session: current, device: _device)
+        .timeout(const Duration(seconds: 15));
+    final list = await _serviceAccountRequest!.whenComplete(
+      () => _serviceAccountRequest = null,
+    );
+    _serviceAccountCache = list;
+    _serviceAccountCacheAt = DateTime.now();
+    _writeServiceAccountCache(list);
+    notifyListeners();
+    AppLogger.info(
+      'session',
+      'load service accounts success',
+      data: {'count': list.length},
+    );
+    return _copyList(list);
+  }
+
+  Future<Map<String, Object?>> loadServiceAccountDetail(int serviceId) async {
+    final current = _requireSession();
+    final detail = await _api.serviceAccountDetail(
+      session: current,
+      device: _device,
+      serviceId: serviceId,
+    );
+    _upsertServiceAccountCache(detail);
+    return detail;
+  }
+
+  Future<Map<String, Object?>> updateServiceAccountSettings({
+    required int serviceId,
+    bool? muted,
+    bool? pinned,
+    bool? following,
+  }) async {
+    final current = _requireSession();
+    final updated = await _api.updateServiceAccountSettings(
+      session: current,
+      device: _device,
+      serviceId: serviceId,
+      muted: muted,
+      pinned: pinned,
+      following: following,
+    );
+    _upsertServiceAccountCache(updated);
+    notifyListeners();
+    return updated;
   }
 
   Future<List<Map<String, Object?>>> loadGroups() async {
@@ -2735,6 +2820,7 @@ class SessionController extends ChangeNotifier {
       await Future.wait([
         loadFriends(),
         loadGroups(),
+        loadServiceAccounts(),
         friendApplyList(type: 'in'),
         friendApplyList(type: 'out'),
       ]);
@@ -3180,6 +3266,48 @@ class SessionController extends ChangeNotifier {
     _cache.writeGroupList(uid: uid, groups: groups);
   }
 
+  void _writeServiceAccountCache(List<Map<String, Object?>> accounts) {
+    final uid = _chatUid();
+    if (uid.isEmpty) {
+      return;
+    }
+    _cache.writeServiceAccounts(uid: uid, accounts: accounts);
+  }
+
+  void _upsertServiceAccountCache(Map<String, Object?> account) {
+    if (account.isEmpty) {
+      return;
+    }
+    final accountKey = _serviceAccountKey(account);
+    if (accountKey.isEmpty) {
+      return;
+    }
+    final next = _serviceAccountCache
+        .map((item) => Map<String, Object?>.from(item))
+        .toList();
+    final index = next.indexWhere(
+      (item) => _serviceAccountKey(item) == accountKey,
+    );
+    if (index >= 0) {
+      next[index] = {...next[index], ...account};
+    } else {
+      next.add(Map<String, Object?>.from(account));
+    }
+    _serviceAccountCache = next;
+    _serviceAccountCacheAt = DateTime.now();
+    _writeServiceAccountCache(next);
+  }
+
+  String _serviceAccountKey(Map<String, Object?> item) {
+    for (final key in ['service_id', 'id', 'code', 'channel_id', 'user_id']) {
+      final value = item[key]?.toString().trim() ?? '';
+      if (value.isNotEmpty && value != '0') {
+        return '$key:$value';
+      }
+    }
+    return '';
+  }
+
   void _onPresenceEvent(BusinessImPresenceEvent event) {
     final uid = _chatUid();
     if (uid.isEmpty) {
@@ -3484,10 +3612,13 @@ class SessionController extends ChangeNotifier {
   void _clearListCaches() {
     _friendCache = const [];
     _groupCache = const [];
+    _serviceAccountCache = const [];
     _friendCacheAt = null;
     _groupCacheAt = null;
+    _serviceAccountCacheAt = null;
     _friendRequest = null;
     _groupRequest = null;
+    _serviceAccountRequest = null;
     _friendStatusCache.clear();
     _friendStatusCacheAt.clear();
     _friendStatusRequests.clear();

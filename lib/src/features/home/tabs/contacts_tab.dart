@@ -11,8 +11,11 @@ class ContactsTab extends StatefulWidget {
 
 class _ContactsTabState extends State<ContactsTab> {
   List<Map<String, Object?>> _friends = const [];
+  List<Map<String, Object?>> _serviceAccounts = const [];
   bool _loading = false;
+  bool _serviceLoading = false;
   String? _error;
+  String? _serviceError;
 
   @override
   void initState() {
@@ -21,8 +24,12 @@ class _ContactsTabState extends State<ContactsTab> {
     _friends = widget.controller.hasLoadedFriends
         ? widget.controller.cachedFriends(allowDisk: false)
         : const [];
+    _serviceAccounts = widget.controller.hasLoadedServiceAccounts
+        ? widget.controller.cachedServiceAccounts(allowDisk: false)
+        : widget.controller.cachedServiceAccounts();
     _precacheContactAvatars(context, _friends, const []);
-    _refresh(showLoading: _friends.isEmpty);
+    _precacheAvatarUrls(context, _serviceAccounts.map(_serviceAccountAvatar));
+    _refresh(showLoading: _friends.isEmpty && _serviceAccounts.isEmpty);
   }
 
   @override
@@ -32,18 +39,37 @@ class _ContactsTabState extends State<ContactsTab> {
   }
 
   void _onControllerChanged() {
-    if (!widget.controller.hasLoadedFriends) {
-      return;
+    var changed = false;
+    var friends = _friends;
+    var services = _serviceAccounts;
+    if (widget.controller.hasLoadedFriends) {
+      final nextFriends = widget.controller.cachedFriends(allowDisk: false);
+      if (!_sameMapList(_friends, nextFriends)) {
+        friends = nextFriends;
+        changed = true;
+      }
     }
-    final friends = widget.controller.cachedFriends(allowDisk: false);
-    if (_sameMapList(_friends, friends)) {
+    if (widget.controller.hasLoadedServiceAccounts) {
+      final nextServices = widget.controller.cachedServiceAccounts(
+        allowDisk: false,
+      );
+      if (!_sameMapList(_serviceAccounts, nextServices)) {
+        services = nextServices;
+        changed = true;
+      }
+    }
+    if (!changed) {
       return;
     }
     _precacheContactAvatars(context, friends, const []);
+    _precacheAvatarUrls(context, services.map(_serviceAccountAvatar));
     setState(() {
       _friends = friends;
+      _serviceAccounts = services;
       _loading = false;
+      _serviceLoading = false;
       _error = null;
+      _serviceError = null;
     });
   }
 
@@ -51,29 +77,42 @@ class _ContactsTabState extends State<ContactsTab> {
     if (showLoading && mounted) {
       setState(() {
         _loading = true;
+        _serviceLoading = true;
         _error = null;
+        _serviceError = null;
       });
+    }
+    List<Map<String, Object?>>? friends;
+    List<Map<String, Object?>>? services;
+    Object? friendError;
+    Object? serviceError;
+    try {
+      friends = await widget.controller.loadFriends(forceRefresh: true);
+    } catch (error) {
+      friendError = error;
     }
     try {
-      final friends = await widget.controller.loadFriends(forceRefresh: true);
-      if (!mounted) {
-        return;
-      }
-      _precacheContactAvatars(context, friends, const []);
-      setState(() {
-        _friends = friends;
-        _loading = false;
-        _error = null;
-      });
+      services = await widget.controller.loadServiceAccounts(
+        forceRefresh: true,
+      );
     } catch (error) {
-      if (!mounted) {
-        return;
-      }
-      setState(() {
-        _loading = false;
-        _error = error.toString();
-      });
+      serviceError = error;
     }
+    if (!mounted) {
+      return;
+    }
+    final nextFriends = friends ?? _friends;
+    final nextServices = services ?? _serviceAccounts;
+    _precacheContactAvatars(context, nextFriends, const []);
+    _precacheAvatarUrls(context, nextServices.map(_serviceAccountAvatar));
+    setState(() {
+      _friends = nextFriends;
+      _serviceAccounts = nextServices;
+      _loading = false;
+      _serviceLoading = false;
+      _error = friendError?.toString();
+      _serviceError = serviceError?.toString();
+    });
   }
 
   @override
@@ -117,6 +156,23 @@ class _ContactsTabState extends State<ContactsTab> {
                 onTap: () =>
                     _push(context, MyGroupsPage(controller: widget.controller)),
               ),
+              _MenuTile(
+                icon: Icons.verified_user_outlined,
+                iconColor: const Color(0xff2563eb),
+                title: '服务号',
+                subtitle: _serviceAccountsSubtitle,
+                onTap: () => _push(
+                  context,
+                  ServiceAccountsPage(controller: widget.controller),
+                ),
+                trailing: _serviceLoading && _serviceAccounts.isNotEmpty
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : null,
+              ),
               const _SectionHeader(text: '联系人'),
               _MenuTile(
                 icon: Icons.person_outline,
@@ -138,6 +194,13 @@ class _ContactsTabState extends State<ContactsTab> {
             bottom: 0,
             child: _InfoBar(text: '联系人刷新失败：$_error'),
           ),
+        if (_serviceError != null && _serviceAccounts.isNotEmpty)
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: _error != null && _friends.isNotEmpty ? 34 : 0,
+            child: _InfoBar(text: '服务号刷新失败：$_serviceError'),
+          ),
       ],
     );
   }
@@ -154,6 +217,187 @@ class _ContactsTabState extends State<ContactsTab> {
       return '暂无联系人';
     }
     return '$count 位联系人';
+  }
+
+  String get _serviceAccountsSubtitle {
+    if (_serviceLoading && _serviceAccounts.isEmpty) {
+      return '正在同步';
+    }
+    if (_serviceError != null && _serviceAccounts.isEmpty) {
+      return '点击重试';
+    }
+    final count = _serviceAccounts.length;
+    if (count <= 0) {
+      return '暂无服务号';
+    }
+    return '$count 个服务号';
+  }
+}
+
+class ServiceAccountsPage extends StatefulWidget {
+  const ServiceAccountsPage({required this.controller, super.key});
+
+  final SessionController controller;
+
+  @override
+  State<ServiceAccountsPage> createState() => _ServiceAccountsPageState();
+}
+
+class _ServiceAccountsPageState extends State<ServiceAccountsPage> {
+  List<Map<String, Object?>> _accounts = const [];
+  bool _loading = false;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.controller.addListener(_onControllerChanged);
+    _accounts = widget.controller.hasLoadedServiceAccounts
+        ? widget.controller.cachedServiceAccounts(allowDisk: false)
+        : widget.controller.cachedServiceAccounts();
+    _precacheAvatarUrls(context, _accounts.map(_serviceAccountAvatar));
+    _refresh(showLoading: _accounts.isEmpty);
+  }
+
+  @override
+  void dispose() {
+    widget.controller.removeListener(_onControllerChanged);
+    super.dispose();
+  }
+
+  void _onControllerChanged() {
+    if (!widget.controller.hasLoadedServiceAccounts) {
+      return;
+    }
+    final accounts = widget.controller.cachedServiceAccounts(allowDisk: false);
+    if (_sameMapList(_accounts, accounts)) {
+      return;
+    }
+    _precacheAvatarUrls(context, accounts.map(_serviceAccountAvatar));
+    setState(() {
+      _accounts = accounts;
+      _loading = false;
+      _error = null;
+    });
+  }
+
+  Future<void> _refresh({bool showLoading = true}) async {
+    if (showLoading && mounted) {
+      setState(() {
+        _loading = true;
+        _error = null;
+      });
+    }
+    try {
+      final accounts = await widget.controller.loadServiceAccounts(
+        forceRefresh: true,
+      );
+      if (!mounted) {
+        return;
+      }
+      _precacheAvatarUrls(context, accounts.map(_serviceAccountAvatar));
+      setState(() {
+        _accounts = accounts;
+        _loading = false;
+        _error = null;
+      });
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _loading = false;
+        _error = error.toString();
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: _pageColor,
+      appBar: AppBar(title: const Text('服务号')),
+      body: SafeArea(
+        child: Stack(
+          children: [
+            RefreshIndicator(
+              onRefresh: () => _refresh(showLoading: false),
+              child: ListView(
+                physics: const AlwaysScrollableScrollPhysics(
+                  parent: ClampingScrollPhysics(),
+                ),
+                padding: const EdgeInsets.only(bottom: 24),
+                children: [
+                  const _SectionHeader(text: '服务号'),
+                  if (_loading && _accounts.isEmpty)
+                    const SizedBox(
+                      height: 180,
+                      child: Center(child: CircularProgressIndicator()),
+                    )
+                  else if (_error != null && _accounts.isEmpty)
+                    SizedBox(
+                      height: 200,
+                      child: _ErrorState(
+                        text: _error!,
+                        onRetry: () => _refresh(),
+                      ),
+                    )
+                  else if (_accounts.isEmpty)
+                    const _EmptyRow(text: '暂无服务号')
+                  else
+                    for (final item in _accounts)
+                      _ContactTile(
+                        key: ValueKey(
+                          'service-${_serviceAccountId(item)}-${_serviceAccountChannelId(item)}',
+                        ),
+                        title: _serviceAccountName(item),
+                        subtitle: _serviceAccountSubtitle(item),
+                        trailing: _boolValue(item['muted']) ? '免打扰' : '',
+                        isGroup: false,
+                        avatarUrl: _serviceAccountAvatar(item),
+                        onTap: () => _openServiceAccount(item),
+                      ),
+                ],
+              ),
+            ),
+            if (_error != null && _accounts.isNotEmpty)
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 0,
+                child: _InfoBar(text: '服务号刷新失败：$_error'),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _openServiceAccount(Map<String, Object?> account) {
+    final channelId = _serviceAccountChannelId(account);
+    if (channelId.isEmpty) {
+      _showWalletMessage(context, '服务号暂不可用');
+      return;
+    }
+    Navigator.of(context)
+        .push(
+          _chatPageRoute(
+            PaymentServicePage(
+              controller: widget.controller,
+              title: _serviceAccountName(account),
+              channelId: channelId,
+              channelType: _serviceAccountChannelType(account),
+              serviceAccount: account,
+            ),
+          ),
+        )
+        .then(
+          (_) => _markConversationReadAfterPop(
+            widget.controller,
+            channelId,
+            _serviceAccountChannelType(account),
+          ),
+        );
   }
 }
 
@@ -405,4 +649,45 @@ class _ContactsListSearchField extends StatelessWidget {
       ),
     );
   }
+}
+
+String _serviceAccountId(Map<String, Object?> item) {
+  return _value(item, ['service_id', 'id', 'code', 'user_id']);
+}
+
+String _serviceAccountName(Map<String, Object?> item) {
+  return _value(item, [
+    'name',
+    'nickname',
+    'title',
+  ], fallback: _value(item, ['code'], fallback: '服务号'));
+}
+
+String _serviceAccountSubtitle(Map<String, Object?> item) {
+  final description = _value(item, ['description', 'signature', 'remark']);
+  if (description.isNotEmpty) {
+    return description;
+  }
+  return '通知与服务';
+}
+
+String _serviceAccountAvatar(Map<String, Object?> item) {
+  return _avatarUrlFromMap(item);
+}
+
+String _serviceAccountChannelId(Map<String, Object?> item) {
+  return _value(item, [
+    'channel_id',
+    'uid',
+    'im_uid',
+  ], fallback: _value(item, ['user_id']));
+}
+
+int _serviceAccountChannelType(Map<String, Object?> item) {
+  final value = _intValue(item, ['channel_type']);
+  return value > 0 ? value : _privateChannelType;
+}
+
+bool _serviceAccountAllowUnfollow(Map<String, Object?> item) {
+  return _boolValue(item['allow_unfollow']);
 }

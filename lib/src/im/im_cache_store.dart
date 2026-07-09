@@ -15,6 +15,7 @@ class ImCacheStore {
   static const _friendApplyListPrefix = 'im_friend_apply_list';
   static const _friendApplyUnreadPrefix = 'im_friend_apply_unread';
   static const _groupListPrefix = 'im_group_list';
+  static const _serviceAccountPrefix = 'im_service_accounts';
   static const _profilePrefix = 'im_profile';
   static const _pinnedConversationPrefix = 'im_pinned_conversations';
   static const _readPrefix = 'im_read_marker';
@@ -459,6 +460,17 @@ class ImCacheStore {
     required List<Map<String, Object?>> groups,
   }) {
     _kv.encodeString('$_groupListPrefix:$uid', jsonEncode(groups));
+  }
+
+  List<Map<String, Object?>> readServiceAccounts(String uid) {
+    return _readMapList('$_serviceAccountPrefix:$uid');
+  }
+
+  void writeServiceAccounts({
+    required String uid,
+    required List<Map<String, Object?>> accounts,
+  }) {
+    _kv.encodeString('$_serviceAccountPrefix:$uid', jsonEncode(accounts));
   }
 
   List<Map<String, Object?>> readMessages({

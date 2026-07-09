@@ -714,6 +714,67 @@ class ApiClient {
     return _mapListFromPayload(result.data);
   }
 
+  Future<List<Map<String, Object?>>> serviceAccounts({
+    required UserSession session,
+    required String device,
+  }) async {
+    final result = await secureSignedImPost<Map<String, Object?>>(
+      'service_account_list',
+      session: session,
+      device: device,
+      params: const {},
+      secureResponse: true,
+    );
+    if (!result.isSuccess) {
+      throw ApiException(result.message, code: result.code);
+    }
+    return _mapListFromPayload(result.data);
+  }
+
+  Future<Map<String, Object?>> serviceAccountDetail({
+    required UserSession session,
+    required String device,
+    required int serviceId,
+  }) async {
+    final result = await secureSignedImPost<Map<String, Object?>>(
+      'service_account_detail',
+      session: session,
+      device: device,
+      params: {'service_id': serviceId.toString()},
+      secureResponse: true,
+    );
+    if (!result.isSuccess) {
+      throw ApiException(result.message, code: result.code);
+    }
+    return Map<String, Object?>.from(result.data);
+  }
+
+  Future<Map<String, Object?>> updateServiceAccountSettings({
+    required UserSession session,
+    required String device,
+    required int serviceId,
+    bool? muted,
+    bool? pinned,
+    bool? following,
+  }) async {
+    final result = await secureSignedImPost<Map<String, Object?>>(
+      'service_account_settings_update',
+      session: session,
+      device: device,
+      params: {
+        'service_id': serviceId.toString(),
+        if (muted != null) 'muted': muted ? '1' : '0',
+        if (pinned != null) 'pinned': pinned ? '1' : '0',
+        if (following != null) 'following': following ? '1' : '0',
+      },
+      secureResponse: true,
+    );
+    if (!result.isSuccess) {
+      throw ApiException(result.message, code: result.code);
+    }
+    return Map<String, Object?>.from(result.data);
+  }
+
   Future<List<Map<String, Object?>>> personMessages({
     required UserSession session,
     required String device,
