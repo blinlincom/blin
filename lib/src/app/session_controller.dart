@@ -815,12 +815,29 @@ class SessionController extends ChangeNotifier {
     );
   }
 
-  Future<void> setWalletPayPassword(String password) async {
+  Future<Map<String, Object?>> sendWalletPayPasswordCode({
+    String verificationMethod = '',
+  }) {
+    final current = _requireSession();
+    return _api.walletSendPayPasswordCode(
+      session: current,
+      device: _device,
+      verificationMethod: verificationMethod,
+    );
+  }
+
+  Future<void> setWalletPayPassword({
+    required String password,
+    required String verificationMethod,
+    required String verifyCode,
+  }) async {
     final current = _requireSession();
     await _api.walletSetPayPassword(
       session: current,
       device: _device,
       password: password,
+      verificationMethod: verificationMethod,
+      verifyCode: verifyCode,
     );
     await loadWalletBalance(refresh: true);
   }
@@ -1891,6 +1908,7 @@ class SessionController extends ChangeNotifier {
     required String receiverId,
     required String money,
     required String assetType,
+    required String payPassword,
     String remark = '',
   }) async {
     _requireSession();
@@ -1902,6 +1920,7 @@ class SessionController extends ChangeNotifier {
         'receiver_id': receiverId,
         'money': money,
         'asset_type': assetType,
+        'pay_password': payPassword,
         if (remark.isNotEmpty) 'remark': remark,
       },
     );
@@ -1913,6 +1932,7 @@ class SessionController extends ChangeNotifier {
     required String receiverId,
     required String money,
     required String assetType,
+    required String payPassword,
     String remark = '',
     String channelId = '',
   }) async {
@@ -1927,6 +1947,7 @@ class SessionController extends ChangeNotifier {
         'receiver_id': receiverId,
         'money': money,
         'asset_type': assetType,
+        'pay_password': payPassword,
         if (remark.isNotEmpty) 'remark': remark,
       },
     );
@@ -1937,6 +1958,7 @@ class SessionController extends ChangeNotifier {
     required String receiverId,
     required String money,
     required String assetType,
+    required String payPassword,
     String remark = '',
   }) async {
     _requireSession();
@@ -1948,6 +1970,7 @@ class SessionController extends ChangeNotifier {
         'receiver_id': receiverId,
         'money': money,
         'asset_type': assetType,
+        'pay_password': payPassword,
         if (remark.isNotEmpty) 'remark': remark,
       },
     );
@@ -1958,6 +1981,7 @@ class SessionController extends ChangeNotifier {
     required String groupId,
     required String money,
     required String assetType,
+    required String payPassword,
     required String packetType,
     int quantity = 1,
     String receiverId = '',
@@ -1974,6 +1998,7 @@ class SessionController extends ChangeNotifier {
         'group_id': groupId,
         'money': money,
         'asset_type': assetType,
+        'pay_password': payPassword,
         'packet_type': packetType,
         'quantity': quantity.toString(),
         if (receiverId.isNotEmpty) 'receiver_id': receiverId,

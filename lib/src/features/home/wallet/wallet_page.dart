@@ -18,6 +18,15 @@ class _WalletPageState extends State<WalletPage> {
     _request = widget.controller.loadWalletBalance(refresh: true);
   }
 
+  Future<void> _openPayPassword() async {
+    await _push(context, WalletPayPasswordPage(controller: widget.controller));
+    if (mounted) {
+      setState(() {
+        _request = widget.controller.loadWalletBalance(refresh: true);
+      });
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -42,6 +51,10 @@ class _WalletPageState extends State<WalletPage> {
               padding: const EdgeInsets.fromLTRB(0, 0, 0, 24),
               children: [
                 _WalletBalanceBand(balance: balance),
+                if (!balance.securityBound ||
+                    !balance.payPasswordSet ||
+                    balance.payPasswordLocked)
+                  _WalletSecurityNotice(balance: balance),
                 const _GroupGap(),
                 _WalletActionGrid(
                   actions: [
@@ -88,11 +101,8 @@ class _WalletPageState extends State<WalletPage> {
                   icon: Icons.lock_outline,
                   iconColor: const Color(0xff6b7280),
                   title: balance.payPasswordSet ? '修改支付密码' : '设置支付密码',
-                  subtitle: '用于收付款确认',
-                  onTap: () => _push(
-                    context,
-                    WalletPayPasswordPage(controller: widget.controller),
-                  ),
+                  subtitle: _walletPayPasswordSubtitle(balance),
+                  onTap: _openPayPassword,
                 ),
                 _MenuTile(
                   icon: Icons.fact_check_outlined,
@@ -107,6 +117,61 @@ class _WalletPageState extends State<WalletPage> {
               ],
             );
           },
+        ),
+      ),
+    );
+  }
+}
+
+String _walletPayPasswordSubtitle(WalletBalance balance) {
+  if (!balance.securityBound) {
+    return '需要先绑定安全验证方式';
+  }
+  if (balance.payPasswordLocked) {
+    return '已锁定，请联系管理员';
+  }
+  if (!balance.payPasswordSet) {
+    return '首次使用红包或转账前设置';
+  }
+  return '用于红包、转账和收付款确认';
+}
+
+class _WalletSecurityNotice extends StatelessWidget {
+  const _WalletSecurityNotice({required this.balance});
+
+  final WalletBalance balance;
+
+  @override
+  Widget build(BuildContext context) {
+    final text = _walletPayPasswordSubtitle(balance);
+    return ColoredBox(
+      color: _surfaceColor,
+      child: Container(
+        margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+        padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+        decoration: BoxDecoration(
+          color: const Color(0xfffffbeb),
+          border: Border.all(color: const Color(0xfffde68a)),
+        ),
+        child: Row(
+          children: [
+            const Icon(
+              Icons.verified_user_outlined,
+              size: 18,
+              color: Color(0xffb45309),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                text,
+                style: const TextStyle(
+                  color: Color(0xff92400e),
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -246,8 +311,8 @@ class WalletPayReceivePage extends StatelessWidget {
             _MenuTile(
               icon: Icons.qr_code_scanner,
               iconColor: const Color(0xff111827),
-              title: '扫一扫付款',
-              subtitle: '扫描对方收款码后确认支付',
+              title: '扫一扫',
+              subtitle: '扫描收付款码或好友二维码',
               onTap: () =>
                   _push(context, WalletScanPage(controller: controller)),
             ),
@@ -535,73 +600,14 @@ class _WalletPayCodePageState extends State<WalletPayCodePage> {
   }
 }
 
-class WalletScanPage extends StatefulWidget {
+class WalletScanPage extends StatelessWidget {
   const WalletScanPage({required this.controller, super.key});
 
   final SessionController controller;
 
   @override
-  State<WalletScanPage> createState() => _WalletScanPageState();
-}
-
-class _WalletScanPageState extends State<WalletScanPage> {
-  bool _handled = false;
-
-  Future<void> _handle(String raw) async {
-    if (_handled) {
-      return;
-    }
-    final token = _walletTokenFromQr(raw);
-    if (token.isEmpty) {
-      _showWalletMessage(context, '二维码无效');
-      return;
-    }
-    _handled = true;
-    try {
-      final order = await widget.controller.scanWalletQr(token);
-      if (!mounted) {
-        return;
-      }
-      await _push(
-        context,
-        WalletPayConfirmPage(
-          controller: widget.controller,
-          order: order,
-          qrToken: token,
-        ),
-      );
-      if (mounted) {
-        Navigator.of(context).pop();
-      }
-    } catch (error) {
-      _handled = false;
-      if (mounted) {
-        _showWalletMessage(context, error.toString());
-      }
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.black,
-      appBar: AppBar(
-        title: const Text('扫一扫'),
-        backgroundColor: Colors.black,
-        foregroundColor: Colors.white,
-        elevation: 0,
-      ),
-      body: MobileScanner(
-        onDetect: (capture) {
-          final barcodes = capture.barcodes;
-          final value = barcodes.isEmpty ? '' : (barcodes.first.rawValue ?? '');
-          if (value.isNotEmpty) {
-            _handle(value);
-          }
-        },
-      ),
-    );
-  }
+  Widget build(BuildContext context) =>
+      FriendQrScannerPage(controller: controller);
 }
 
 class WalletPayConfirmPage extends StatefulWidget {
@@ -889,24 +895,100 @@ class WalletPayPasswordPage extends StatefulWidget {
 class _WalletPayPasswordPageState extends State<WalletPayPasswordPage> {
   final _password = TextEditingController();
   final _confirm = TextEditingController();
+  final _code = TextEditingController();
   bool _busy = false;
+  bool _sendingCode = false;
+  WalletBalance? _balance;
+  String _method = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _balance = widget.controller.walletBalance;
+    final methods = _balance?.securityMethods ?? const <WalletSecurityMethod>[];
+    if (methods.isNotEmpty) {
+      _method = methods.first.method;
+    }
+    _loadBalance();
+  }
 
   @override
   void dispose() {
     _password.dispose();
     _confirm.dispose();
+    _code.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadBalance() async {
+    try {
+      final balance = await widget.controller.loadWalletBalance(refresh: true);
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _balance = balance;
+        if (_method.isEmpty && balance.securityMethods.isNotEmpty) {
+          _method = balance.securityMethods.first.method;
+        }
+      });
+    } catch (error) {
+      if (mounted) {
+        _showWalletMessage(context, error.toString());
+      }
+    }
+  }
+
+  Future<void> _sendCode() async {
+    if (_method.isEmpty) {
+      _showWalletMessage(context, '请先绑定手机号、邮箱或安全验证方式');
+      return;
+    }
+    setState(() => _sendingCode = true);
+    try {
+      await widget.controller.sendWalletPayPasswordCode(
+        verificationMethod: _method,
+      );
+      if (mounted) {
+        _showWalletMessage(context, '验证码已发送');
+      }
+    } catch (error) {
+      if (mounted) {
+        _showWalletMessage(context, error.toString());
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _sendingCode = false);
+      }
+    }
   }
 
   Future<void> _submit() async {
     final value = _password.text.trim();
+    if (!RegExp(r'^\d{6}$').hasMatch(value)) {
+      _showWalletMessage(context, '支付密码必须是6位数字');
+      return;
+    }
     if (value != _confirm.text.trim()) {
       _showWalletMessage(context, '两次密码不一致');
       return;
     }
+    final code = _code.text.trim();
+    if (code.isEmpty) {
+      _showWalletMessage(context, '请输入验证码');
+      return;
+    }
+    if (_method.isEmpty) {
+      _showWalletMessage(context, '请先绑定手机号、邮箱或安全验证方式');
+      return;
+    }
     setState(() => _busy = true);
     try {
-      await widget.controller.setWalletPayPassword(value);
+      await widget.controller.setWalletPayPassword(
+        password: value,
+        verificationMethod: _method,
+        verifyCode: code,
+      );
       if (mounted) {
         _showWalletMessage(context, '设置成功');
         Navigator.of(context).pop();
@@ -924,9 +1006,20 @@ class _WalletPayPasswordPageState extends State<WalletPayPasswordPage> {
 
   @override
   Widget build(BuildContext context) {
+    final balance = _balance ?? widget.controller.walletBalance;
+    final methods = balance?.securityMethods ?? const <WalletSecurityMethod>[];
+    final canSet = methods.isNotEmpty && balance?.payPasswordLocked != true;
     return _WalletFormScaffold(
       title: '支付密码',
       children: [
+        _WalletPayPasswordSecurityPanel(
+          balance: balance,
+          selectedMethod: _method,
+          onChanged: methods.isEmpty
+              ? null
+              : (value) => setState(() => _method = value),
+        ),
+        const SizedBox(height: 14),
         _WalletTextField(
           controller: _password,
           label: '支付密码',
@@ -942,12 +1035,154 @@ class _WalletPayPasswordPageState extends State<WalletPayPasswordPage> {
           keyboardType: TextInputType.number,
           obscureText: true,
         ),
+        const SizedBox(height: 12),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: _WalletTextField(
+                controller: _code,
+                label: '验证码',
+                hint: '安全验证码',
+                keyboardType: TextInputType.number,
+              ),
+            ),
+            const SizedBox(width: 10),
+            SizedBox(
+              height: 56,
+              child: OutlinedButton(
+                onPressed: canSet && !_sendingCode ? _sendCode : null,
+                child: Text(_sendingCode ? '发送中...' : '获取验证码'),
+              ),
+            ),
+          ],
+        ),
         const SizedBox(height: 22),
         _WalletPrimaryButton(
           text: _busy ? '保存中...' : '保存',
-          onPressed: _busy ? null : _submit,
+          onPressed: canSet && !_busy ? _submit : null,
         ),
       ],
+    );
+  }
+}
+
+class _WalletPayPasswordSecurityPanel extends StatelessWidget {
+  const _WalletPayPasswordSecurityPanel({
+    required this.balance,
+    required this.selectedMethod,
+    required this.onChanged,
+  });
+
+  final WalletBalance? balance;
+  final String selectedMethod;
+  final ValueChanged<String>? onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final methods = balance?.securityMethods ?? const <WalletSecurityMethod>[];
+    if (methods.isEmpty) {
+      return const _WalletPlainNotice(
+        icon: Icons.info_outline,
+        text: '请先绑定手机号、邮箱或安全验证方式',
+        color: Color(0xffb45309),
+        background: Color(0xfffffbeb),
+        border: Color(0xfffde68a),
+      );
+    }
+    final value = methods.any((item) => item.method == selectedMethod)
+        ? selectedMethod
+        : methods.first.method;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        DropdownButtonFormField<String>(
+          initialValue: value,
+          decoration: const InputDecoration(
+            labelText: '安全验证',
+            filled: true,
+            fillColor: _surfaceColor,
+            border: OutlineInputBorder(
+              borderSide: BorderSide(color: _lightBorderColor),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderSide: BorderSide(color: _lightBorderColor),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderSide: BorderSide(color: _primaryColor),
+            ),
+          ),
+          items: [
+            for (final method in methods)
+              DropdownMenuItem<String>(
+                value: method.method,
+                child: Text(
+                  '${method.label}${method.target.isEmpty ? '' : ' ${method.target}'}',
+                ),
+              ),
+          ],
+          onChanged: onChanged == null
+              ? null
+              : (value) {
+                  if (value != null) {
+                    onChanged!(value);
+                  }
+                },
+        ),
+        if (balance?.payPasswordLocked == true) ...[
+          const SizedBox(height: 10),
+          const _WalletPlainNotice(
+            icon: Icons.lock_outline,
+            text: '支付密码已锁定，请联系管理员解锁',
+            color: Color(0xff991b1b),
+            background: Color(0xfffef2f2),
+            border: Color(0xfffecaca),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+class _WalletPlainNotice extends StatelessWidget {
+  const _WalletPlainNotice({
+    required this.icon,
+    required this.text,
+    required this.color,
+    required this.background,
+    required this.border,
+  });
+
+  final IconData icon;
+  final String text;
+  final Color color;
+  final Color background;
+  final Color border;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+      decoration: BoxDecoration(
+        color: background,
+        border: Border.all(color: border),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, size: 18, color: color),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              text,
+              style: TextStyle(
+                color: color,
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

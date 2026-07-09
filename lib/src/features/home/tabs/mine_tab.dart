@@ -83,7 +83,7 @@ class MineTab extends StatelessWidget {
                 icon: Icons.qr_code_scanner,
                 iconColor: const Color(0xff111827),
                 title: '扫一扫',
-                subtitle: '扫描好友二维码',
+                subtitle: '添加好友、收付款',
                 onTap: () =>
                     _push(context, FriendQrScannerPage(controller: controller)),
               ),

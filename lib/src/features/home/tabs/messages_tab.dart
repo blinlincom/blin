@@ -9,6 +9,80 @@ class MessagesTab extends StatefulWidget {
   State<MessagesTab> createState() => _MessagesTabState();
 }
 
+class _MessagesHeader extends StatelessWidget {
+  const _MessagesHeader({required this.controller});
+
+  final SessionController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    return ColoredBox(
+      color: _surfaceColor,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(14, 8, 14, 10),
+        child: Row(
+          children: [
+            Expanded(
+              child: InkWell(
+                onTap: () => _push(context, SearchPage(controller: controller)),
+                borderRadius: BorderRadius.circular(6),
+                child: Container(
+                  height: 36,
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  decoration: BoxDecoration(
+                    color: _fillColor,
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: const Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.search, color: _mutedColor, size: 17),
+                      SizedBox(width: 8),
+                      Text(
+                        '搜索',
+                        style: TextStyle(
+                          color: _mutedColor,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Semantics(
+              button: true,
+              label: '扫一扫',
+              child: Material(
+                color: _fillColor,
+                borderRadius: BorderRadius.circular(6),
+                child: InkWell(
+                  onTap: () => _push(
+                    context,
+                    FriendQrScannerPage(controller: controller),
+                  ),
+                  borderRadius: BorderRadius.circular(6),
+                  child: const SizedBox(
+                    width: 44,
+                    height: 44,
+                    child: Icon(
+                      Icons.qr_code_scanner,
+                      color: _textColor,
+                      size: 22,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _MessagesTabState extends State<MessagesTab> {
   late int _conversationRevision;
   List<Map<String, Object?>> _conversations = const [];
@@ -261,10 +335,7 @@ class _MessagesTabState extends State<MessagesTab> {
 
   @override
   Widget build(BuildContext context) {
-    final header = _SearchBar(
-      hintText: '搜索',
-      onTap: () => _push(context, SearchPage(controller: widget.controller)),
-    );
+    final header = _MessagesHeader(controller: widget.controller);
     return ColoredBox(
       color: _surfaceColor,
       child: ListView.builder(

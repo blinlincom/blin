@@ -272,23 +272,50 @@ class WalletBalance {
     this.balance = '0.00',
     this.balanceLabel = '0.00',
     this.payPasswordSet = false,
+    this.payPasswordLocked = false,
+    this.payPasswordLockedUntil = '',
+    this.payPasswordFailedCount = 0,
+    this.securityBound = false,
+    this.securityMethods = const [],
     this.serverTime = 0,
   });
 
   final String balance;
   final String balanceLabel;
   final bool payPasswordSet;
+  final bool payPasswordLocked;
+  final String payPasswordLockedUntil;
+  final int payPasswordFailedCount;
+  final bool securityBound;
+  final List<WalletSecurityMethod> securityMethods;
   final int serverTime;
 
   factory WalletBalance.fromJson(Object? value) {
     final map = _objectMap(value);
     final balance = _decimalLabel(map['balance']);
+    final methods = <WalletSecurityMethod>[];
+    final rawMethods = map['security_methods'];
+    if (rawMethods is Iterable) {
+      for (final item in rawMethods) {
+        final method = WalletSecurityMethod.fromJson(item);
+        if (method.method.isNotEmpty) {
+          methods.add(method);
+        }
+      }
+    }
     return WalletBalance(
       balance: balance,
       balanceLabel:
           _stringFromKeys(map, const ['balance_label', 'balance_text']) ??
           balance,
       payPasswordSet: _enabled(map['pay_password_set']),
+      payPasswordLocked: _enabled(map['pay_password_locked']),
+      payPasswordLockedUntil:
+          _stringFromKeys(map, const ['pay_password_locked_until']) ?? '',
+      payPasswordFailedCount:
+          int.tryParse(map['pay_password_failed_count']?.toString() ?? '') ?? 0,
+      securityBound: _enabled(map['security_bound']),
+      securityMethods: methods,
       serverTime: int.tryParse(map['server_time']?.toString() ?? '') ?? 0,
     );
   }
@@ -297,7 +324,39 @@ class WalletBalance {
     'balance': balance,
     'balance_label': balanceLabel,
     'pay_password_set': payPasswordSet ? 1 : 0,
+    'pay_password_locked': payPasswordLocked ? 1 : 0,
+    'pay_password_locked_until': payPasswordLockedUntil,
+    'pay_password_failed_count': payPasswordFailedCount,
+    'security_bound': securityBound ? 1 : 0,
+    'security_methods': securityMethods.map((item) => item.toJson()).toList(),
     'server_time': serverTime,
+  };
+}
+
+class WalletSecurityMethod {
+  const WalletSecurityMethod({
+    required this.method,
+    required this.label,
+    required this.target,
+  });
+
+  final String method;
+  final String label;
+  final String target;
+
+  factory WalletSecurityMethod.fromJson(Object? value) {
+    final map = _objectMap(value);
+    return WalletSecurityMethod(
+      method: map['method']?.toString() ?? '',
+      label: map['label']?.toString() ?? '',
+      target: map['target']?.toString() ?? '',
+    );
+  }
+
+  Map<String, Object?> toJson() => {
+    'method': method,
+    'label': label,
+    'target': target,
   };
 }
 

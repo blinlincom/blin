@@ -231,17 +231,44 @@ class ApiClient {
     required UserSession session,
     required String device,
     required String password,
+    required String verificationMethod,
+    required String verifyCode,
   }) async {
     final result = await secureSignedImPost<Object?>(
       'wallet_pay_password_set',
       session: session,
       device: device,
-      params: {'new_pay_password': password},
+      params: {
+        'new_pay_password': password,
+        'verification_method': verificationMethod,
+        'verify_code': verifyCode,
+      },
       secureResponse: true,
     );
     if (!result.isSuccess) {
       throw ApiException(result.message, code: result.code);
     }
+  }
+
+  Future<Map<String, Object?>> walletSendPayPasswordCode({
+    required UserSession session,
+    required String device,
+    required String verificationMethod,
+  }) async {
+    final result = await secureSignedImPost<Map<String, Object?>>(
+      'wallet_security_code_send',
+      session: session,
+      device: device,
+      params: {
+        if (verificationMethod.isNotEmpty)
+          'verification_method': verificationMethod,
+      },
+      secureResponse: true,
+    );
+    if (!result.isSuccess) {
+      throw ApiException(result.message, code: result.code);
+    }
+    return result.data;
   }
 
   Future<void> walletRechargeKm({

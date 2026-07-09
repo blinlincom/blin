@@ -8,6 +8,7 @@ class ActionInputField {
     this.initial = '',
     this.keyboardType,
     this.maxLines = 1,
+    this.obscureText = false,
   });
 
   final String id;
@@ -16,6 +17,7 @@ class ActionInputField {
   final String initial;
   final TextInputType? keyboardType;
   final int maxLines;
+  final bool obscureText;
 }
 
 void _showChatSnack(BuildContext context, String text, {bool error = false}) {
@@ -194,6 +196,7 @@ class _ActionInputPageState extends State<ActionInputPage> {
         keyboardType: field.keyboardType,
         maxLines: field.maxLines,
         minLines: field.maxLines > 1 ? 2 : 1,
+        obscureText: field.obscureText,
         style: const TextStyle(
           color: _textColor,
           fontSize: 15,

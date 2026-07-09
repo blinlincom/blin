@@ -319,6 +319,44 @@ String _atName(String username) {
   return value.startsWith('@') ? value : '@$value';
 }
 
+Future<void> _openQrScanResult({
+  required BuildContext context,
+  required SessionController controller,
+  required String raw,
+  bool replace = false,
+}) async {
+  final text = raw.trim();
+  if (text.isEmpty) {
+    throw Exception('二维码内容为空');
+  }
+
+  Widget page;
+  final walletToken = _walletTokenFromQr(text);
+  if (walletToken.isNotEmpty) {
+    final order = await controller.scanWalletQr(walletToken);
+    page = WalletPayConfirmPage(
+      controller: controller,
+      order: order,
+      qrToken: walletToken,
+    );
+  } else {
+    final friendTarget = _parseFriendQrTarget(text);
+    page = friendTarget == null
+        ? _UnknownQrResultPage(raw: text)
+        : FriendQrResultPage(controller: controller, target: friendTarget);
+  }
+
+  if (!context.mounted) {
+    return;
+  }
+  final route = MaterialPageRoute<void>(builder: (_) => page);
+  if (replace) {
+    await Navigator.of(context).pushReplacement(route);
+  } else {
+    await Navigator.of(context).push(route);
+  }
+}
+
 class FriendQrScannerPage extends StatefulWidget {
   const FriendQrScannerPage({required this.controller, super.key});
 
@@ -365,22 +403,35 @@ class _FriendQrScannerPageState extends State<FriendQrScannerPage> {
   }
 
   Future<void> _openRaw(String raw) async {
-    final target = _parseFriendQrTarget(raw);
-    if (target == null) {
-      setState(() => _error = '不是有效的 BIM 好友二维码');
-      return;
-    }
     _handled = true;
     await _scanner.stop();
     if (!mounted) {
       return;
     }
-    await Navigator.of(context).pushReplacement(
-      MaterialPageRoute<void>(
-        builder: (_) =>
-            FriendQrResultPage(controller: widget.controller, target: target),
-      ),
-    );
+    try {
+      await _openQrScanResult(
+        context: context,
+        controller: widget.controller,
+        raw: raw,
+        replace: true,
+      );
+    } catch (error, stackTrace) {
+      AppLogger.error(
+        'ui',
+        'open qr scan result failed',
+        error: error,
+        stackTrace: stackTrace,
+        data: {'raw_length': raw.length},
+      );
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _handled = false;
+        _error = error.toString().replaceFirst('Exception: ', '');
+      });
+      unawaited(_scanner.start());
+    }
   }
 
   Future<void> _pickFromAlbum() async {
@@ -491,7 +542,7 @@ class _FriendQrScannerPageState extends State<FriendQrScannerPage> {
                     right: 24,
                     bottom: 28,
                     child: Text(
-                      _error.isEmpty ? '将好友二维码放入框内' : _error,
+                      _error.isEmpty ? '将二维码放入框内' : _error,
                       textAlign: TextAlign.center,
                       style: TextStyle(
                         color: _error.isEmpty ? Colors.white : _dangerColor,
@@ -755,6 +806,79 @@ class _FriendQrResultPageState extends State<FriendQrResultPage> {
   }
 }
 
+class _UnknownQrResultPage extends StatelessWidget {
+  const _UnknownQrResultPage({required this.raw});
+
+  final String raw;
+
+  Future<void> _copy(BuildContext context) async {
+    await Clipboard.setData(ClipboardData(text: raw));
+    if (context.mounted) {
+      _showChatSnack(context, '已复制');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: _pageColor,
+      appBar: AppBar(title: const Text('二维码内容')),
+      body: SafeArea(
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(18, 20, 18, 32),
+          children: [
+            const Icon(Icons.qr_code_2, size: 52, color: _mutedColor),
+            const SizedBox(height: 16),
+            const Text(
+              '未识别到可处理的业务二维码',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: _textColor,
+                fontSize: 17,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              '可以复制内容后自行确认来源。',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: _mutedColor, fontSize: 13),
+            ),
+            const SizedBox(height: 22),
+            DecoratedBox(
+              decoration: BoxDecoration(
+                color: _surfaceColor,
+                border: Border.all(color: _lightBorderColor),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.all(14),
+                child: SelectableText(
+                  raw,
+                  style: const TextStyle(
+                    color: _textColor,
+                    fontSize: 14,
+                    height: 1.45,
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 18),
+            SizedBox(
+              height: 48,
+              child: FilledButton.icon(
+                onPressed: () => _copy(context),
+                icon: const Icon(Icons.copy, size: 18),
+                label: const Text('复制内容'),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _QrAlbumPickerPage extends StatefulWidget {
   const _QrAlbumPickerPage();
 
@@ -762,7 +886,8 @@ class _QrAlbumPickerPage extends StatefulWidget {
   State<_QrAlbumPickerPage> createState() => _QrAlbumPickerPageState();
 }
 
-class _QrAlbumPickerPageState extends State<_QrAlbumPickerPage> {
+class _QrAlbumPickerPageState extends State<_QrAlbumPickerPage>
+    with WidgetsBindingObserver {
   static const _pageSize = 120;
 
   final ScrollController _gridController = ScrollController();
@@ -780,16 +905,31 @@ class _QrAlbumPickerPageState extends State<_QrAlbumPickerPage> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _gridController.addListener(_onGridScroll);
     unawaited(_loadAlbums());
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _gridController
       ..removeListener(_onGridScroll)
       ..dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) {
+      return;
+    }
+    final album = _selectedAlbum;
+    if (album == null) {
+      unawaited(_loadAlbums());
+    } else {
+      unawaited(_loadAssets(album, showPageLoading: false));
+    }
   }
 
   void _onGridScroll() {
@@ -824,6 +964,7 @@ class _QrAlbumPickerPageState extends State<_QrAlbumPickerPage> {
       }
       final albums = await PhotoManager.getAssetPathList(
         type: RequestType.image,
+        filterOption: _qrAlbumFilterOption,
         hasAll: true,
       );
       if (!mounted) {
@@ -877,6 +1018,7 @@ class _QrAlbumPickerPageState extends State<_QrAlbumPickerPage> {
     }
     try {
       final assets = await album.getAssetListPaged(page: 0, size: _pageSize);
+      assets.sort(_mediaAssetRecentCompare);
       if (!mounted) {
         return;
       }
@@ -923,6 +1065,7 @@ class _QrAlbumPickerPageState extends State<_QrAlbumPickerPage> {
         page: nextPage,
         size: _pageSize,
       );
+      assets.sort(_mediaAssetRecentCompare);
       if (!mounted) {
         return;
       }
@@ -1229,6 +1372,29 @@ String _firstBarcodeRawValue(BarcodeCapture? capture) {
     }
   }
   return '';
+}
+
+FilterOptionGroup get _qrAlbumFilterOption => FilterOptionGroup(
+  orders: const [OrderOption(type: OrderOptionType.createDate, asc: false)],
+);
+
+Future<String> _scanQrRawFromImagePath(String path) async {
+  if (path.trim().isEmpty) {
+    return '';
+  }
+  final scanner = MobileScannerController(
+    formats: const [BarcodeFormat.qrCode],
+    detectionSpeed: DetectionSpeed.noDuplicates,
+  );
+  try {
+    final capture = await scanner.analyzeImage(
+      path,
+      formats: const [BarcodeFormat.qrCode],
+    );
+    return _firstBarcodeRawValue(capture);
+  } finally {
+    scanner.dispose();
+  }
 }
 
 Map<String, Object?>? _firstExactUsername(

@@ -1951,6 +1951,12 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         ),
       if (copyText.isNotEmpty)
         _MessageActionItem(label: '复制', icon: Icons.copy, onTap: _copySelected),
+      if (_messageCanScanQr(item))
+        _MessageActionItem(
+          label: '识别二维码',
+          icon: Icons.qr_code_scanner,
+          onTap: _scanSelectedQr,
+        ),
       _MessageActionItem(
         label: '收藏',
         icon: Icons.bookmark_border,
@@ -1978,6 +1984,136 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         contentType == ChatContentTypes.transfer ||
         contentType == ChatContentTypes.redPacketReceived ||
         contentType == ChatContentTypes.transferReceived;
+  }
+
+  bool _messageCanScanQr(Map<String, Object?> item) {
+    final contentType = _messageContentType(item);
+    if (_messageActionPaymentLike(contentType)) {
+      return false;
+    }
+    final media = _ChatMediaItem.fromMessage(item);
+    if (media.isImageLike) {
+      return media.existingLocalPath.isNotEmpty || media.url.isNotEmpty;
+    }
+    if (media.isVideo) {
+      final payload = _asObjectMap(item['payload']);
+      final mediaPayload = _asObjectMap(payload['media']);
+      return _qrMediaCoverLocalPath(payload, mediaPayload).isNotEmpty ||
+          _qrMediaCoverRemoteUrl(payload, mediaPayload).isNotEmpty;
+    }
+    if (!media.isFile) {
+      return false;
+    }
+    final mime = media.mime.toLowerCase();
+    final imageLike =
+        mime.startsWith('image/') ||
+        _looksLikeImagePath(media.localPath) ||
+        _looksLikeImagePath(media.url);
+    return imageLike &&
+        (media.existingLocalPath.isNotEmpty || media.url.isNotEmpty);
+  }
+
+  Future<void> _scanSelectedQr() async {
+    final item = Map<String, Object?>.from(_selectedMessage);
+    if (item.isEmpty) {
+      return;
+    }
+    _QrScanImageSource? source;
+    setState(() {
+      _message = '识别中...';
+      _error = null;
+      _selectedClientMsgNo = '';
+      _selectedPayload = const {};
+      _selectedMessage = const {};
+      _selectedMenuAnchor = null;
+    });
+    try {
+      source = await _qrScanImageSourceFromMessage(item);
+      if (source == null || source.path.isEmpty) {
+        throw Exception('当前消息没有可识别的二维码图片');
+      }
+      final raw = await _scanQrRawFromImagePath(source.path);
+      if (raw.isEmpty) {
+        if (mounted) {
+          setState(() {
+            _message = '';
+            _error = '未识别到二维码';
+          });
+        }
+        return;
+      }
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _message = '';
+        _error = null;
+      });
+      await _openQrScanResult(
+        context: context,
+        controller: widget.controller,
+        raw: raw,
+      );
+    } catch (error, stackTrace) {
+      AppLogger.error(
+        'chat',
+        'scan message qr failed',
+        error: error,
+        stackTrace: stackTrace,
+        data: {
+          'client_msg_no': _value(item, ['client_msg_no']),
+          'content_type': _messageContentType(item),
+        },
+      );
+      if (mounted) {
+        setState(() {
+          _message = '';
+          _error = error.toString().replaceFirst('Exception: ', '');
+        });
+      }
+    } finally {
+      final path = source?.path ?? '';
+      if (source?.temporary == true && path.isNotEmpty) {
+        try {
+          await File(path).delete();
+        } on Object {
+          // 临时识别文件删除失败不影响用户继续操作。
+        }
+      }
+    }
+  }
+
+  Future<_QrScanImageSource?> _qrScanImageSourceFromMessage(
+    Map<String, Object?> item,
+  ) async {
+    final payload = _asObjectMap(item['payload']);
+    final mediaPayload = _asObjectMap(payload['media']);
+    final media = _ChatMediaItem.fromMessage(item);
+    if (media.isImageLike ||
+        (media.isFile &&
+            (media.mime.toLowerCase().startsWith('image/') ||
+                _looksLikeImagePath(media.localPath) ||
+                _looksLikeImagePath(media.url)))) {
+      final local = media.existingLocalPath;
+      if (local.isNotEmpty) {
+        return _QrScanImageSource(path: local, temporary: false);
+      }
+      if (media.url.isNotEmpty) {
+        return _downloadQrScanImage(media.url);
+      }
+      return null;
+    }
+    if (media.isVideo) {
+      final coverLocal = _qrMediaCoverLocalPath(payload, mediaPayload);
+      if (coverLocal.isNotEmpty) {
+        return _QrScanImageSource(path: coverLocal, temporary: false);
+      }
+      final coverUrl = _qrMediaCoverRemoteUrl(payload, mediaPayload);
+      if (coverUrl.isNotEmpty) {
+        return _downloadQrScanImage(coverUrl);
+      }
+    }
+    return null;
   }
 
   String _selectedMessageCopyText(Map<String, Object?> item) {
@@ -3075,6 +3211,9 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       setState(() => _message = _groupMuteText(_groupMuteState));
       return;
     }
+    if (!await _ensureWalletReadyForPayment()) {
+      return;
+    }
     final data = await _openInput(
       context,
       title: '发送转账',
@@ -3090,6 +3229,13 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
           hint: 'money 或 integral',
           initial: 'money',
         ),
+        const ActionInputField(
+          id: 'pay_password',
+          label: '支付密码',
+          hint: '6位数字',
+          keyboardType: TextInputType.number,
+          obscureText: true,
+        ),
         const ActionInputField(id: 'remark', label: '备注'),
         if (_isGroup) const ActionInputField(id: 'receiver_id', label: '指定收款人'),
       ],
@@ -3104,6 +3250,11 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       setState(() => _error = amountError);
       return;
     }
+    final payPassword = (data['pay_password'] ?? '').trim();
+    if (!RegExp(r'^\d{6}$').hasMatch(payPassword)) {
+      setState(() => _error = '请输入6位支付密码');
+      return;
+    }
     await _runSending(() async {
       if (_isGroup) {
         await widget.controller.sendGroupTransfer(
@@ -3112,6 +3263,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
           receiverId: data['receiver_id'] ?? '',
           money: money,
           assetType: assetType.isEmpty ? 'money' : assetType,
+          payPassword: payPassword,
           remark: data['remark'] ?? '',
         );
       } else {
@@ -3119,6 +3271,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
           receiverId: _receiverId,
           money: money,
           assetType: assetType.isEmpty ? 'money' : assetType,
+          payPassword: payPassword,
           remark: data['remark'] ?? '',
         );
       }
@@ -3128,6 +3281,9 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   Future<void> _sendRedPacket() async {
     if (!_composerEnabled) {
       setState(() => _message = _groupMuteText(_groupMuteState));
+      return;
+    }
+    if (!await _ensureWalletReadyForPayment()) {
       return;
     }
     final data = await _openInput(
@@ -3149,6 +3305,13 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
           id: 'remark',
           label: '祝福语',
           initial: '恭喜发财，大吉大利',
+        ),
+        const ActionInputField(
+          id: 'pay_password',
+          label: '支付密码',
+          hint: '6位数字',
+          keyboardType: TextInputType.number,
+          obscureText: true,
         ),
         if (_isGroup)
           const ActionInputField(
@@ -3177,6 +3340,11 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       setState(() => _error = amountError);
       return;
     }
+    final payPassword = (data['pay_password'] ?? '').trim();
+    if (!RegExp(r'^\d{6}$').hasMatch(payPassword)) {
+      setState(() => _error = '请输入6位支付密码');
+      return;
+    }
     await _runSending(() async {
       if (_isGroup) {
         await widget.controller.sendGroupRedPacket(
@@ -3184,6 +3352,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
           channelId: widget.channelId,
           money: money,
           assetType: assetType.isEmpty ? 'money' : assetType,
+          payPassword: payPassword,
           packetType: data['packet_type'] ?? 'ordinary',
           quantity: int.tryParse(data['quantity'] ?? '') ?? 1,
           receiverId: data['receiver_id'] ?? '',
@@ -3194,6 +3363,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
           receiverId: _receiverId,
           money: money,
           assetType: assetType.isEmpty ? 'money' : assetType,
+          payPassword: payPassword,
           remark: data['remark'] ?? '',
         );
       }
@@ -3212,6 +3382,57 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     }
     final amount = double.tryParse(value);
     return amount != null && amount > 0 ? '' : '金额必须大于 0';
+  }
+
+  Future<bool> _ensureWalletReadyForPayment() async {
+    WalletBalance balance;
+    try {
+      balance = await widget.controller.loadWalletBalance(refresh: true);
+    } catch (error) {
+      if (mounted) {
+        setState(() => _error = error.toString());
+      }
+      return false;
+    }
+    if (!mounted) {
+      return false;
+    }
+    if (!balance.securityBound) {
+      setState(() => _error = '请先绑定手机号、邮箱或安全验证方式');
+      return false;
+    }
+    if (balance.payPasswordLocked) {
+      setState(() => _error = '支付密码已锁定，请联系管理员解锁');
+      return false;
+    }
+    if (balance.payPasswordSet) {
+      return true;
+    }
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => WalletPayPasswordPage(controller: widget.controller),
+      ),
+    );
+    if (!mounted) {
+      return false;
+    }
+    try {
+      balance = await widget.controller.loadWalletBalance(refresh: true);
+    } catch (error) {
+      if (mounted) {
+        setState(() => _error = error.toString());
+      }
+      return false;
+    }
+    if (!balance.payPasswordSet) {
+      setState(() => _error = '请先设置支付密码');
+      return false;
+    }
+    if (balance.payPasswordLocked) {
+      setState(() => _error = '支付密码已锁定，请联系管理员解锁');
+      return false;
+    }
+    return true;
   }
 
   Future<void> _openTextOptions() async {
@@ -4185,6 +4406,97 @@ class _ChatToastState extends State<_ChatToast> {
       ),
     );
   }
+}
+
+class _QrScanImageSource {
+  const _QrScanImageSource({required this.path, required this.temporary});
+
+  final String path;
+  final bool temporary;
+}
+
+String _qrMediaCoverLocalPath(
+  Map<String, Object?> payload,
+  Map<String, Object?> media,
+) {
+  for (final key in const [
+    'cover_file_path',
+    'cover_local_path',
+    'cover_path',
+    'thumb_file_path',
+    'thumb_local_path',
+    'thumb_path',
+    'thumbnail_file_path',
+    'thumbnail_path',
+    'image_file_path',
+  ]) {
+    final value = _value(payload, [key], fallback: _value(media, [key]));
+    if (value.isEmpty ||
+        _isRemoteResource(value) ||
+        !_isLikelyLocalPath(value)) {
+      continue;
+    }
+    try {
+      if (File(value).existsSync()) {
+        return value;
+      }
+    } on Object {
+      continue;
+    }
+  }
+  return '';
+}
+
+String _qrMediaCoverRemoteUrl(
+  Map<String, Object?> payload,
+  Map<String, Object?> media,
+) {
+  for (final key in const [
+    'cover_url',
+    'cover_image_url',
+    'cover_path',
+    'thumb_url',
+    'thumbnail_url',
+    'thumbnail_path',
+    'image_url',
+  ]) {
+    final raw = _value(payload, [key], fallback: _value(media, [key]));
+    if (raw.isEmpty || _isLikelyLocalPath(raw)) {
+      continue;
+    }
+    final url = _normalizeAvatarUrl(raw);
+    if (url.isNotEmpty) {
+      return url;
+    }
+  }
+  return '';
+}
+
+Future<_QrScanImageSource> _downloadQrScanImage(String rawUrl) async {
+  final url = _normalizeAvatarUrl(rawUrl);
+  if (url.isEmpty) {
+    throw Exception('二维码图片地址为空');
+  }
+  final dir = await getTemporaryDirectory();
+  final ext = _qrScanImageExtension(url);
+  final path =
+      '${dir.path}/bim_qr_scan_${DateTime.now().microsecondsSinceEpoch}$ext';
+  await Dio().download(
+    url,
+    path,
+    options: Options(responseType: ResponseType.bytes),
+  );
+  return _QrScanImageSource(path: path, temporary: true);
+}
+
+String _qrScanImageExtension(String url) {
+  final path = Uri.tryParse(url)?.path.toLowerCase() ?? url.toLowerCase();
+  for (final ext in const ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp']) {
+    if (path.endsWith(ext)) {
+      return ext;
+    }
+  }
+  return '.jpg';
 }
 
 class _GroupCallInvitePickerPage extends StatefulWidget {

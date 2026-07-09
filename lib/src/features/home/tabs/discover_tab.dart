@@ -38,7 +38,7 @@ class DiscoverTab extends StatelessWidget {
             icon: Icons.qr_code_scanner,
             iconColor: const Color(0xff111827),
             title: '扫一扫',
-            subtitle: '扫描二维码添加好友',
+            subtitle: '添加好友、收付款',
             onTap: () =>
                 _push(context, FriendQrScannerPage(controller: controller)),
           ),
