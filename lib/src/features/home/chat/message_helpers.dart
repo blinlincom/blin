@@ -472,10 +472,14 @@ bool _isSystemNoticeMessage(Map<String, Object?> item) {
       contentType == ChatContentTypes.walletNotice) {
     return false;
   }
+  final payload = _asObjectMap(item['payload']);
   return contentType == ChatContentTypes.redPacketReceived ||
       contentType == ChatContentTypes.transferReceived ||
+      contentType == 'cmd' ||
       _boolValue(item['is_system']) ||
-      _boolValue(_asObjectMap(item['payload'])['is_system']);
+      _boolValue(item['system_message']) ||
+      _boolValue(payload['is_system']) ||
+      _boolValue(payload['system_message']);
 }
 
 String _systemNoticeText(Map<String, Object?> item) {
@@ -504,6 +508,12 @@ String _systemNoticeText(Map<String, Object?> item) {
       payload,
       action: ChatContentTypes.transferReceived,
     );
+  }
+  if (contentType == 'cmd') {
+    final notice = _value(payload, ['notice', 'summary', 'text', 'content']);
+    if (notice.isNotEmpty && notice != '[消息]') {
+      return notice;
+    }
   }
   return content.isEmpty ? '[系统消息]' : content;
 }
