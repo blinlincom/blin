@@ -554,17 +554,13 @@ class ApiClient {
   Future<WalletOrder> walletCurrentPayCode({
     required UserSession session,
     required String device,
-    required String payPassword,
     String remark = '',
   }) async {
     final result = await secureSignedImPost<Map<String, Object?>>(
       'wallet_pay_code_current',
       session: session,
       device: device,
-      params: {
-        'pay_password': payPassword,
-        if (remark.isNotEmpty) 'remark': remark,
-      },
+      params: {if (remark.isNotEmpty) 'remark': remark},
       secureResponse: true,
     );
     if (!result.isSuccess) {
@@ -594,7 +590,8 @@ class ApiClient {
   Future<WalletOrder> walletConfirmQrPay({
     required UserSession session,
     required String device,
-    required String qrToken,
+    String qrToken = '',
+    String orderNo = '',
     required String payPassword,
     required String amount,
     required String requestId,
@@ -604,7 +601,8 @@ class ApiClient {
       session: session,
       device: device,
       params: {
-        'qr_token': qrToken,
+        if (qrToken.isNotEmpty) 'qr_token': qrToken,
+        if (orderNo.isNotEmpty) 'order_no': orderNo,
         'pay_password': payPassword,
         'request_id': requestId,
         if (amount.isNotEmpty) 'amount': amount,

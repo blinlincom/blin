@@ -792,6 +792,9 @@ String _walletNoticeTitle(Map<String, Object?> payload) {
     return direct;
   }
   final scene = _walletNoticeScene(payload);
+  if (scene == 'pay_code_confirm_required') {
+    return '待确认付款';
+  }
   if (scene == 'scan_collect_success') {
     return '收款到账';
   }

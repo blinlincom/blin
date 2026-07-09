@@ -450,6 +450,10 @@ class _PaymentServicePageState extends State<PaymentServicePage>
     final notice = _walletNoticePayload(payload);
     final title = _walletNoticeTitle(payload);
     final amount = _paymentServiceAmountText(notice);
+    final scene = _walletNoticeScene(payload);
+    final orderNo = _value(notice, ['order_no']);
+    final canConfirmPayCode =
+        scene == 'pay_code_confirm_required' && orderNo.isNotEmpty;
     final rows = <_PaymentServiceDetailRowData>[
       _PaymentServiceDetailRowData(
         label: '交易对象',
@@ -492,9 +496,46 @@ class _PaymentServicePageState extends State<PaymentServicePage>
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
       ),
-      builder: (context) =>
-          _PaymentServiceDetailSheet(title: title, amount: amount, rows: rows),
+      builder: (context) => _PaymentServiceDetailSheet(
+        title: title,
+        amount: amount,
+        rows: rows,
+        actionText: canConfirmPayCode ? '确认付款' : '',
+        onAction: canConfirmPayCode
+            ? () {
+                Navigator.of(context).pop();
+                unawaited(_confirmPayCodeOrder(orderNo, amount));
+              }
+            : null,
+      ),
     );
+  }
+
+  Future<void> _confirmPayCodeOrder(String orderNo, String amountLabel) async {
+    final password = await _showWalletPayPasswordSheet(
+      context,
+      title: '确认付款',
+      amountLabel: amountLabel,
+    );
+    if (password.isEmpty || !mounted) {
+      return;
+    }
+    try {
+      final order = await widget.controller.confirmWalletPayCodeOrder(
+        orderNo: orderNo,
+        payPassword: password,
+      );
+      if (!mounted) {
+        return;
+      }
+      _showWalletMessage(context, '支付成功');
+      unawaited(_loadMessagesIntoState(showLoading: false));
+      unawaited(widget.controller.loadWalletOrderStatus(order.orderNo));
+    } catch (error) {
+      if (mounted) {
+        _showWalletMessage(context, error.toString());
+      }
+    }
   }
 }
 
@@ -1031,11 +1072,15 @@ class _PaymentServiceDetailSheet extends StatelessWidget {
     required this.title,
     required this.amount,
     required this.rows,
+    this.actionText = '',
+    this.onAction,
   });
 
   final String title;
   final String amount;
   final List<_PaymentServiceDetailRowData> rows;
+  final String actionText;
+  final VoidCallback? onAction;
 
   @override
   Widget build(BuildContext context) {
@@ -1088,6 +1133,14 @@ class _PaymentServiceDetailSheet extends StatelessWidget {
               },
             ),
           ),
+          if (actionText.isNotEmpty && onAction != null) ...[
+            const SizedBox(height: 18),
+            SizedBox(
+              width: double.infinity,
+              height: 48,
+              child: FilledButton(onPressed: onAction, child: Text(actionText)),
+            ),
+          ],
         ],
       ),
     );

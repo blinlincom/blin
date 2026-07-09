@@ -3242,13 +3242,6 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
           hint: 'money 或 integral',
           initial: 'money',
         ),
-        const ActionInputField(
-          id: 'pay_password',
-          label: '支付密码',
-          hint: '6位数字',
-          keyboardType: TextInputType.number,
-          obscureText: true,
-        ),
         const ActionInputField(id: 'remark', label: '备注'),
         if (_isGroup) const ActionInputField(id: 'receiver_id', label: '指定收款人'),
       ],
@@ -3263,9 +3256,13 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       setState(() => _error = amountError);
       return;
     }
-    final payPassword = (data['pay_password'] ?? '').trim();
-    if (!RegExp(r'^\d{6}$').hasMatch(payPassword)) {
-      setState(() => _error = '请输入6位支付密码');
+    final normalizedAssetType = assetType.isEmpty ? 'money' : assetType;
+    final payPassword = await _showWalletPayPasswordSheet(
+      context,
+      title: '确认转账',
+      amountLabel: _chatPaymentAmountLabel(money, normalizedAssetType),
+    );
+    if (payPassword.isEmpty) {
       return;
     }
     await _runSending(() async {
@@ -3275,7 +3272,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
           channelId: widget.channelId,
           receiverId: data['receiver_id'] ?? '',
           money: money,
-          assetType: assetType.isEmpty ? 'money' : assetType,
+          assetType: normalizedAssetType,
           payPassword: payPassword,
           remark: data['remark'] ?? '',
         );
@@ -3283,7 +3280,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         await widget.controller.sendPrivateTransfer(
           receiverId: _receiverId,
           money: money,
-          assetType: assetType.isEmpty ? 'money' : assetType,
+          assetType: normalizedAssetType,
           payPassword: payPassword,
           remark: data['remark'] ?? '',
         );
@@ -3319,13 +3316,6 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
           label: '祝福语',
           initial: '恭喜发财，大吉大利',
         ),
-        const ActionInputField(
-          id: 'pay_password',
-          label: '支付密码',
-          hint: '6位数字',
-          keyboardType: TextInputType.number,
-          obscureText: true,
-        ),
         if (_isGroup)
           const ActionInputField(
             id: 'packet_type',
@@ -3353,9 +3343,13 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       setState(() => _error = amountError);
       return;
     }
-    final payPassword = (data['pay_password'] ?? '').trim();
-    if (!RegExp(r'^\d{6}$').hasMatch(payPassword)) {
-      setState(() => _error = '请输入6位支付密码');
+    final normalizedAssetType = assetType.isEmpty ? 'money' : assetType;
+    final payPassword = await _showWalletPayPasswordSheet(
+      context,
+      title: '确认红包',
+      amountLabel: _chatPaymentAmountLabel(money, normalizedAssetType),
+    );
+    if (payPassword.isEmpty) {
       return;
     }
     await _runSending(() async {
@@ -3364,7 +3358,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
           groupId: _groupId,
           channelId: widget.channelId,
           money: money,
-          assetType: assetType.isEmpty ? 'money' : assetType,
+          assetType: normalizedAssetType,
           payPassword: payPassword,
           packetType: data['packet_type'] ?? 'ordinary',
           quantity: int.tryParse(data['quantity'] ?? '') ?? 1,
@@ -3375,7 +3369,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         await widget.controller.sendPrivateRedPacket(
           receiverId: _receiverId,
           money: money,
-          assetType: assetType.isEmpty ? 'money' : assetType,
+          assetType: normalizedAssetType,
           payPassword: payPassword,
           remark: data['remark'] ?? '',
         );
@@ -3395,6 +3389,18 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     }
     final amount = double.tryParse(value);
     return amount != null && amount > 0 ? '' : '金额必须大于 0';
+  }
+
+  String _chatPaymentAmountLabel(String value, String assetType) {
+    final normalizedAsset = assetType.trim().toLowerCase();
+    if (normalizedAsset == 'integral') {
+      return '${value.trim()} 积分';
+    }
+    final amount = double.tryParse(value.trim());
+    if (amount == null) {
+      return '¥ ${value.trim()}';
+    }
+    return '¥ ${amount.toStringAsFixed(2)}';
   }
 
   Future<bool> _ensureWalletReadyForPayment() async {

@@ -830,6 +830,7 @@ class SessionController extends ChangeNotifier {
             data: {
               'balance': value.balance,
               'pay_password_set': value.payPasswordSet,
+              'merchant_enabled': value.merchantEnabled,
             },
           );
           notifyListeners();
@@ -1000,15 +1001,11 @@ class SessionController extends ChangeNotifier {
     );
   }
 
-  Future<WalletOrder> currentWalletPayCode({
-    required String payPassword,
-    String remark = '',
-  }) {
+  Future<WalletOrder> currentWalletPayCode({String remark = ''}) {
     final current = _requireSession();
     return _api.walletCurrentPayCode(
       session: current,
       device: _device,
-      payPassword: payPassword,
       remark: remark,
     );
   }
@@ -1034,6 +1031,23 @@ class SessionController extends ChangeNotifier {
       qrToken: qrToken,
       payPassword: payPassword,
       amount: amount,
+      requestId: _walletRequestId(),
+    );
+    await loadWalletBalance(refresh: true);
+    return order;
+  }
+
+  Future<WalletOrder> confirmWalletPayCodeOrder({
+    required String orderNo,
+    required String payPassword,
+  }) async {
+    final current = _requireSession();
+    final order = await _api.walletConfirmQrPay(
+      session: current,
+      device: _device,
+      orderNo: orderNo,
+      payPassword: payPassword,
+      amount: '',
       requestId: _walletRequestId(),
     );
     await loadWalletBalance(refresh: true);

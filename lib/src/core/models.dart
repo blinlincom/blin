@@ -277,6 +277,10 @@ class WalletBalance {
     this.payPasswordFailedCount = 0,
     this.securityBound = false,
     this.securityMethods = const [],
+    this.merchantEnabled = false,
+    this.merchantStatus = 0,
+    this.merchantStatusName = '',
+    this.merchantName = '',
     this.serverTime = 0,
   });
 
@@ -288,6 +292,10 @@ class WalletBalance {
   final int payPasswordFailedCount;
   final bool securityBound;
   final List<WalletSecurityMethod> securityMethods;
+  final bool merchantEnabled;
+  final int merchantStatus;
+  final String merchantStatusName;
+  final String merchantName;
   final int serverTime;
 
   factory WalletBalance.fromJson(Object? value) {
@@ -316,6 +324,11 @@ class WalletBalance {
           int.tryParse(map['pay_password_failed_count']?.toString() ?? '') ?? 0,
       securityBound: _enabled(map['security_bound']),
       securityMethods: methods,
+      merchantEnabled: _enabled(map['merchant_enabled']),
+      merchantStatus:
+          int.tryParse(map['merchant_status']?.toString() ?? '') ?? 0,
+      merchantStatusName: map['merchant_status_name']?.toString() ?? '',
+      merchantName: map['merchant_name']?.toString() ?? '',
       serverTime: int.tryParse(map['server_time']?.toString() ?? '') ?? 0,
     );
   }
@@ -329,6 +342,10 @@ class WalletBalance {
     'pay_password_failed_count': payPasswordFailedCount,
     'security_bound': securityBound ? 1 : 0,
     'security_methods': securityMethods.map((item) => item.toJson()).toList(),
+    'merchant_enabled': merchantEnabled ? 1 : 0,
+    'merchant_status': merchantStatus,
+    'merchant_status_name': merchantStatusName,
+    'merchant_name': merchantName,
     'server_time': serverTime,
   };
 }

@@ -288,10 +288,23 @@ class _WalletAction {
   final VoidCallback onTap;
 }
 
-class WalletPayReceivePage extends StatelessWidget {
+class WalletPayReceivePage extends StatefulWidget {
   const WalletPayReceivePage({required this.controller, super.key});
 
   final SessionController controller;
+
+  @override
+  State<WalletPayReceivePage> createState() => _WalletPayReceivePageState();
+}
+
+class _WalletPayReceivePageState extends State<WalletPayReceivePage> {
+  late final Future<WalletBalance> _balanceRequest;
+
+  @override
+  void initState() {
+    super.initState();
+    _balanceRequest = widget.controller.loadWalletBalance(refresh: false);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -305,34 +318,53 @@ class WalletPayReceivePage extends StatelessWidget {
         surfaceTintColor: Colors.transparent,
       ),
       body: SafeArea(
-        child: ListView(
-          children: [
-            _MenuTile(
-              icon: Icons.call_received,
-              iconColor: const Color(0xff0f766e),
-              title: '收款码',
-              subtitle: '设置金额后让对方扫码付款',
-              onTap: () =>
-                  _push(context, WalletCollectCodePage(controller: controller)),
-            ),
-            _MenuTile(
-              icon: Icons.call_made,
-              iconColor: const Color(0xff2563eb),
-              title: '付款码',
-              subtitle: '短时有效，只能被收款方消费一次',
-              onTap: () =>
-                  _push(context, WalletPayCodePage(controller: controller)),
-            ),
-            const _GroupGap(),
-            _MenuTile(
-              icon: Icons.qr_code_scanner,
-              iconColor: const Color(0xff111827),
-              title: '扫一扫',
-              subtitle: '扫描收付款码或好友二维码',
-              onTap: () =>
-                  _push(context, WalletScanPage(controller: controller)),
-            ),
-          ],
+        child: FutureBuilder<WalletBalance>(
+          future: _balanceRequest,
+          initialData: widget.controller.walletBalance,
+          builder: (context, snapshot) {
+            final balance =
+                snapshot.data ??
+                widget.controller.walletBalance ??
+                const WalletBalance();
+            final merchantEnabled = balance.merchantEnabled;
+            return ListView(
+              children: [
+                _MenuTile(
+                  icon: Icons.call_received,
+                  iconColor: const Color(0xff0f766e),
+                  title: '收款码',
+                  subtitle: merchantEnabled ? '设置金额后让对方扫码付款' : '仅开通商户权限后可用',
+                  onTap: merchantEnabled
+                      ? () => _push(
+                          context,
+                          WalletCollectCodePage(controller: widget.controller),
+                        )
+                      : () => _showWalletMessage(context, '当前账号未开通商户收款权限'),
+                ),
+                _MenuTile(
+                  icon: Icons.call_made,
+                  iconColor: const Color(0xff2563eb),
+                  title: '付款码',
+                  subtitle: '短时有效，只能被收款方消费一次',
+                  onTap: () => _push(
+                    context,
+                    WalletPayCodePage(controller: widget.controller),
+                  ),
+                ),
+                const _GroupGap(),
+                _MenuTile(
+                  icon: Icons.qr_code_scanner,
+                  iconColor: const Color(0xff111827),
+                  title: '扫一扫',
+                  subtitle: '扫描收付款码或好友二维码',
+                  onTap: () => _push(
+                    context,
+                    WalletScanPage(controller: widget.controller),
+                  ),
+                ),
+              ],
+            );
+          },
         ),
       ),
     );
@@ -486,7 +518,6 @@ class WalletPayCodePage extends StatefulWidget {
 }
 
 class _WalletPayCodePageState extends State<WalletPayCodePage> {
-  final _password = TextEditingController();
   Future<WalletOrder>? _request;
   WalletOrder? _order;
   bool _busy = false;
@@ -501,7 +532,6 @@ class _WalletPayCodePageState extends State<WalletPayCodePage> {
   @override
   void dispose() {
     _timer?.cancel();
-    _password.dispose();
     super.dispose();
   }
 
@@ -511,9 +541,7 @@ class _WalletPayCodePageState extends State<WalletPayCodePage> {
     }
     setState(() => _busy = true);
     try {
-      final order = await widget.controller.currentWalletPayCode(
-        payPassword: _password.text.trim(),
-      );
+      final order = await widget.controller.currentWalletPayCode();
       if (!mounted) {
         return;
       }
@@ -579,14 +607,6 @@ class _WalletPayCodePageState extends State<WalletPayCodePage> {
           children: [
             if (order == null) ...[
               _WalletPayCodeIntro(),
-              const SizedBox(height: 16),
-              _WalletTextField(
-                controller: _password,
-                label: '支付密码',
-                hint: '6位数字',
-                keyboardType: TextInputType.number,
-                obscureText: true,
-              ),
               const SizedBox(height: 22),
               _WalletPrimaryButton(
                 text: _busy ? '生成中...' : '打开付款码',
@@ -672,7 +692,7 @@ class _WalletPayConfirmPageState extends State<WalletPayConfirmPage> {
       }
       _showWalletMessage(
         context,
-        widget.order.orderType == 'pay' ? '收款成功' : '支付成功',
+        widget.order.orderType == 'pay' ? '已向付款方发起确认' : '支付成功',
       );
       Navigator.of(context).pop(order);
     } catch (error) {
@@ -695,7 +715,7 @@ class _WalletPayConfirmPageState extends State<WalletPayConfirmPage> {
     return Scaffold(
       backgroundColor: _pageColor,
       appBar: AppBar(
-        title: Text(isPayCode ? '确认收款' : '确认付款'),
+        title: Text(isPayCode ? '发起收款' : '确认付款'),
         backgroundColor: _surfaceColor,
         foregroundColor: _textColor,
         elevation: 0,
@@ -706,7 +726,7 @@ class _WalletPayConfirmPageState extends State<WalletPayConfirmPage> {
           padding: const EdgeInsets.fromLTRB(20, 24, 20, 32),
           children: [
             _WalletConfirmHeader(
-              title: isPayCode ? '向对方收款' : '付款给对方',
+              title: isPayCode ? '向付款方发起确认' : '付款给对方',
               name: targetName,
               avatar: targetAvatar,
             ),
@@ -752,8 +772,8 @@ class _WalletPayConfirmPageState extends State<WalletPayConfirmPage> {
             const SizedBox(height: 24),
             _WalletPrimaryButton(
               text: _busy
-                  ? (isPayCode ? '收款中...' : '支付中...')
-                  : (isPayCode ? '确认收款' : '确认付款'),
+                  ? (isPayCode ? '发起中...' : '支付中...')
+                  : (isPayCode ? '发起收款确认' : '确认付款'),
               onPressed: _busy ? null : _confirm,
             ),
           ],
@@ -2263,7 +2283,7 @@ class _WalletPayCodeIntro extends StatelessWidget {
             ),
             SizedBox(height: 8),
             Text(
-              '出示给收款方扫码，金额由收款方输入，确认后完成付款。',
+              '出示给商户扫码，金额由商户输入，付款方确认后完成付款。',
               style: TextStyle(
                 color: _secondaryTextColor,
                 fontSize: 14,
@@ -2631,4 +2651,107 @@ void _showWalletMessage(BuildContext context, String text) {
   ScaffoldMessenger.of(context)
     ..hideCurrentSnackBar()
     ..showSnackBar(SnackBar(content: Text(message)));
+}
+
+Future<String> _showWalletPayPasswordSheet(
+  BuildContext context, {
+  required String title,
+  String amountLabel = '',
+}) async {
+  final controller = TextEditingController();
+  var errorText = '';
+  final result = await showModalBottomSheet<String>(
+    context: context,
+    isScrollControlled: true,
+    useSafeArea: true,
+    backgroundColor: _surfaceColor,
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+    ),
+    builder: (context) {
+      return StatefulBuilder(
+        builder: (context, setModalState) {
+          return Padding(
+            padding: EdgeInsets.fromLTRB(
+              20,
+              12,
+              20,
+              22 + MediaQuery.viewInsetsOf(context).bottom,
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Center(
+                  child: Container(
+                    width: 36,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: const Color(0xffd4d6dc),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 20),
+                Text(
+                  title,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: _textColor,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                if (amountLabel.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    amountLabel,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      color: _textColor,
+                      fontSize: 30,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 18),
+                _WalletTextField(
+                  controller: controller,
+                  label: '支付密码',
+                  hint: '6位数字',
+                  keyboardType: TextInputType.number,
+                  obscureText: true,
+                ),
+                if (errorText.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    errorText,
+                    style: const TextStyle(
+                      color: BimColors.danger,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 18),
+                _WalletPrimaryButton(
+                  text: '确认',
+                  onPressed: () {
+                    final password = controller.text.trim();
+                    if (!RegExp(r'^\d{6}$').hasMatch(password)) {
+                      setModalState(() => errorText = '请输入6位支付密码');
+                      return;
+                    }
+                    Navigator.of(context).pop(password);
+                  },
+                ),
+              ],
+            ),
+          );
+        },
+      );
+    },
+  );
+  controller.dispose();
+  return result ?? '';
 }
