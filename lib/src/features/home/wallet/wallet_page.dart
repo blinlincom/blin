@@ -915,6 +915,7 @@ class _WalletSecurityPageState extends State<WalletSecurityPage> {
   final _emailCode = TextEditingController();
   final _captcha = TextEditingController();
   UserSecurityInfo? _info;
+  _WalletSecurityEditMode _editMode = _WalletSecurityEditMode.none;
   bool _loading = true;
   bool _busy = false;
   bool _sendingMobile = false;
@@ -958,6 +959,33 @@ class _WalletSecurityPageState extends State<WalletSecurityPage> {
   void _refreshCaptcha() {
     setState(() {
       _captcha.clear();
+      _captchaRevision++;
+    });
+  }
+
+  void _startEdit(_WalletSecurityEditMode mode) {
+    final info = _info ?? const UserSecurityInfo();
+    setState(() {
+      _editMode = _editMode == mode ? _WalletSecurityEditMode.none : mode;
+      _captcha.clear();
+      _mobileCode.clear();
+      _emailCode.clear();
+      _captchaRevision++;
+      if (mode == _WalletSecurityEditMode.mobile && info.mobileBound) {
+        _mobile.text = info.mobile;
+      }
+      if (mode == _WalletSecurityEditMode.email && info.emailBound) {
+        _email.text = info.email;
+      }
+    });
+  }
+
+  void _closeEdit() {
+    setState(() {
+      _editMode = _WalletSecurityEditMode.none;
+      _captcha.clear();
+      _mobileCode.clear();
+      _emailCode.clear();
       _captchaRevision++;
     });
   }
@@ -1019,6 +1047,7 @@ class _WalletSecurityPageState extends State<WalletSecurityPage> {
         setState(() {
           _info = info;
           _mobileCode.clear();
+          _editMode = _WalletSecurityEditMode.none;
         });
         _showWalletMessage(context, '手机号已绑定');
       }
@@ -1079,6 +1108,7 @@ class _WalletSecurityPageState extends State<WalletSecurityPage> {
         setState(() {
           _info = info;
           _emailCode.clear();
+          _editMode = _WalletSecurityEditMode.none;
         });
         _showWalletMessage(context, '邮箱已绑定');
       }
@@ -1121,145 +1151,219 @@ class _WalletSecurityPageState extends State<WalletSecurityPage> {
         _WalletSecurityStatusRow(
           label: '手机号',
           value: info.mobileBound ? info.mobile : '未绑定',
+          actionText: info.mobileBound ? '更换' : '绑定',
+          selected: _editMode == _WalletSecurityEditMode.mobile,
+          onTap: _loading
+              ? null
+              : () => _startEdit(_WalletSecurityEditMode.mobile),
         ),
         const SizedBox(height: 10),
         _WalletSecurityStatusRow(
           label: '邮箱',
           value: info.emailBound ? info.email : '未绑定',
+          actionText: info.emailBound ? '更换' : '绑定',
+          selected: _editMode == _WalletSecurityEditMode.email,
+          onTap: _loading
+              ? null
+              : () => _startEdit(_WalletSecurityEditMode.email),
         ),
-        const SizedBox(height: 18),
-        _WalletImageCaptchaInput(
-          controller: _captcha,
-          revision: _captchaRevision,
-          loader: widget.controller.loadImageCaptcha,
-          onRefresh: _refreshCaptcha,
-        ),
-        const SizedBox(height: 18),
-        _WalletSectionLabel(text: info.mobileBound ? '更换手机号' : '绑定手机号'),
-        const SizedBox(height: 10),
-        _WalletTextField(
-          controller: _mobile,
-          label: '手机号',
-          hint: '请输入手机号',
-          keyboardType: TextInputType.phone,
-        ),
-        const SizedBox(height: 10),
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(
-              child: _WalletTextField(
-                controller: _mobileCode,
-                label: '短信验证码',
-                hint: '请输入验证码',
-                keyboardType: TextInputType.number,
+        if (_editMode != _WalletSecurityEditMode.none) ...[
+          const SizedBox(height: 18),
+          _WalletSecurityEditPanel(
+            title: _editMode == _WalletSecurityEditMode.mobile
+                ? (info.mobileBound ? '更换手机号' : '绑定手机号')
+                : (info.emailBound ? '更换邮箱' : '绑定邮箱'),
+            onClose: _closeEdit,
+            children: [
+              _WalletImageCaptchaInput(
+                controller: _captcha,
+                revision: _captchaRevision,
+                loader: widget.controller.loadImageCaptcha,
+                onRefresh: _refreshCaptcha,
               ),
-            ),
-            const SizedBox(width: 10),
-            SizedBox(
-              height: 56,
-              child: OutlinedButton(
-                onPressed: _sendingMobile || _busy ? null : _sendMobileCode,
-                child: Text(_sendingMobile ? '发送中...' : '获取验证码'),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 10),
-        _WalletPrimaryButton(
-          text: _busy ? '保存中...' : '保存手机号',
-          onPressed: _busy ? null : _confirmMobile,
-        ),
-        const SizedBox(height: 22),
-        _WalletSectionLabel(text: info.emailBound ? '更换邮箱' : '绑定邮箱'),
-        const SizedBox(height: 10),
-        _WalletTextField(
-          controller: _email,
-          label: '邮箱',
-          hint: '请输入邮箱',
-          keyboardType: TextInputType.emailAddress,
-        ),
-        const SizedBox(height: 10),
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(
-              child: _WalletTextField(
-                controller: _emailCode,
-                label: '邮箱验证码',
-                hint: '请输入验证码',
-                keyboardType: TextInputType.number,
-              ),
-            ),
-            const SizedBox(width: 10),
-            SizedBox(
-              height: 56,
-              child: OutlinedButton(
-                onPressed: _sendingEmail || _busy ? null : _sendEmailCode,
-                child: Text(_sendingEmail ? '发送中...' : '获取验证码'),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 10),
-        _WalletPrimaryButton(
-          text: _busy ? '保存中...' : '保存邮箱',
-          onPressed: _busy ? null : _confirmEmail,
-        ),
+              const SizedBox(height: 12),
+              if (_editMode == _WalletSecurityEditMode.mobile) ...[
+                _WalletTextField(
+                  controller: _mobile,
+                  label: '手机号',
+                  hint: '请输入手机号',
+                  keyboardType: TextInputType.phone,
+                ),
+                const SizedBox(height: 10),
+                _WalletCodeSendField(
+                  controller: _mobileCode,
+                  label: '短信验证码',
+                  hint: '请输入验证码',
+                  buttonText: _sendingMobile ? '发送中...' : '获取短信验证码',
+                  onPressed: _sendingMobile || _busy ? null : _sendMobileCode,
+                ),
+                const SizedBox(height: 12),
+                _WalletPrimaryButton(
+                  text: _busy ? '保存中...' : '保存手机号',
+                  onPressed: _busy ? null : _confirmMobile,
+                ),
+              ] else ...[
+                _WalletTextField(
+                  controller: _email,
+                  label: '邮箱',
+                  hint: '请输入邮箱',
+                  keyboardType: TextInputType.emailAddress,
+                ),
+                const SizedBox(height: 10),
+                _WalletCodeSendField(
+                  controller: _emailCode,
+                  label: '邮箱验证码',
+                  hint: '请输入验证码',
+                  buttonText: _sendingEmail ? '发送中...' : '获取邮箱验证码',
+                  onPressed: _sendingEmail || _busy ? null : _sendEmailCode,
+                ),
+                const SizedBox(height: 12),
+                _WalletPrimaryButton(
+                  text: _busy ? '保存中...' : '保存邮箱',
+                  onPressed: _busy ? null : _confirmEmail,
+                ),
+              ],
+            ],
+          ),
+        ],
       ],
     );
   }
 }
 
+enum _WalletSecurityEditMode { none, mobile, email }
+
 class _WalletSecurityStatusRow extends StatelessWidget {
-  const _WalletSecurityStatusRow({required this.label, required this.value});
+  const _WalletSecurityStatusRow({
+    required this.label,
+    required this.value,
+    required this.actionText,
+    required this.selected,
+    required this.onTap,
+  });
 
   final String label;
   final String value;
+  final String actionText;
+  final bool selected;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
+    return Material(
       color: _surfaceColor,
-      child: Row(
-        children: [
-          Text(
-            label,
-            style: const TextStyle(
-              color: _secondaryTextColor,
-              fontSize: 14,
-              fontWeight: FontWeight.w600,
-            ),
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(14, 14, 12, 14),
+          child: Row(
+            children: [
+              Icon(
+                label == '手机号'
+                    ? Icons.phone_iphone_outlined
+                    : Icons.email_outlined,
+                color: selected ? _primaryColor : _secondaryTextColor,
+                size: 20,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      label,
+                      style: const TextStyle(
+                        color: _textColor,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      value,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: _secondaryTextColor,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 10),
+              Text(
+                actionText,
+                style: TextStyle(
+                  color: selected ? _primaryColor : _secondaryTextColor,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(width: 2),
+              Icon(
+                selected ? Icons.keyboard_arrow_up : Icons.chevron_right,
+                color: selected ? _primaryColor : _mutedColor,
+                size: 20,
+              ),
+            ],
           ),
-          const Spacer(),
-          Text(
-            value,
-            style: const TextStyle(
-              color: _textColor,
-              fontSize: 14,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }
 }
 
-class _WalletSectionLabel extends StatelessWidget {
-  const _WalletSectionLabel({required this.text});
+class _WalletSecurityEditPanel extends StatelessWidget {
+  const _WalletSecurityEditPanel({
+    required this.title,
+    required this.onClose,
+    required this.children,
+  });
 
-  final String text;
+  final String title;
+  final VoidCallback onClose;
+  final List<Widget> children;
 
   @override
   Widget build(BuildContext context) {
-    return Text(
-      text,
-      style: const TextStyle(
-        color: _textColor,
-        fontSize: 15,
-        fontWeight: FontWeight.w800,
+    return ColoredBox(
+      color: _surfaceColor,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(14, 14, 14, 16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    title,
+                    style: const TextStyle(
+                      color: _textColor,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+                IconButton(
+                  tooltip: '收起',
+                  onPressed: onClose,
+                  icon: const Icon(Icons.close, size: 20),
+                  color: _secondaryTextColor,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(
+                    minWidth: 44,
+                    minHeight: 44,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            ...children,
+          ],
+        ),
       ),
     );
   }
@@ -1559,26 +1663,12 @@ class _WalletPayPasswordPageState extends State<WalletPayPasswordPage> {
           },
         ),
         const SizedBox(height: 12),
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(
-              child: _WalletTextField(
-                controller: _code,
-                label: '验证码',
-                hint: '安全验证码',
-                keyboardType: TextInputType.number,
-              ),
-            ),
-            const SizedBox(width: 10),
-            SizedBox(
-              height: 56,
-              child: OutlinedButton(
-                onPressed: canSet && !_sendingCode ? _sendCode : null,
-                child: Text(_sendingCode ? '发送中...' : '获取验证码'),
-              ),
-            ),
-          ],
+        _WalletCodeSendField(
+          controller: _code,
+          label: '验证码',
+          hint: '安全验证码',
+          buttonText: _sendingCode ? '发送中...' : '获取安全验证码',
+          onPressed: canSet && !_sendingCode ? _sendCode : null,
         ),
         const SizedBox(height: 22),
         _WalletPrimaryButton(
@@ -2080,6 +2170,58 @@ class _WalletTextField extends StatelessWidget {
           borderSide: BorderSide(color: _primaryColor),
         ),
       ),
+    );
+  }
+}
+
+class _WalletCodeSendField extends StatelessWidget {
+  const _WalletCodeSendField({
+    required this.controller,
+    required this.label,
+    required this.hint,
+    required this.buttonText,
+    required this.onPressed,
+  });
+
+  final TextEditingController controller;
+  final String label;
+  final String hint;
+  final String buttonText;
+  final VoidCallback? onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _WalletTextField(
+          controller: controller,
+          label: label,
+          hint: hint,
+          keyboardType: TextInputType.number,
+        ),
+        const SizedBox(height: 8),
+        SizedBox(
+          height: 48,
+          child: OutlinedButton.icon(
+            onPressed: onPressed,
+            icon: const Icon(Icons.verified_outlined, size: 18),
+            label: Text(buttonText),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: _primaryColor,
+              disabledForegroundColor: _mutedColor,
+              side: const BorderSide(color: _primaryColor),
+              textStyle: const TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w700,
+              ),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(BimRadius.sm),
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

@@ -4,7 +4,8 @@ const _paymentServiceBackground = Color(0xffededed);
 const _paymentServiceText = Color(0xff1f1f1f);
 const _paymentServiceMuted = Color(0xff8d9199);
 const _paymentServiceDivider = Color(0xffebedf0);
-const _paymentServiceCardRadius = 10.0;
+const _paymentServiceCardRadius = 8.0;
+const _paymentServiceContentMaxWidth = 440.0;
 
 class PaymentServicePage extends StatefulWidget {
   const PaymentServicePage({
@@ -418,9 +419,9 @@ class _PaymentServicePageState extends State<PaymentServicePage>
         ),
         padding: EdgeInsets.fromLTRB(
           _paymentServiceHorizontalPadding(context),
-          24,
+          16,
           _paymentServiceHorizontalPadding(context),
-          28,
+          20,
         ),
         itemCount: messages.length,
         itemBuilder: (context, index) {
@@ -436,7 +437,7 @@ class _PaymentServicePageState extends State<PaymentServicePage>
                 item: item,
                 onTap: () => _showPaymentNoticeDetail(item),
               ),
-              const SizedBox(height: 24),
+              const SizedBox(height: 16),
             ],
           );
         },
@@ -517,12 +518,12 @@ class _PaymentServiceHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      height: searching ? 104 : 58,
+      height: searching ? 98 : 54,
       color: _paymentServiceBackground,
       child: Column(
         children: [
           SizedBox(
-            height: 58,
+            height: 54,
             child: Stack(
               alignment: Alignment.center,
               children: [
@@ -543,7 +544,7 @@ class _PaymentServiceHeader extends StatelessWidget {
                     textAlign: TextAlign.center,
                     style: const TextStyle(
                       color: _paymentServiceText,
-                      fontSize: 18,
+                      fontSize: 17,
                       fontWeight: FontWeight.w700,
                       height: 1.1,
                     ),
@@ -574,7 +575,7 @@ class _PaymentServiceHeader extends StatelessWidget {
                 _paymentServiceHorizontalPadding(context),
                 0,
                 _paymentServiceHorizontalPadding(context),
-                10,
+                8,
               ),
               child: SizedBox(
                 height: 36,
@@ -637,9 +638,9 @@ class _PaymentHeaderIconButton extends StatelessWidget {
           onTap: onTap,
           radius: 24,
           child: SizedBox(
-            width: 48,
-            height: 48,
-            child: Icon(icon, color: Colors.black, size: 26),
+            width: 44,
+            height: 44,
+            child: Icon(icon, color: Colors.black, size: 23),
           ),
         ),
       ),
@@ -691,7 +692,9 @@ class _PaymentServiceNoticeCard extends StatelessWidget {
     final detailLabel = _paymentServiceDetailLabel(notice, payload);
     return Center(
       child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 560),
+        constraints: const BoxConstraints(
+          maxWidth: _paymentServiceContentMaxWidth,
+        ),
         child: Material(
           color: _surfaceColor,
           borderRadius: BorderRadius.circular(_paymentServiceCardRadius),
@@ -702,13 +705,13 @@ class _PaymentServiceNoticeCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(22, 19, 22, 18),
+                  padding: const EdgeInsets.fromLTRB(18, 15, 18, 14),
                   child: Row(
                     children: [
                       _Avatar(
                         label: actorName.isEmpty ? title : actorName,
                         imageUrl: actorAvatar,
-                        size: 36,
+                        size: 34,
                         color: _paymentServiceAccent(notice, payload),
                         icon: actorAvatar.isEmpty
                             ? Icons.account_balance_wallet_outlined
@@ -722,7 +725,7 @@ class _PaymentServiceNoticeCard extends StatelessWidget {
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
                             color: _paymentServiceText,
-                            fontSize: 17,
+                            fontSize: 16,
                             fontWeight: FontWeight.w700,
                             height: 1.2,
                           ),
@@ -733,7 +736,7 @@ class _PaymentServiceNoticeCard extends StatelessWidget {
                 ),
                 const Divider(height: 1, color: _paymentServiceDivider),
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(22, 52, 22, 50),
+                  padding: const EdgeInsets.fromLTRB(18, 30, 18, 28),
                   child: Column(
                     children: [
                       Text(
@@ -743,13 +746,13 @@ class _PaymentServiceNoticeCard extends StatelessWidget {
                         textAlign: TextAlign.center,
                         style: const TextStyle(
                           color: _paymentServiceText,
-                          fontSize: 22,
+                          fontSize: 19,
                           fontWeight: FontWeight.w500,
                           height: 1.2,
                         ),
                       ),
                       if (amount.isNotEmpty) ...[
-                        const SizedBox(height: 24),
+                        const SizedBox(height: 16),
                         FittedBox(
                           fit: BoxFit.scaleDown,
                           child: Text(
@@ -757,7 +760,7 @@ class _PaymentServiceNoticeCard extends StatelessWidget {
                             textAlign: TextAlign.center,
                             style: const TextStyle(
                               color: Colors.black,
-                              fontSize: 48,
+                              fontSize: 38,
                               fontWeight: FontWeight.w800,
                               height: 0.95,
                               letterSpacing: 0,
@@ -765,7 +768,7 @@ class _PaymentServiceNoticeCard extends StatelessWidget {
                           ),
                         ),
                       ],
-                      const SizedBox(height: 25),
+                      const SizedBox(height: 18),
                       _PaymentServiceDetailLink(label: detailLabel),
                     ],
                   ),
@@ -773,7 +776,7 @@ class _PaymentServiceNoticeCard extends StatelessWidget {
                 if (remark.isNotEmpty)
                   _PaymentServiceRemarkRow(text: remark)
                 else
-                  const SizedBox(height: 6),
+                  const SizedBox(height: 4),
               ],
             ),
           ),
@@ -817,29 +820,29 @@ class _PaymentServiceRemarkRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(22, 0, 22, 0),
+      padding: const EdgeInsets.fromLTRB(18, 0, 18, 0),
       child: Column(
         children: [
           const Divider(height: 1, color: _paymentServiceDivider),
           SizedBox(
-            height: 62,
+            height: 54,
             child: Row(
               children: [
                 const Icon(
                   Icons.chat_bubble_outline,
                   color: Colors.black,
-                  size: 24,
+                  size: 21,
                 ),
-                const SizedBox(width: 14),
+                const SizedBox(width: 10),
                 const Text(
                   '留言',
                   style: TextStyle(
                     color: _paymentServiceText,
-                    fontSize: 16,
+                    fontSize: 15,
                     fontWeight: FontWeight.w700,
                   ),
                 ),
-                const SizedBox(width: 12),
+                const SizedBox(width: 10),
                 Expanded(
                   child: Text(
                     text,
@@ -848,7 +851,7 @@ class _PaymentServiceRemarkRow extends StatelessWidget {
                     textAlign: TextAlign.right,
                     style: const TextStyle(
                       color: _paymentServiceMuted,
-                      fontSize: 15,
+                      fontSize: 14,
                       fontWeight: FontWeight.w500,
                     ),
                   ),
@@ -882,7 +885,7 @@ class _PaymentServiceBottomBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      height: 64,
+      height: 56,
       decoration: const BoxDecoration(
         color: _surfaceColor,
         border: Border(top: BorderSide(color: Color(0xffdddddd), width: 0.5)),
@@ -890,7 +893,7 @@ class _PaymentServiceBottomBar extends StatelessWidget {
       child: Row(
         children: [
           SizedBox(
-            width: 72,
+            width: 64,
             child: _PaymentServiceMenuButton(
               icon: Icons.apps,
               label: '支付服务',
@@ -945,20 +948,20 @@ class _PaymentServiceMenuButton extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
                       color: Colors.black,
-                      fontSize: 17,
+                      fontSize: 15,
                       fontWeight: FontWeight.w500,
                       height: 1.1,
                     ),
                   )
                 : Container(
-                    width: 40,
-                    height: 40,
+                    width: 34,
+                    height: 34,
                     alignment: Alignment.center,
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
-                      border: Border.all(color: Colors.black, width: 2),
+                      border: Border.all(color: Colors.black, width: 1.6),
                     ),
-                    child: Icon(icon, color: Colors.black, size: 24),
+                    child: Icon(icon, color: Colors.black, size: 21),
                   ),
           ),
         ),
@@ -972,7 +975,7 @@ class _PaymentServiceVerticalDivider extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(width: 0.5, height: 28, color: const Color(0xffe0e0e0));
+    return Container(width: 0.5, height: 24, color: const Color(0xffe0e0e0));
   }
 }
 
@@ -1269,10 +1272,16 @@ String _paymentServiceTimeLabel(Map<String, Object?> item) {
 
 double _paymentServiceHorizontalPadding(BuildContext context) {
   final width = MediaQuery.sizeOf(context).width;
-  if (width >= 720) {
+  if (width >= 900) {
     return 40;
   }
-  return 16;
+  if (width >= 600) {
+    return 28;
+  }
+  if (width >= 360) {
+    return 20;
+  }
+  return 14;
 }
 
 String _paymentServiceActorName(

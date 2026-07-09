@@ -134,7 +134,7 @@ class _AuthPageState extends State<AuthPage> {
           const SizedBox(height: 18),
           _PrimaryAuthButton(text: '重新加载', onPressed: _loadAuthConfig),
         ] else
-          const _AuthLoadingState(text: '正在同步登录方式和验证码规则'),
+          const _AuthConfigLoadingForm(),
       ],
     );
   }
@@ -1480,6 +1480,125 @@ class _AuthLoadingState extends StatelessWidget {
               textAlign: TextAlign.center,
               style: const TextStyle(color: _authMuted, fontSize: 15),
             ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _AuthConfigLoadingForm extends StatelessWidget {
+  const _AuthConfigLoadingForm();
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        const _AuthModeSkeleton(),
+        const SizedBox(height: 20),
+        const _AuthSkeletonField(icon: Icons.person_outline, text: '账号'),
+        const SizedBox(height: 14),
+        const _AuthSkeletonField(icon: Icons.lock_outline, text: '密码或验证码'),
+        const SizedBox(height: 14),
+        const _AuthLoadingState(text: '正在同步登录方式和验证码规则'),
+        const SizedBox(height: 18),
+        _PrimaryAuthButton(text: '登录', onPressed: null),
+        const SizedBox(height: 18),
+        Row(
+          children: [
+            TextButton(onPressed: null, child: const Text('忘记密码?')),
+            const Spacer(),
+            TextButton(onPressed: null, child: const Text('新用户注册')),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+class _AuthModeSkeleton extends StatelessWidget {
+  const _AuthModeSkeleton();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 44,
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: _authFill,
+        border: Border.all(color: _authBorder),
+        borderRadius: BorderRadius.circular(BimRadius.sm),
+      ),
+      child: Row(
+        children: const [
+          Expanded(child: _AuthSkeletonPill(text: '密码登录')),
+          SizedBox(width: 4),
+          Expanded(child: _AuthSkeletonPill(text: '验证码登录')),
+        ],
+      ),
+    );
+  }
+}
+
+class _AuthSkeletonPill extends StatelessWidget {
+  const _AuthSkeletonPill({required this.text});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: const Color(0xfff1f5f9),
+        borderRadius: BorderRadius.circular(BimRadius.xs),
+      ),
+      child: Center(
+        child: Text(
+          text,
+          style: const TextStyle(
+            color: _authMuted,
+            fontSize: 14,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _AuthSkeletonField extends StatelessWidget {
+  const _AuthSkeletonField({required this.icon, required this.text});
+
+  final IconData icon;
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 56,
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      decoration: BoxDecoration(
+        color: _authSurface,
+        border: Border.all(color: _authBorder),
+        borderRadius: BorderRadius.circular(BimRadius.sm),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, color: _authMuted, size: 20),
+          const SizedBox(width: 12),
+          Text(
+            text,
+            style: const TextStyle(
+              color: _authMuted,
+              fontSize: 15,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const Spacer(),
+          const SizedBox(
+            width: 16,
+            height: 16,
+            child: CircularProgressIndicator(strokeWidth: 2),
           ),
         ],
       ),
