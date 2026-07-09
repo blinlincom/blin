@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 import 'dart:typed_data';
@@ -41,6 +42,8 @@ class _AuthPageState extends State<AuthPage> {
   var _showConfirmPassword = false;
   var _loginCaptchaRevision = 0;
   var _registerCaptchaRevision = 0;
+  var _authConfigLoading = true;
+  var _authConfigError = '';
 
   final _loginFormKey = GlobalKey<FormState>();
   final _registerFormKey = GlobalKey<FormState>();
@@ -56,6 +59,20 @@ class _AuthPageState extends State<AuthPage> {
   final _registerCode = TextEditingController();
   final _registerImageCaptcha = TextEditingController();
   final _registerInviteCode = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_loadAuthConfig());
+  }
+
+  @override
+  void didUpdateWidget(covariant AuthPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.controller != widget.controller) {
+      unawaited(_loadAuthConfig());
+    }
+  }
 
   @override
   void dispose() {
@@ -88,7 +105,9 @@ class _AuthPageState extends State<AuthPage> {
                 constraints: const BoxConstraints(maxWidth: 520),
                 child: AnimatedSwitcher(
                   duration: const Duration(milliseconds: 180),
-                  child: _isLogin
+                  child: _authConfigLoading || _authConfigError.isNotEmpty
+                      ? _authConfigGate(key: const ValueKey('auth-config'))
+                      : _isLogin
                       ? _loginView(key: const ValueKey('login'))
                       : _registerView(key: const ValueKey('register')),
                 ),
@@ -97,6 +116,26 @@ class _AuthPageState extends State<AuthPage> {
           ),
         );
       },
+    );
+  }
+
+  Widget _authConfigGate({required Key key}) {
+    final hasError = _authConfigError.isNotEmpty;
+    return ListView(
+      key: key,
+      padding: EdgeInsets.fromLTRB(_pageInset, 58, _pageInset, 28),
+      children: [
+        _AuthBrand(appInfo: widget.controller.appInfo),
+        const SizedBox(height: 28),
+        _AuthTitle(title: '登录', subtitle: hasError ? '登录配置加载失败' : '正在读取后台登录配置'),
+        const SizedBox(height: 34),
+        if (hasError) ...[
+          _Notice(text: _authConfigError),
+          const SizedBox(height: 18),
+          _PrimaryAuthButton(text: '重新加载', onPressed: _loadAuthConfig),
+        ] else
+          const _AuthLoadingState(text: '正在同步登录方式和验证码规则'),
+      ],
     );
   }
 
@@ -189,8 +228,7 @@ class _AuthPageState extends State<AuthPage> {
                       child: const Text('获取验证码'),
                     ),
                   ),
-                if (config.loginCaptchaEnabled ||
-                    mode == _LoginMode.mobile) ...[
+                if (_loginRequiresImageCaptcha(config, mode)) ...[
                   const SizedBox(height: 14),
                   _ImageCaptchaInput(
                     controller: _loginImageCaptcha,
@@ -322,10 +360,7 @@ class _AuthPageState extends State<AuthPage> {
                     ),
                   ),
                 ),
-                if ((mode == _RegisterMode.username &&
-                        config.registerCaptchaEnabled) ||
-                    mode == _RegisterMode.mobile ||
-                    mode == _RegisterMode.email) ...[
+                if (_registerRequiresImageCaptcha(config, mode)) ...[
                   const SizedBox(height: 14),
                   _ImageCaptchaInput(
                     controller: _registerImageCaptcha,
@@ -461,6 +496,10 @@ class _AuthPageState extends State<AuthPage> {
   }
 
   Future<void> _submitLogin() async {
+    if (_authConfigLoading || _authConfigError.isNotEmpty) {
+      _showSnack('请先完成登录配置同步');
+      return;
+    }
     final config = widget.controller.authConfig;
     if (!config.hasAnyLoginMode) {
       _showSnack('当前未开放登录方式');
@@ -474,30 +513,36 @@ class _AuthPageState extends State<AuthPage> {
       return;
     }
     final mode = _activeLoginMode(config);
+    final loginCaptcha = _loginRequiresImageCaptcha(config, mode)
+        ? _loginImageCaptcha.text.trim()
+        : '';
     try {
       if (mode == _LoginMode.password) {
         await widget.controller.login(
           username: _loginAccount.text.trim(),
           password: _loginPassword.text,
-          captcha: config.loginCaptchaEnabled
-              ? _loginImageCaptcha.text.trim()
-              : '',
+          captcha: loginCaptcha,
         );
       } else {
         await widget.controller.loginWithMobile(
           mobile: _loginAccount.text.trim(),
           code: _loginCode.text.trim(),
-          captcha: config.loginCaptchaEnabled
-              ? _loginImageCaptcha.text.trim()
-              : '',
+          captcha: loginCaptcha,
         );
       }
     } catch (_) {
+      if (loginCaptcha.isNotEmpty && mounted) {
+        setState(_refreshLoginCaptchaInput);
+      }
       // 错误已经写入 controller，页面通过 Notice 展示。
     }
   }
 
   Future<void> _submitRegister() async {
+    if (_authConfigLoading || _authConfigError.isNotEmpty) {
+      _showSnack('请先完成登录配置同步');
+      return;
+    }
     final config = widget.controller.authConfig;
     if (!config.registerEnabled || _registerModes(config).isEmpty) {
       _showSnack('当前未开放注册');
@@ -549,6 +594,9 @@ class _AuthPageState extends State<AuthPage> {
       });
       _showSnack(mode == _RegisterMode.username ? '注册成功，请登录' : '注册成功，请登录');
     } catch (_) {
+      if (_registerRequiresImageCaptcha(config, mode) && mounted) {
+        setState(_refreshRegisterCaptchaInput);
+      }
       // 错误已经写入 controller，页面通过 Notice 展示。
     }
   }
@@ -589,8 +637,12 @@ class _AuthPageState extends State<AuthPage> {
       if (!mounted) {
         return;
       }
+      setState(_refreshRegisterCaptchaInput);
       _showSnack('验证码已发送');
     } catch (_) {
+      if (mounted) {
+        setState(_refreshRegisterCaptchaInput);
+      }
       // 错误已经写入 controller，页面通过 Notice 展示。
     }
   }
@@ -634,6 +686,26 @@ class _AuthPageState extends State<AuthPage> {
     return _LoginMode.mobile;
   }
 
+  bool _loginRequiresImageCaptcha(AppAuthConfig config, _LoginMode mode) {
+    return config.loginCaptchaEnabled || mode == _LoginMode.mobile;
+  }
+
+  bool _registerRequiresImageCaptcha(AppAuthConfig config, _RegisterMode mode) {
+    return (mode == _RegisterMode.username && config.registerCaptchaEnabled) ||
+        mode == _RegisterMode.mobile ||
+        mode == _RegisterMode.email;
+  }
+
+  void _refreshLoginCaptchaInput() {
+    _loginImageCaptcha.clear();
+    _loginCaptchaRevision++;
+  }
+
+  void _refreshRegisterCaptchaInput() {
+    _registerImageCaptcha.clear();
+    _registerCaptchaRevision++;
+  }
+
   List<_RegisterMode> _registerModes(AppAuthConfig config) {
     if (!config.registerEnabled) {
       return const [];
@@ -656,6 +728,21 @@ class _AuthPageState extends State<AuthPage> {
   void _switchMode(bool login) {
     setState(() => _isLogin = login);
     widget.controller.clearError();
+  }
+
+  Future<void> _loadAuthConfig() async {
+    setState(() {
+      _authConfigLoading = true;
+      _authConfigError = '';
+    });
+    final ok = await widget.controller.refreshAppInfoForAuth();
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _authConfigLoading = false;
+      _authConfigError = ok ? '' : '无法读取后台登录配置，请检查网络后重试';
+    });
   }
 
   void _showFeatureNotice(String feature) {
@@ -1358,6 +1445,43 @@ class _UnavailableState extends StatelessWidget {
         text,
         textAlign: TextAlign.center,
         style: const TextStyle(color: _authMuted, fontSize: 15),
+      ),
+    );
+  }
+}
+
+class _AuthLoadingState extends StatelessWidget {
+  const _AuthLoadingState({required this.text});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 18),
+      decoration: BoxDecoration(
+        color: _authSurface,
+        border: Border.all(color: _authBorder),
+        borderRadius: BorderRadius.circular(BimRadius.sm),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const SizedBox(
+            width: 18,
+            height: 18,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+          const SizedBox(width: 12),
+          Flexible(
+            child: Text(
+              text,
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: _authMuted, fontSize: 15),
+            ),
+          ),
+        ],
       ),
     );
   }

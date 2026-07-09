@@ -380,7 +380,7 @@ class _MessagesTabState extends State<MessagesTab> {
     final contentType = _value(item, [
       'content_type',
     ], fallback: _value(_asObjectMap(item['payload']), ['content_type']));
-    final readOnly =
+    final paymentService =
         channelType == _privateChannelType &&
         (contentType == ChatContentTypes.walletNotice || title == '支付通知');
     final pinned = _conversationPinned(item);
@@ -409,17 +409,23 @@ class _MessagesTabState extends State<MessagesTab> {
             Navigator.of(context)
                 .push(
                   _chatPageRoute(
-                    ChatPage(
-                      controller: widget.controller,
-                      title: title,
-                      channelId: channelId,
-                      groupId: _value(item, [
-                        'group_id',
-                        'id',
-                      ], fallback: channelId),
-                      channelType: channelType,
-                      readOnly: readOnly,
-                    ),
+                    paymentService
+                        ? PaymentServicePage(
+                            controller: widget.controller,
+                            title: title.isEmpty ? '支付通知' : title,
+                            channelId: channelId,
+                            channelType: channelType,
+                          )
+                        : ChatPage(
+                            controller: widget.controller,
+                            title: title,
+                            channelId: channelId,
+                            groupId: _value(item, [
+                              'group_id',
+                              'id',
+                            ], fallback: channelId),
+                            channelType: channelType,
+                          ),
                   ),
                 )
                 .then(

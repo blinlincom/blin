@@ -399,6 +399,37 @@ class SessionController extends ChangeNotifier {
     }
   }
 
+  Future<bool> refreshAppInfoForAuth({String source = 'auth_page'}) async {
+    try {
+      final appInfo = await _api.getAppInfo();
+      _appInfo = appInfo;
+      _store.writeAppInfo(appInfo);
+      AppLogger.info(
+        'session',
+        'auth app info refreshed',
+        data: {
+          'source': source,
+          'app_name': appInfo.name,
+          'login_captcha_enabled': appInfo.auth.loginCaptchaEnabled,
+          'register_captcha_enabled': appInfo.auth.registerCaptchaEnabled,
+        },
+      );
+      notifyListeners();
+      return true;
+    } catch (error, stackTrace) {
+      AppLogger.warn(
+        'session',
+        'auth app info refresh failed',
+        data: {
+          'source': source,
+          'error': error.toString(),
+          'stack': stackTrace.toString(),
+        },
+      );
+      return false;
+    }
+  }
+
   void _handleSessionRefreshApiError(
     ApiException error, {
     required String source,

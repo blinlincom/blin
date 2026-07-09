@@ -31,14 +31,17 @@ Future<void> _push(BuildContext context, Widget page) async {
   ).push(MaterialPageRoute<void>(builder: (_) => page));
 }
 
-PageRoute<void> _chatPageRoute(ChatPage page) {
+PageRoute<void> _chatPageRoute(Widget page) {
+  final background = page is PaymentServicePage
+      ? _paymentServiceBackground
+      : _chatPageColor;
   return PageRouteBuilder<void>(
     opaque: true,
     pageBuilder: (_, __, ___) =>
-        const ColoredBox(color: _chatPageColor, child: SizedBox.expand()),
+        ColoredBox(color: background, child: const SizedBox.expand()),
     transitionsBuilder: (_, animation, __, ___) {
       return ColoredBox(
-        color: _chatPageColor,
+        color: background,
         child: FadeTransition(opacity: animation, child: page),
       );
     },

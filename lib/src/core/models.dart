@@ -725,6 +725,9 @@ class AppAuthConfig {
         'account_config',
         'user',
         'user_config',
+        'login_configuration',
+        'registration_configuration',
+        'invitation_configuration',
         'app_exten_info',
         'extend',
         'extra',
@@ -734,14 +737,30 @@ class AppAuthConfig {
     }
 
     collect(map);
-    final registerEnabled = _boolFromSources(sources, const [
-      'register_enabled',
-      'enable_register',
-      'user_register_enabled',
-      'registration_enabled',
-      'allow_register',
-      'is_register',
-    ], defaultValue: true);
+    final loginSwitch = _intFromSources(sources, const ['login_switch']);
+    final loginOpen = loginSwitch == null ? null : loginSwitch == 0;
+    final loginCodeSwitch = _intFromSources(sources, const [
+      'login_code_switch',
+    ]);
+    final registrationSwitch = _intFromSources(sources, const [
+      'registration_switch',
+    ]);
+    final registrationOpen = registrationSwitch == null
+        ? null
+        : registrationSwitch == 0;
+    final registrationCodeSwitch = _intFromSources(sources, const [
+      'registration_code_switch',
+    ]);
+    final registerEnabled =
+        registrationOpen ??
+        _boolFromSources(sources, const [
+          'register_enabled',
+          'enable_register',
+          'user_register_enabled',
+          'registration_enabled',
+          'allow_register',
+          'is_register',
+        ], defaultValue: true);
     final inviteEnabled = _boolFromSources(sources, const [
       'invite_code_enabled',
       'invitecode_enabled',
@@ -752,84 +771,98 @@ class AppAuthConfig {
       'invitecode',
     ]);
     return AppAuthConfig(
-      passwordLoginEnabled: _boolFromSources(sources, const [
-        'password_login_enabled',
-        'enable_password_login',
-        'login_password_enabled',
-        'account_login_enabled',
-        'username_login_enabled',
-        'password_login',
-        'account_login',
-        'username_login',
-      ], defaultValue: true),
-      mobileLoginEnabled: _boolFromSources(sources, const [
-        'mobile_login_enabled',
-        'phone_login_enabled',
-        'sms_login_enabled',
-        'enable_mobile_login',
-        'enable_phone_login',
-        'is_mobile_login',
-        'is_phone_login',
-        'mobile_login',
-        'phone_login',
-        'sms_login',
-      ]),
-      loginCaptchaEnabled: _boolFromSources(sources, const [
-        'login_captcha_enabled',
-        'login_image_captcha_enabled',
-        'enable_login_captcha',
-        'enable_login_image_captcha',
-        'is_login_captcha',
-        'login_captcha',
-        'login_img_code',
-        'login_image_code',
-      ]),
+      passwordLoginEnabled:
+          loginOpen ??
+          _boolFromSources(sources, const [
+            'password_login_enabled',
+            'enable_password_login',
+            'login_password_enabled',
+            'account_login_enabled',
+            'username_login_enabled',
+            'password_login',
+            'account_login',
+            'username_login',
+          ], defaultValue: true),
+      mobileLoginEnabled: (loginOpen == false)
+          ? false
+          : _boolFromSources(sources, const [
+              'mobile_login_enabled',
+              'phone_login_enabled',
+              'sms_login_enabled',
+              'enable_mobile_login',
+              'enable_phone_login',
+              'is_mobile_login',
+              'is_phone_login',
+              'mobile_login',
+              'phone_login',
+              'sms_login',
+            ]),
+      loginCaptchaEnabled: loginCodeSwitch == null
+          ? _boolFromSources(sources, const [
+              'login_captcha_enabled',
+              'login_image_captcha_enabled',
+              'enable_login_captcha',
+              'enable_login_image_captcha',
+              'is_login_captcha',
+              'login_captcha',
+              'login_img_code',
+              'login_image_code',
+            ])
+          : (loginOpen != false && loginCodeSwitch == 1),
       registerEnabled: registerEnabled,
       usernameRegisterEnabled:
           registerEnabled &&
-          _boolFromSources(sources, const [
-            'username_register_enabled',
-            'account_register_enabled',
-            'enable_username_register',
-            'enable_account_register',
-            'is_username_register',
-            'username_register',
-            'account_register',
-          ], defaultValue: true),
+          (registrationCodeSwitch == null
+              ? _boolFromSources(sources, const [
+                  'username_register_enabled',
+                  'account_register_enabled',
+                  'enable_username_register',
+                  'enable_account_register',
+                  'is_username_register',
+                  'username_register',
+                  'account_register',
+                ], defaultValue: true)
+              : registrationCodeSwitch == 0 || registrationCodeSwitch == 1),
       mobileRegisterEnabled:
           registerEnabled &&
-          _boolFromSources(sources, const [
-            'mobile_register_enabled',
-            'phone_register_enabled',
-            'sms_register_enabled',
-            'enable_mobile_register',
-            'enable_phone_register',
-            'is_mobile_register',
-            'is_phone_register',
-            'mobile_register',
-            'phone_register',
-            'sms_register',
-          ]),
+          (registrationCodeSwitch == null
+              ? _boolFromSources(sources, const [
+                  'mobile_register_enabled',
+                  'phone_register_enabled',
+                  'sms_register_enabled',
+                  'enable_mobile_register',
+                  'enable_phone_register',
+                  'is_mobile_register',
+                  'is_phone_register',
+                  'mobile_register',
+                  'phone_register',
+                  'sms_register',
+                ])
+              : registrationCodeSwitch == 3),
       emailRegisterEnabled:
           registerEnabled &&
-          _boolFromSources(sources, const [
-            'email_register_enabled',
-            'enable_email_register',
-            'is_email_register',
-            'email_register',
-          ]),
+          (registrationCodeSwitch == null
+              ? _boolFromSources(sources, const [
+                  'email_register_enabled',
+                  'enable_email_register',
+                  'is_email_register',
+                  'email_register',
+                ])
+              : registrationCodeSwitch == 2),
       registerCaptchaEnabled:
           registerEnabled &&
-          _boolFromSources(sources, const [
-            'register_captcha_enabled',
-            'register_image_captcha_enabled',
-            'enable_register_captcha',
-            'enable_register_image_captcha',
-            'is_register_captcha',
-            'register_captcha',
-            'register_img_code',
-            'register_image_code',
-          ]),
+          (registrationCodeSwitch == null
+              ? _boolFromSources(sources, const [
+                  'register_captcha_enabled',
+                  'register_image_captcha_enabled',
+                  'enable_register_captcha',
+                  'enable_register_image_captcha',
+                  'is_register_captcha',
+                  'register_captcha',
+                  'register_img_code',
+                  'register_image_code',
+                ])
+              : registrationCodeSwitch == 1),
       inviteCodeEnabled: registerEnabled && inviteEnabled,
       inviteCodeRequired:
           registerEnabled &&
@@ -910,6 +943,25 @@ String? _stringFromKeys(Map<String, Object?> map, List<String> keys) {
         value is! Iterable &&
         value.toString().trim().isNotEmpty) {
       return value.toString();
+    }
+  }
+  return null;
+}
+
+int? _intFromSources(List<Map<String, Object?>> sources, List<String> keys) {
+  for (final source in sources) {
+    for (final key in keys) {
+      final value = _valueForKey(source, key);
+      if (value == null) {
+        continue;
+      }
+      if (value is num) {
+        return value.toInt();
+      }
+      final parsed = int.tryParse(value.toString().trim());
+      if (parsed != null) {
+        return parsed;
+      }
     }
   }
   return null;

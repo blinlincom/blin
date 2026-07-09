@@ -41,6 +41,7 @@ part 'contacts/friend_requests_page.dart';
 part 'contacts/group_pages.dart';
 part 'contacts/private_chat_actions_page.dart';
 part 'wallet/wallet_page.dart';
+part 'wallet/payment_service_page.dart';
 part 'chat/chat_page.dart';
 part 'chat/action_input_pages.dart';
 part 'chat/media_picker_pages.dart';

@@ -570,31 +570,6 @@ class _FriendQrScannerPageState extends State<FriendQrScannerPage> {
                 ],
               ),
             ),
-            ColoredBox(
-              color: Colors.black,
-              child: SafeArea(
-                top: false,
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(18, 12, 18, 18),
-                  child: SizedBox(
-                    height: 50,
-                    width: double.infinity,
-                    child: OutlinedButton.icon(
-                      onPressed: _pickingImage ? null : _pickFromAlbum,
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: Colors.white,
-                        side: const BorderSide(color: Color(0x66ffffff)),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                      ),
-                      icon: const Icon(Icons.photo_library_outlined),
-                      label: const Text('从相册选择'),
-                    ),
-                  ),
-                ),
-              ),
-            ),
           ],
         ),
       ),
