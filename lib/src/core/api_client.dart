@@ -555,12 +555,16 @@ class ApiClient {
     required UserSession session,
     required String device,
     String remark = '',
+    String payPassword = '',
   }) async {
     final result = await secureSignedImPost<Map<String, Object?>>(
       'wallet_pay_code_current',
       session: session,
       device: device,
-      params: {if (remark.isNotEmpty) 'remark': remark},
+      params: {
+        if (remark.isNotEmpty) 'remark': remark,
+        if (payPassword.isNotEmpty) 'pay_password': payPassword,
+      },
       secureResponse: true,
     );
     if (!result.isSuccess) {

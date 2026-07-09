@@ -271,6 +271,15 @@ class WalletBalance {
   const WalletBalance({
     this.balance = '0.00',
     this.balanceLabel = '0.00',
+    this.availableBalance = '0.00',
+    this.availableBalanceLabel = '0.00',
+    this.frozenBalance = '0.00',
+    this.frozenBalanceLabel = '0.00',
+    this.walletStatus = 1,
+    this.walletStatusName = '',
+    this.walletLockReason = '',
+    this.freezeReason = '',
+    this.freezeRecords = const [],
     this.payPasswordSet = false,
     this.payPasswordLocked = false,
     this.payPasswordLockedUntil = '',
@@ -286,6 +295,15 @@ class WalletBalance {
 
   final String balance;
   final String balanceLabel;
+  final String availableBalance;
+  final String availableBalanceLabel;
+  final String frozenBalance;
+  final String frozenBalanceLabel;
+  final int walletStatus;
+  final String walletStatusName;
+  final String walletLockReason;
+  final String freezeReason;
+  final List<WalletFreezeRecord> freezeRecords;
   final bool payPasswordSet;
   final bool payPasswordLocked;
   final String payPasswordLockedUntil;
@@ -311,11 +329,42 @@ class WalletBalance {
         }
       }
     }
+    final freezeRecords = <WalletFreezeRecord>[];
+    final rawFreezeRecords = map['freeze_records'];
+    if (rawFreezeRecords is Iterable) {
+      for (final item in rawFreezeRecords) {
+        final record = WalletFreezeRecord.fromJson(item);
+        if (record.freezeNo.isNotEmpty || record.amount != '0.00') {
+          freezeRecords.add(record);
+        }
+      }
+    }
+    final availableBalance = _decimalLabel(map['available_balance']);
+    final frozenBalance = _decimalLabel(map['frozen_balance']);
     return WalletBalance(
       balance: balance,
       balanceLabel:
           _stringFromKeys(map, const ['balance_label', 'balance_text']) ??
           balance,
+      availableBalance: availableBalance,
+      availableBalanceLabel:
+          _stringFromKeys(map, const [
+            'available_balance_label',
+            'available_balance_text',
+          ]) ??
+          availableBalance,
+      frozenBalance: frozenBalance,
+      frozenBalanceLabel:
+          _stringFromKeys(map, const [
+            'frozen_balance_label',
+            'frozen_balance_text',
+          ]) ??
+          frozenBalance,
+      walletStatus: int.tryParse(map['wallet_status']?.toString() ?? '') ?? 1,
+      walletStatusName: map['wallet_status_name']?.toString() ?? '',
+      walletLockReason: map['wallet_lock_reason']?.toString() ?? '',
+      freezeReason: map['freeze_reason']?.toString() ?? '',
+      freezeRecords: freezeRecords,
       payPasswordSet: _enabled(map['pay_password_set']),
       payPasswordLocked: _enabled(map['pay_password_locked']),
       payPasswordLockedUntil:
@@ -336,6 +385,15 @@ class WalletBalance {
   Map<String, Object?> toJson() => {
     'balance': balance,
     'balance_label': balanceLabel,
+    'available_balance': availableBalance,
+    'available_balance_label': availableBalanceLabel,
+    'frozen_balance': frozenBalance,
+    'frozen_balance_label': frozenBalanceLabel,
+    'wallet_status': walletStatus,
+    'wallet_status_name': walletStatusName,
+    'wallet_lock_reason': walletLockReason,
+    'freeze_reason': freezeReason,
+    'freeze_records': freezeRecords.map((item) => item.toJson()).toList(),
     'pay_password_set': payPasswordSet ? 1 : 0,
     'pay_password_locked': payPasswordLocked ? 1 : 0,
     'pay_password_locked_until': payPasswordLockedUntil,
@@ -347,6 +405,46 @@ class WalletBalance {
     'merchant_status_name': merchantStatusName,
     'merchant_name': merchantName,
     'server_time': serverTime,
+  };
+}
+
+class WalletFreezeRecord {
+  const WalletFreezeRecord({
+    this.freezeNo = '',
+    this.amount = '0.00',
+    this.amountLabel = '0.00',
+    this.reason = '',
+    this.createTime = '',
+    this.updateTime = '',
+  });
+
+  final String freezeNo;
+  final String amount;
+  final String amountLabel;
+  final String reason;
+  final String createTime;
+  final String updateTime;
+
+  factory WalletFreezeRecord.fromJson(Object? value) {
+    final map = _objectMap(value);
+    final amount = _decimalLabel(map['amount']);
+    return WalletFreezeRecord(
+      freezeNo: map['freeze_no']?.toString() ?? '',
+      amount: amount,
+      amountLabel: map['amount_label']?.toString() ?? amount,
+      reason: map['reason']?.toString() ?? '',
+      createTime: map['create_time']?.toString() ?? '',
+      updateTime: map['update_time']?.toString() ?? '',
+    );
+  }
+
+  Map<String, Object?> toJson() => {
+    'freeze_no': freezeNo,
+    'amount': amount,
+    'amount_label': amountLabel,
+    'reason': reason,
+    'create_time': createTime,
+    'update_time': updateTime,
   };
 }
 

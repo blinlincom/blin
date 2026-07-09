@@ -201,6 +201,11 @@ class _WalletBalanceBand extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final statusText = balance.walletStatusName.isNotEmpty
+        ? balance.walletStatusName
+        : (balance.walletStatus == 1 ? '正常' : '受限');
+    final hasFrozen = _walletAmountPositive(balance.frozenBalance);
+    final hasRisk = hasFrozen || balance.walletStatus != 1;
     return ColoredBox(
       color: _surfaceColor,
       child: Padding(
@@ -226,9 +231,102 @@ class _WalletBalanceBand extends StatelessWidget {
                 height: 1.05,
               ),
             ),
+            const SizedBox(height: 18),
+            Row(
+              children: [
+                Expanded(
+                  child: _WalletBalanceMetric(
+                    label: '可用余额',
+                    value: '¥${balance.availableBalanceLabel}',
+                  ),
+                ),
+                const SizedBox(width: 18),
+                Expanded(
+                  child: _WalletBalanceMetric(
+                    label: '冻结余额',
+                    value: '¥${balance.frozenBalanceLabel}',
+                  ),
+                ),
+              ],
+            ),
+            if (hasRisk) ...[
+              const SizedBox(height: 14),
+              InkWell(
+                onTap: () => _showWalletFreezeDetails(context, balance),
+                child: Container(
+                  padding: const EdgeInsets.fromLTRB(10, 9, 10, 9),
+                  decoration: BoxDecoration(
+                    color: const Color(0xfffffbeb),
+                    border: Border.all(color: const Color(0xfffde68a)),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(
+                        Icons.info_outline,
+                        size: 17,
+                        color: Color(0xffb45309),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          '钱包$statusText${balance.freezeReason.isEmpty ? '' : '：${balance.freezeReason}'}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: Color(0xff92400e),
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                      const Icon(
+                        Icons.chevron_right,
+                        size: 18,
+                        color: Color(0xffb45309),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
           ],
         ),
       ),
+    );
+  }
+}
+
+class _WalletBalanceMetric extends StatelessWidget {
+  const _WalletBalanceMetric({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: const TextStyle(
+            color: _secondaryTextColor,
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(height: 5),
+        Text(
+          value,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(
+            color: _textColor,
+            fontSize: 16,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+      ],
     );
   }
 }
@@ -304,16 +402,16 @@ class _WalletPayReceivePageState extends State<WalletPayReceivePage> {
   WalletOrder? _collectOrder;
   String _payError = '';
   String _collectError = '';
-  bool _payLoading = true;
+  bool _payLoading = false;
   bool _collectLoading = true;
   bool _settingCollectAmount = false;
+  bool _payUnlocked = false;
   Timer? _payTimer;
   int _paySecondsLeft = 0;
 
   @override
   void initState() {
     super.initState();
-    unawaited(_loadPayCode(showLoading: false));
     unawaited(_loadCollectCode(showLoading: false));
   }
 
@@ -325,7 +423,17 @@ class _WalletPayReceivePageState extends State<WalletPayReceivePage> {
     super.dispose();
   }
 
-  Future<void> _loadPayCode({bool showLoading = true}) async {
+  Future<void> _loadPayCode({
+    bool showLoading = true,
+    bool requirePassword = true,
+  }) async {
+    var payPassword = '';
+    if (requirePassword && !_payUnlocked) {
+      payPassword = await _showWalletPayPasswordSheet(context, title: '打开付款码');
+      if (payPassword.isEmpty) {
+        return;
+      }
+    }
     if (showLoading && mounted) {
       setState(() {
         _payLoading = true;
@@ -333,7 +441,9 @@ class _WalletPayReceivePageState extends State<WalletPayReceivePage> {
       });
     }
     try {
-      final order = await widget.controller.currentWalletPayCode();
+      final order = await widget.controller.currentWalletPayCode(
+        payPassword: payPassword,
+      );
       if (!mounted) {
         return;
       }
@@ -342,15 +452,21 @@ class _WalletPayReceivePageState extends State<WalletPayReceivePage> {
         _payOrder = order;
         _payError = '';
         _payLoading = false;
+        _payUnlocked = true;
       });
     } catch (error) {
       if (!mounted) {
         return;
       }
       _payTimer?.cancel();
+      final errorText = _walletInlineError(error);
       setState(() {
-        _payError = _walletInlineError(error);
+        _payError = errorText;
         _payLoading = false;
+        if (errorText.contains('支付密码')) {
+          _payUnlocked = false;
+          _payOrder = null;
+        }
       });
     }
   }
@@ -403,7 +519,7 @@ class _WalletPayReceivePageState extends State<WalletPayReceivePage> {
       }
       if (_paySecondsLeft <= 1) {
         timer.cancel();
-        unawaited(_loadPayCode(showLoading: false));
+        unawaited(_loadPayCode(showLoading: false, requirePassword: false));
         return;
       }
       setState(() => _paySecondsLeft -= 1);
@@ -412,7 +528,8 @@ class _WalletPayReceivePageState extends State<WalletPayReceivePage> {
 
   Future<void> _refreshAll() async {
     await Future.wait([
-      _loadPayCode(),
+      if (_payUnlocked || _payOrder != null)
+        _loadPayCode(requirePassword: false),
       _loadCollectCode(
         amount: _amount.text.trim(),
         remark: _remark.text.trim(),
@@ -442,7 +559,7 @@ class _WalletPayReceivePageState extends State<WalletPayReceivePage> {
       return '付款码生成失败';
     }
     if (_payOrder == null) {
-      return '正在生成付款码';
+      return '验证支付密码后显示';
     }
     return _paySecondsLeft > 0 ? '${_paySecondsLeft}s 后自动刷新' : '短时有效，自动刷新';
   }
@@ -499,9 +616,16 @@ class _WalletPayReceivePageState extends State<WalletPayReceivePage> {
             Padding(
               padding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
               child: TextButton.icon(
-                onPressed: _payLoading ? null : () => _loadPayCode(),
-                icon: const Icon(Icons.refresh, size: 18),
-                label: const Text('刷新付款码'),
+                onPressed: _payLoading
+                    ? null
+                    : () => _loadPayCode(
+                        requirePassword: !_payUnlocked || _payOrder == null,
+                      ),
+                icon: Icon(
+                  _payOrder == null ? Icons.lock_open : Icons.refresh,
+                  size: 18,
+                ),
+                label: Text(_payOrder == null ? '打开付款码' : '刷新付款码'),
               ),
             ),
             const _GroupGap(),
@@ -696,6 +820,7 @@ class _WalletPayCodePageState extends State<WalletPayCodePage> {
   Future<WalletOrder>? _request;
   WalletOrder? _order;
   bool _busy = false;
+  bool _unlocked = false;
   Timer? _timer;
   int _secondsLeft = 0;
 
@@ -710,13 +835,22 @@ class _WalletPayCodePageState extends State<WalletPayCodePage> {
     super.dispose();
   }
 
-  Future<void> _createOrRefresh() async {
+  Future<void> _createOrRefresh({bool requirePassword = true}) async {
     if (_busy) {
       return;
     }
+    var payPassword = '';
+    if (requirePassword && !_unlocked) {
+      payPassword = await _showWalletPayPasswordSheet(context, title: '打开付款码');
+      if (payPassword.isEmpty) {
+        return;
+      }
+    }
     setState(() => _busy = true);
     try {
-      final order = await widget.controller.currentWalletPayCode();
+      final order = await widget.controller.currentWalletPayCode(
+        payPassword: payPassword,
+      );
       if (!mounted) {
         return;
       }
@@ -724,9 +858,17 @@ class _WalletPayCodePageState extends State<WalletPayCodePage> {
       setState(() {
         _order = order;
         _request = Future.value(order);
+        _unlocked = true;
       });
     } catch (error) {
       if (mounted) {
+        if (error.toString().contains('支付密码')) {
+          setState(() {
+            _order = null;
+            _request = null;
+            _unlocked = false;
+          });
+        }
         _showWalletMessage(context, error.toString());
       }
     } finally {
@@ -749,7 +891,7 @@ class _WalletPayCodePageState extends State<WalletPayCodePage> {
       }
       if (_secondsLeft <= 1) {
         timer.cancel();
-        _createOrRefresh();
+        _createOrRefresh(requirePassword: false);
         return;
       }
       setState(() => _secondsLeft -= 1);
@@ -771,7 +913,9 @@ class _WalletPayCodePageState extends State<WalletPayCodePage> {
           if (order != null)
             IconButton(
               tooltip: '刷新',
-              onPressed: _busy ? null : _createOrRefresh,
+              onPressed: _busy
+                  ? null
+                  : () => _createOrRefresh(requirePassword: false),
               icon: const Icon(Icons.refresh),
             ),
         ],
@@ -2846,6 +2990,77 @@ String _walletTokenFromQr(String raw) {
     return text;
   }
   return '';
+}
+
+bool _walletAmountPositive(String value) {
+  final normalized = value.replaceAll(',', '').replaceAll('¥', '').trim();
+  return (double.tryParse(normalized) ?? 0) > 0;
+}
+
+Future<void> _showWalletFreezeDetails(
+  BuildContext context,
+  WalletBalance balance,
+) {
+  return showModalBottomSheet<void>(
+    context: context,
+    useSafeArea: true,
+    backgroundColor: _surfaceColor,
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+    ),
+    builder: (context) {
+      final records = balance.freezeRecords;
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(20, 16, 20, 26),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const Text(
+              '钱包限制详情',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: _textColor,
+                fontSize: 17,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(height: 18),
+            _WalletInfoRow(
+              label: '钱包状态',
+              value: balance.walletStatusName.isEmpty
+                  ? (balance.walletStatus == 1 ? '正常' : '受限')
+                  : balance.walletStatusName,
+            ),
+            _WalletInfoRow(
+              label: '冻结余额',
+              value: '¥${balance.frozenBalanceLabel}',
+            ),
+            if (balance.walletLockReason.isNotEmpty)
+              _WalletInfoRow(label: '锁定原因', value: balance.walletLockReason),
+            if (balance.freezeReason.isNotEmpty)
+              _WalletInfoRow(label: '冻结原因', value: balance.freezeReason),
+            if (records.isNotEmpty) ...[
+              const Divider(height: 24),
+              for (final item in records)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: Text(
+                    '${item.amountLabel}  ${item.reason.isEmpty ? '未填写原因' : item.reason}',
+                    style: const TextStyle(
+                      color: _textColor,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      height: 1.4,
+                    ),
+                  ),
+                ),
+            ],
+          ],
+        ),
+      );
+    },
+  );
 }
 
 void _showWalletMessage(BuildContext context, String text) {

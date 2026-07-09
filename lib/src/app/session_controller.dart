@@ -1020,12 +1020,16 @@ class SessionController extends ChangeNotifier {
     );
   }
 
-  Future<WalletOrder> currentWalletPayCode({String remark = ''}) {
+  Future<WalletOrder> currentWalletPayCode({
+    String remark = '',
+    String payPassword = '',
+  }) {
     final current = _requireSession();
     return _api.walletCurrentPayCode(
       session: current,
       device: _device,
       remark: remark,
+      payPassword: payPassword,
     );
   }
 

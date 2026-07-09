@@ -117,6 +117,7 @@ class _ContactsTabState extends State<ContactsTab> {
 
   @override
   Widget build(BuildContext context) {
+    final groupedFriends = _groupContactsByLetter(_friends);
     return Stack(
       children: [
         RefreshIndicator(
@@ -174,19 +175,46 @@ class _ContactsTabState extends State<ContactsTab> {
                     : null,
               ),
               const _SectionHeader(text: '联系人'),
-              _MenuTile(
-                icon: Icons.person_outline,
-                iconColor: _primaryColor,
-                title: '联系人',
-                subtitle: _contactsSubtitle,
-                onTap: () => _push(
-                  context,
-                  ContactsListPage(controller: widget.controller),
-                ),
-              ),
+              if (_loading && _friends.isEmpty)
+                const SizedBox(
+                  height: 180,
+                  child: Center(child: CircularProgressIndicator()),
+                )
+              else if (_error != null && _friends.isEmpty)
+                SizedBox(
+                  height: 200,
+                  child: _ErrorState(text: _error!, onRetry: () => _refresh()),
+                )
+              else if (_friends.isEmpty)
+                const _EmptyRow(text: '暂无联系人')
+              else
+                for (final group in groupedFriends) ...[
+                  _SectionHeader(text: group.key),
+                  for (final item in group.value)
+                    _ContactTile(
+                      key: ValueKey(
+                        'contact-tab-${_friendUserId(item)}-${_friendChannelId(item)}',
+                      ),
+                      title: _friendTitle(item),
+                      subtitle: _friendSubtitle(item),
+                      trailing: '',
+                      isGroup: false,
+                      avatarUrl: _friendAvatarUrl(item),
+                      onTap: () => _openContactProfile(item),
+                      onLongPress: () =>
+                          _openPrivateChat(context, widget.controller, item),
+                    ),
+                ],
             ],
           ),
         ),
+        if (_friends.length >= 12)
+          const Positioned(
+            right: 4,
+            top: 176,
+            bottom: 24,
+            child: IgnorePointer(child: _AlphabetIndex()),
+          ),
         if (_error != null && _friends.isNotEmpty)
           Positioned(
             left: 0,
@@ -205,20 +233,6 @@ class _ContactsTabState extends State<ContactsTab> {
     );
   }
 
-  String get _contactsSubtitle {
-    if (_loading && _friends.isEmpty) {
-      return '正在同步';
-    }
-    if (_error != null && _friends.isEmpty) {
-      return '点击重试';
-    }
-    final count = _friends.length;
-    if (count <= 0) {
-      return '暂无联系人';
-    }
-    return '$count 位联系人';
-  }
-
   String get _serviceAccountsSubtitle {
     if (_serviceLoading && _serviceAccounts.isEmpty) {
       return '正在同步';
@@ -231,6 +245,21 @@ class _ContactsTabState extends State<ContactsTab> {
       return '暂无服务号';
     }
     return '$count 个服务号';
+  }
+
+  void _openContactProfile(Map<String, Object?> item) {
+    _push(
+      context,
+      FriendProfilePage(
+        controller: widget.controller,
+        title: _friendTitle(item),
+        receiverId: _friendUserId(item),
+        channelId: _friendChannelId(item),
+        avatarUrl: _friendAvatarUrl(item),
+        online: _friendPresenceText(item) == '在线',
+        onOpenChat: () => _openPrivateChat(context, widget.controller, item),
+      ),
+    );
   }
 }
 
@@ -690,4 +719,42 @@ int _serviceAccountChannelType(Map<String, Object?> item) {
 
 bool _serviceAccountAllowUnfollow(Map<String, Object?> item) {
   return _boolValue(item['allow_unfollow']);
+}
+
+List<MapEntry<String, List<Map<String, Object?>>>> _groupContactsByLetter(
+  List<Map<String, Object?>> friends,
+) {
+  final sorted = friends.map(Map<String, Object?>.from).toList();
+  sorted.sort((left, right) {
+    final leftLetter = _contactSortLetter(left);
+    final rightLetter = _contactSortLetter(right);
+    final letterResult = leftLetter.compareTo(rightLetter);
+    if (letterResult != 0) {
+      return letterResult;
+    }
+    return _friendTitle(left).compareTo(_friendTitle(right));
+  });
+  final groups = <MapEntry<String, List<Map<String, Object?>>>>[];
+  for (final item in sorted) {
+    final letter = _contactSortLetter(item);
+    if (groups.isEmpty || groups.last.key != letter) {
+      groups.add(MapEntry(letter, <Map<String, Object?>>[item]));
+    } else {
+      groups.last.value.add(item);
+    }
+  }
+  return groups;
+}
+
+String _contactSortLetter(Map<String, Object?> item) {
+  final title = _friendTitle(item).trim();
+  final source = title.isEmpty ? _friendUsername(item).trim() : title;
+  if (source.isEmpty) {
+    return '#';
+  }
+  final first = source.characters.first.toUpperCase();
+  if (RegExp(r'^[A-Z]$').hasMatch(first)) {
+    return first;
+  }
+  return '#';
 }

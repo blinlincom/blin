@@ -507,6 +507,7 @@ class _PaymentServicePageState extends State<PaymentServicePage>
       child: Scaffold(
         backgroundColor: _paymentServiceBackground,
         body: SafeArea(
+          bottom: false,
           child: Column(
             children: [
               _PaymentServiceHeader(
@@ -723,19 +724,15 @@ class _PaymentServiceHeader extends StatelessWidget {
         children: [
           SizedBox(
             height: 54,
-            child: Stack(
-              alignment: Alignment.center,
+            child: Row(
               children: [
-                Positioned(
-                  left: 4,
-                  child: _PaymentHeaderIconButton(
-                    icon: Icons.arrow_back_ios_new,
-                    label: '返回',
-                    onTap: onBack,
-                  ),
+                const SizedBox(width: 4),
+                _PaymentHeaderIconButton(
+                  icon: Icons.arrow_back_ios_new,
+                  label: '返回',
+                  onTap: onBack,
                 ),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 118),
+                Expanded(
                   child: Text(
                     title,
                     maxLines: 1,
@@ -749,22 +746,17 @@ class _PaymentServiceHeader extends StatelessWidget {
                     ),
                   ),
                 ),
-                Positioned(
-                  right: 52,
-                  child: _PaymentHeaderIconButton(
-                    icon: searching ? Icons.close : Icons.search,
-                    label: searching ? '关闭搜索' : '搜索',
-                    onTap: onSearch,
-                  ),
+                _PaymentHeaderIconButton(
+                  icon: searching ? Icons.close : Icons.search,
+                  label: searching ? '关闭搜索' : '搜索',
+                  onTap: onSearch,
                 ),
-                Positioned(
-                  right: 4,
-                  child: _PaymentHeaderIconButton(
-                    icon: Icons.settings_outlined,
-                    label: '设置',
-                    onTap: onSettings,
-                  ),
+                _PaymentHeaderIconButton(
+                  icon: Icons.settings_outlined,
+                  label: '设置',
+                  onTap: onSettings,
                 ),
+                const SizedBox(width: 4),
               ],
             ),
           ),
@@ -1171,64 +1163,79 @@ class _PaymentServiceBottomBar extends StatelessWidget {
     if (visibleMenus.isEmpty) {
       return const SizedBox.shrink();
     }
-    return Container(
-      height: 56,
-      decoration: const BoxDecoration(
-        color: _surfaceColor,
-        border: Border(top: BorderSide(color: Color(0xffdddddd), width: 0.5)),
-      ),
-      child: Row(
-        children: [
-          SizedBox(
-            width: 64,
-            child: _PaymentServiceMenuButton(
-              icon: Icons.apps,
-              label: '服务',
-              showText: false,
-              onTap: () => onMenuTap(visibleMenus.first),
+    return ColoredBox(
+      color: _surfaceColor,
+      child: SafeArea(
+        top: false,
+        child: Container(
+          height: 56,
+          decoration: const BoxDecoration(
+            color: _surfaceColor,
+            border: Border(
+              top: BorderSide(color: Color(0xffdddddd), width: 0.5),
             ),
           ),
-          const _PaymentServiceVerticalDivider(),
-          Expanded(
-            child: visibleMenus.length <= 3
-                ? Row(
-                    children: [
-                      for (var index = 0; index < visibleMenus.length; index++)
-                        Expanded(
-                          child: Row(
-                            children: [
-                              if (index > 0)
-                                const _PaymentServiceVerticalDivider(),
-                              Expanded(
-                                child: _PaymentServiceMenuButton(
-                                  label: _serviceMenuLabel(visibleMenus[index]),
-                                  onTap: () => onMenuTap(visibleMenus[index]),
-                                ),
+          child: Row(
+            children: [
+              SizedBox(
+                width: 64,
+                child: _PaymentServiceMenuButton(
+                  icon: Icons.apps,
+                  label: '服务',
+                  showText: false,
+                  onTap: () => onMenuTap(visibleMenus.first),
+                ),
+              ),
+              const _PaymentServiceVerticalDivider(),
+              Expanded(
+                child: visibleMenus.length <= 3
+                    ? Row(
+                        children: [
+                          for (
+                            var index = 0;
+                            index < visibleMenus.length;
+                            index++
+                          )
+                            Expanded(
+                              child: Row(
+                                children: [
+                                  if (index > 0)
+                                    const _PaymentServiceVerticalDivider(),
+                                  Expanded(
+                                    child: _PaymentServiceMenuButton(
+                                      label: _serviceMenuLabel(
+                                        visibleMenus[index],
+                                      ),
+                                      onTap: () =>
+                                          onMenuTap(visibleMenus[index]),
+                                    ),
+                                  ),
+                                ],
                               ),
-                            ],
-                          ),
-                        ),
-                    ],
-                  )
-                : ListView.separated(
-                    scrollDirection: Axis.horizontal,
-                    physics: const ClampingScrollPhysics(),
-                    itemCount: visibleMenus.length,
-                    separatorBuilder: (_, __) =>
-                        const _PaymentServiceVerticalDivider(),
-                    itemBuilder: (context, index) {
-                      final item = visibleMenus[index];
-                      return SizedBox(
-                        width: 108,
-                        child: _PaymentServiceMenuButton(
-                          label: _serviceMenuLabel(item),
-                          onTap: () => onMenuTap(item),
-                        ),
-                      );
-                    },
-                  ),
+                            ),
+                        ],
+                      )
+                    : ListView.separated(
+                        scrollDirection: Axis.horizontal,
+                        physics: const ClampingScrollPhysics(),
+                        itemCount: visibleMenus.length,
+                        separatorBuilder: (_, __) =>
+                            const _PaymentServiceVerticalDivider(),
+                        itemBuilder: (context, index) {
+                          final item = visibleMenus[index];
+                          return SizedBox(
+                            width: 108,
+                            child: _PaymentServiceMenuButton(
+                              label: _serviceMenuLabel(item),
+                              onTap: () => onMenuTap(item),
+                            ),
+                          );
+                        },
+                      ),
+              ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }
@@ -1811,11 +1818,6 @@ int _paymentServiceCompareMessages(
   Map<String, Object?> left,
   Map<String, Object?> right,
 ) {
-  final seqLeft = _intValue(left, ['message_seq']);
-  final seqRight = _intValue(right, ['message_seq']);
-  if (seqLeft > 0 && seqRight > 0 && seqLeft != seqRight) {
-    return seqLeft.compareTo(seqRight);
-  }
   final timeLeft = _messageDateTime(left);
   final timeRight = _messageDateTime(right);
   if (timeLeft != null && timeRight != null) {
@@ -1823,6 +1825,16 @@ int _paymentServiceCompareMessages(
     if (result != 0) {
       return result;
     }
+  }
+  final epochLeft = _paymentServiceSortEpoch(left);
+  final epochRight = _paymentServiceSortEpoch(right);
+  if (epochLeft > 0 && epochRight > 0 && epochLeft != epochRight) {
+    return epochLeft.compareTo(epochRight);
+  }
+  final seqLeft = _intValue(left, ['message_seq']);
+  final seqRight = _intValue(right, ['message_seq']);
+  if (seqLeft > 0 && seqRight > 0 && seqLeft != seqRight) {
+    return seqLeft.compareTo(seqRight);
   }
   final timestampResult = _value(left, [
     'timestamp',
@@ -1833,6 +1845,24 @@ int _paymentServiceCompareMessages(
   return _paymentServiceMessageKey(
     left,
   ).compareTo(_paymentServiceMessageKey(right));
+}
+
+int _paymentServiceSortEpoch(Map<String, Object?> item) {
+  final timestamp = _value(item, [
+    'timestamp',
+    'client_timestamp',
+    'send_time',
+    'created_at',
+    'create_time',
+  ]);
+  if (timestamp.isEmpty) {
+    return 0;
+  }
+  final numeric = int.tryParse(timestamp);
+  if (numeric != null) {
+    return numeric > 9999999999 ? numeric : numeric * 1000;
+  }
+  return DateTime.tryParse(timestamp)?.millisecondsSinceEpoch ?? 0;
 }
 
 bool _shouldShowPaymentTimeDivider(
