@@ -117,7 +117,7 @@ class _PaymentServicePageState extends State<PaymentServicePage>
       channelId: widget.channelId,
       channelType: widget.channelType,
     );
-    _messages = cached;
+    _messages = _paymentServiceSortedMessages(cached);
     _loading = cached.isEmpty;
     _error = '';
     if (cached.isNotEmpty) {
@@ -241,7 +241,7 @@ class _PaymentServicePageState extends State<PaymentServicePage>
     required bool showLoading,
   }) {
     if (loaded.isEmpty && _messages.isNotEmpty && !showLoading) {
-      return _messages;
+      return _paymentServiceSortedMessages(_messages);
     }
     var merged = _messages.isEmpty
         ? <Map<String, Object?>>[]
@@ -278,29 +278,31 @@ class _PaymentServicePageState extends State<PaymentServicePage>
         .where(_paymentServiceIsWalletNotice)
         .toList(growable: false);
     if (_query.isEmpty) {
-      return notices;
+      return _paymentServiceSortedMessages(notices);
     }
     final query = _query.toLowerCase();
-    return notices
-        .where((item) {
-          final payload = _asObjectMap(item['payload']);
-          final notice = _walletNoticePayload(payload);
-          final fields = [
-            _walletNoticeTitle(payload),
-            _walletNoticeSummary(payload),
-            _paymentServiceAmountText(notice),
-            _paymentServiceActorName(notice, payload),
-            _value(notice, [
-              'order_no',
-              'bill_no',
-              'transaction_no',
-              'trade_no',
-            ]),
-            _value(item, ['content', 'text']),
-          ].join(' ').toLowerCase();
-          return fields.contains(query);
-        })
-        .toList(growable: false);
+    return _paymentServiceSortedMessages(
+      notices
+          .where((item) {
+            final payload = _asObjectMap(item['payload']);
+            final notice = _walletNoticePayload(payload);
+            final fields = [
+              _walletNoticeTitle(payload),
+              _walletNoticeSummary(payload),
+              _paymentServiceAmountText(notice),
+              _paymentServiceActorName(notice, payload),
+              _value(notice, [
+                'order_no',
+                'bill_no',
+                'transaction_no',
+                'trade_no',
+              ]),
+              _value(item, ['content', 'text']),
+            ].join(' ').toLowerCase();
+            return fields.contains(query);
+          })
+          .toList(growable: false),
+    );
   }
 
   void _jumpToLatest() {
@@ -1213,6 +1215,16 @@ bool _paymentServiceIsWalletNotice(Map<String, Object?> item) {
       _asObjectMap(payload['wallet_notice']).isNotEmpty;
 }
 
+List<Map<String, Object?>> _paymentServiceSortedMessages(
+  Iterable<Map<String, Object?>> messages,
+) {
+  final next = messages
+      .map((item) => Map<String, Object?>.from(item))
+      .toList(growable: false);
+  next.sort(_paymentServiceCompareMessages);
+  return next;
+}
+
 List<Map<String, Object?>> _paymentServiceMergeMessages(
   List<Map<String, Object?>> current,
   Map<String, Object?> incoming, {
@@ -1280,9 +1292,20 @@ int _paymentServiceCompareMessages(
   final timeLeft = _messageDateTime(left);
   final timeRight = _messageDateTime(right);
   if (timeLeft != null && timeRight != null) {
-    return timeLeft.compareTo(timeRight);
+    final result = timeLeft.compareTo(timeRight);
+    if (result != 0) {
+      return result;
+    }
   }
-  return _value(left, ['timestamp']).compareTo(_value(right, ['timestamp']));
+  final timestampResult = _value(left, [
+    'timestamp',
+  ]).compareTo(_value(right, ['timestamp']));
+  if (timestampResult != 0) {
+    return timestampResult;
+  }
+  return _paymentServiceMessageKey(
+    left,
+  ).compareTo(_paymentServiceMessageKey(right));
 }
 
 bool _shouldShowPaymentTimeDivider(

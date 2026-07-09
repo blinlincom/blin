@@ -184,6 +184,7 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
+  final GlobalKey _quickActionButtonKey = GlobalKey();
   var _index = 0;
   int _totalUnread = 0;
   bool _initialSyncOverlayVisible = false;
@@ -369,13 +370,79 @@ class _HomePageState extends State<HomePage> {
     return [
       if (_index == 0 || _index == 1)
         IconButton(
+          key: _quickActionButtonKey,
           tooltip: '更多',
           onPressed: showInitialSyncOverlay
               ? _showInitialSyncLockedTip
-              : () => _open(QuickActionsPage(controller: widget.controller)),
+              : _openQuickActionsMenu,
           icon: const Icon(Icons.add_circle_outline, size: 23),
         ),
     ];
+  }
+
+  Future<void> _openQuickActionsMenu() async {
+    final buttonContext = _quickActionButtonKey.currentContext;
+    final overlay = Navigator.of(context).overlay?.context.findRenderObject();
+    final button = buttonContext?.findRenderObject();
+    if (button is! RenderBox || overlay is! RenderBox) {
+      return;
+    }
+    final bottomRight = button.localToGlobal(
+      button.size.bottomRight(Offset.zero),
+      ancestor: overlay,
+    );
+    final left = max(8.0, bottomRight.dx - 184);
+    final selected = await showMenu<String>(
+      context: context,
+      color: const Color(0xff2f3338),
+      elevation: 0,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+      position: RelativeRect.fromLTRB(
+        left,
+        bottomRight.dy + 6,
+        max(8.0, overlay.size.width - bottomRight.dx),
+        0,
+      ),
+      items: const [
+        PopupMenuItem(
+          value: 'group',
+          height: 48,
+          child: _HomeQuickMenuRow(icon: Icons.groups_outlined, label: '发起群聊'),
+        ),
+        PopupMenuItem(
+          value: 'friend',
+          height: 48,
+          child: _HomeQuickMenuRow(icon: Icons.person_add_alt_1, label: '添加好友'),
+        ),
+        PopupMenuItem(
+          value: 'pay',
+          height: 48,
+          child: _HomeQuickMenuRow(icon: Icons.qr_code_2, label: '收付款'),
+        ),
+        PopupMenuItem(
+          value: 'scan',
+          height: 48,
+          child: _HomeQuickMenuRow(icon: Icons.qr_code_scanner, label: '扫一扫'),
+        ),
+      ],
+    );
+    if (!mounted || selected == null) {
+      return;
+    }
+    switch (selected) {
+      case 'group':
+        await _open(CreateGroupPage(controller: widget.controller));
+        break;
+      case 'friend':
+        await _open(SearchPage(controller: widget.controller));
+        break;
+      case 'pay':
+        await _open(WalletPayReceivePage(controller: widget.controller));
+        break;
+      case 'scan':
+        await _open(WalletScanPage(controller: widget.controller));
+        break;
+    }
   }
 
   Future<void> _retryInitialSync() async {
@@ -438,6 +505,36 @@ class _HomePageState extends State<HomePage> {
       return status.isEmpty ? '连接异常' : status;
     }
     return '消息';
+  }
+}
+
+class _HomeQuickMenuRow extends StatelessWidget {
+  const _HomeQuickMenuRow({required this.icon, required this.label});
+
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 152,
+      child: Row(
+        children: [
+          Icon(icon, color: Colors.white, size: 22),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              label,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 16,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 

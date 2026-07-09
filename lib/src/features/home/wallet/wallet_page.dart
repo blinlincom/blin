@@ -298,12 +298,172 @@ class WalletPayReceivePage extends StatefulWidget {
 }
 
 class _WalletPayReceivePageState extends State<WalletPayReceivePage> {
-  late final Future<WalletBalance> _balanceRequest;
+  final _amount = TextEditingController();
+  final _remark = TextEditingController();
+  WalletOrder? _payOrder;
+  WalletOrder? _collectOrder;
+  String _payError = '';
+  String _collectError = '';
+  bool _payLoading = true;
+  bool _collectLoading = true;
+  bool _settingCollectAmount = false;
+  Timer? _payTimer;
+  int _paySecondsLeft = 0;
 
   @override
   void initState() {
     super.initState();
-    _balanceRequest = widget.controller.loadWalletBalance(refresh: false);
+    unawaited(_loadPayCode(showLoading: false));
+    unawaited(_loadCollectCode(showLoading: false));
+  }
+
+  @override
+  void dispose() {
+    _payTimer?.cancel();
+    _amount.dispose();
+    _remark.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadPayCode({bool showLoading = true}) async {
+    if (showLoading && mounted) {
+      setState(() {
+        _payLoading = true;
+        _payError = '';
+      });
+    }
+    try {
+      final order = await widget.controller.currentWalletPayCode();
+      if (!mounted) {
+        return;
+      }
+      _startPayCountdown(order);
+      setState(() {
+        _payOrder = order;
+        _payError = '';
+        _payLoading = false;
+      });
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      _payTimer?.cancel();
+      setState(() {
+        _payError = _walletInlineError(error);
+        _payLoading = false;
+      });
+    }
+  }
+
+  Future<void> _loadCollectCode({
+    String amount = '',
+    String remark = '',
+    bool showLoading = true,
+  }) async {
+    if (showLoading && mounted) {
+      setState(() {
+        _collectLoading = true;
+        _collectError = '';
+      });
+    }
+    try {
+      final order = await widget.controller.currentWalletCollectCode(
+        amount: amount,
+        remark: remark,
+      );
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _collectOrder = order;
+        _collectError = '';
+        _collectLoading = false;
+      });
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _collectError = _walletInlineError(error);
+        _collectLoading = false;
+      });
+    }
+  }
+
+  void _startPayCountdown(WalletOrder order) {
+    _payTimer?.cancel();
+    _paySecondsLeft = order.expireSeconds;
+    if (_paySecondsLeft <= 0) {
+      return;
+    }
+    _payTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+      if (_paySecondsLeft <= 1) {
+        timer.cancel();
+        unawaited(_loadPayCode(showLoading: false));
+        return;
+      }
+      setState(() => _paySecondsLeft -= 1);
+    });
+  }
+
+  Future<void> _refreshAll() async {
+    await Future.wait([
+      _loadPayCode(),
+      _loadCollectCode(
+        amount: _amount.text.trim(),
+        remark: _remark.text.trim(),
+      ),
+    ]);
+  }
+
+  Future<void> _setCollectAmount() async {
+    if (_settingCollectAmount) {
+      return;
+    }
+    setState(() => _settingCollectAmount = true);
+    await _loadCollectCode(
+      amount: _amount.text.trim(),
+      remark: _remark.text.trim(),
+    );
+    if (mounted) {
+      setState(() => _settingCollectAmount = false);
+      if (_collectError.isEmpty) {
+        _showWalletMessage(context, '收款码已更新');
+      }
+    }
+  }
+
+  String get _paySubtitle {
+    if (_payError.isNotEmpty) {
+      return '付款码生成失败';
+    }
+    if (_payOrder == null) {
+      return '正在生成付款码';
+    }
+    return _paySecondsLeft > 0 ? '${_paySecondsLeft}s 后自动刷新' : '短时有效，自动刷新';
+  }
+
+  String get _collectTitle {
+    final order = _collectOrder;
+    if (order == null || order.needsAmountInput) {
+      return '我的收款码';
+    }
+    return '收款金额 ¥${order.amountLabel}';
+  }
+
+  String get _collectSubtitle {
+    if (_collectError.isNotEmpty) {
+      return '收款码生成失败';
+    }
+    final order = _collectOrder;
+    if (order == null) {
+      return '正在生成收款码';
+    }
+    return order.remark.isEmpty ? '扫一扫，向我付款' : order.remark;
   }
 
   @override
@@ -316,55 +476,70 @@ class _WalletPayReceivePageState extends State<WalletPayReceivePage> {
         foregroundColor: _textColor,
         elevation: 0,
         surfaceTintColor: Colors.transparent,
+        actions: [
+          IconButton(
+            tooltip: '刷新',
+            onPressed: (_payLoading || _collectLoading) ? null : _refreshAll,
+            icon: const Icon(Icons.refresh),
+          ),
+        ],
       ),
       body: SafeArea(
-        child: FutureBuilder<WalletBalance>(
-          future: _balanceRequest,
-          initialData: widget.controller.walletBalance,
-          builder: (context, snapshot) {
-            final balance =
-                snapshot.data ??
-                widget.controller.walletBalance ??
-                const WalletBalance();
-            final merchantEnabled = balance.merchantEnabled;
-            return ListView(
-              children: [
-                _MenuTile(
-                  icon: Icons.call_received,
-                  iconColor: const Color(0xff0f766e),
-                  title: '收款码',
-                  subtitle: merchantEnabled ? '设置金额后让对方扫码付款' : '仅开通商户权限后可用',
-                  onTap: merchantEnabled
-                      ? () => _push(
-                          context,
-                          WalletCollectCodePage(controller: widget.controller),
-                        )
-                      : () => _showWalletMessage(context, '当前账号未开通商户收款权限'),
-                ),
-                _MenuTile(
-                  icon: Icons.call_made,
-                  iconColor: const Color(0xff2563eb),
-                  title: '付款码',
-                  subtitle: '短时有效，只能被收款方消费一次',
-                  onTap: () => _push(
-                    context,
-                    WalletPayCodePage(controller: widget.controller),
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(0, 0, 0, 28),
+          children: [
+            _WalletQrPanel(
+              order: _payOrder,
+              title: '付款码',
+              subtitle: _paySubtitle,
+              loading: _payLoading,
+              showBarcode: true,
+              errorText: _payError,
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
+              child: TextButton.icon(
+                onPressed: _payLoading ? null : () => _loadPayCode(),
+                icon: const Icon(Icons.refresh, size: 18),
+                label: const Text('刷新付款码'),
+              ),
+            ),
+            const _GroupGap(),
+            _WalletQrPanel(
+              order: _collectOrder,
+              title: _collectTitle,
+              subtitle: _collectSubtitle,
+              loading: _collectLoading,
+              errorText: _collectError,
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  _WalletTextField(
+                    controller: _amount,
+                    label: '设置金额',
+                    hint: '不填则由付款方输入',
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
                   ),
-                ),
-                const _GroupGap(),
-                _MenuTile(
-                  icon: Icons.qr_code_scanner,
-                  iconColor: const Color(0xff111827),
-                  title: '扫一扫',
-                  subtitle: '扫描收付款码或好友二维码',
-                  onTap: () => _push(
-                    context,
-                    WalletScanPage(controller: widget.controller),
+                  const SizedBox(height: 12),
+                  _WalletTextField(
+                    controller: _remark,
+                    label: '备注',
+                    hint: '选填',
                   ),
-                ),
-              ],
-            );
-          },
+                  const SizedBox(height: 18),
+                  _WalletPrimaryButton(
+                    text: _settingCollectAmount ? '更新中...' : '设置收款金额',
+                    onPressed: _settingCollectAmount ? null : _setCollectAmount,
+                  ),
+                ],
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -2304,6 +2479,7 @@ class _WalletQrPanel extends StatelessWidget {
     required this.subtitle,
     this.loading = false,
     this.showBarcode = false,
+    this.errorText = '',
   });
 
   final WalletOrder? order;
@@ -2311,6 +2487,7 @@ class _WalletQrPanel extends StatelessWidget {
   final String subtitle;
   final bool loading;
   final bool showBarcode;
+  final String errorText;
 
   @override
   Widget build(BuildContext context) {
@@ -2350,7 +2527,32 @@ class _WalletQrPanel extends StatelessWidget {
               height: 246,
               alignment: Alignment.center,
               color: Colors.white,
-              child: loading || payload.isEmpty
+              child: errorText.isNotEmpty
+                  ? Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 24),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(
+                            Icons.info_outline,
+                            color: _mutedColor,
+                            size: 30,
+                          ),
+                          const SizedBox(height: 10),
+                          Text(
+                            errorText,
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                              color: _mutedColor,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                              height: 1.45,
+                            ),
+                          ),
+                        ],
+                      ),
+                    )
+                  : loading || payload.isEmpty
                   ? const SizedBox(
                       width: 28,
                       height: 28,
@@ -2651,6 +2853,11 @@ void _showWalletMessage(BuildContext context, String text) {
   ScaffoldMessenger.of(context)
     ..hideCurrentSnackBar()
     ..showSnackBar(SnackBar(content: Text(message)));
+}
+
+String _walletInlineError(Object error) {
+  final text = error.toString().replaceFirst('Exception: ', '').trim();
+  return text.isEmpty ? '操作失败，请稍后再试' : text;
 }
 
 Future<String> _showWalletPayPasswordSheet(
