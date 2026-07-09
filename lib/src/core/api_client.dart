@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
@@ -79,14 +80,84 @@ class ApiClient {
   }
 
   Future<ImageCaptcha> getImageCaptcha({required int type}) async {
-    final result = await post<Object?>('get_image_verification_code', {
+    final stopwatch = Stopwatch()..start();
+    final requestId = AppLogger.traceId('api');
+    final params = <String, Object?>{
+      'appid': appId,
       'type': type,
       'timestamp': _timestamp(),
-    });
-    if (!result.isSuccess) {
-      throw ApiException(result.message, code: result.code);
+      'nonce': _nonce(),
+    };
+    AppLogger.info(
+      'api',
+      'captcha image request start',
+      data: {
+        'request_id': requestId,
+        'action': 'get_image_verification_code',
+        'base_url': baseUrl,
+        'type': type,
+      },
+    );
+    try {
+      final response = await _dio.post<Object?>(
+        'get_image_verification_code',
+        data: FormData.fromMap(params),
+        options: Options(
+          responseType: ResponseType.bytes,
+          headers: {
+            Headers.acceptHeader:
+                'image/png,image/*;q=0.9,application/json;q=0.8',
+          },
+        ),
+      );
+      final captcha = _parseImageCaptchaResponse(
+        response.data,
+        contentType: response.headers.value(Headers.contentTypeHeader),
+      );
+      AppLogger.info(
+        'api',
+        'captcha image request success',
+        data: {
+          'request_id': requestId,
+          'status_code': response.statusCode,
+          'content_type': response.headers.value(Headers.contentTypeHeader),
+          'has_image': captcha.hasImage,
+          'ms': stopwatch.elapsedMilliseconds,
+        },
+      );
+      return captcha;
+    } on DioException catch (error) {
+      final response = error.response;
+      AppLogger.error(
+        'api',
+        'captcha image request failed',
+        error: error.message,
+        data: {
+          'request_id': requestId,
+          'type': error.type.name,
+          'status_code': response?.statusCode,
+          'content_type': response?.headers.value(Headers.contentTypeHeader),
+          'response_summary': _responseBodySummary(response?.data),
+          'ms': stopwatch.elapsedMilliseconds,
+        },
+      );
+      if (response?.data != null) {
+        return _parseImageCaptchaResponse(
+          response!.data,
+          contentType: response.headers.value(Headers.contentTypeHeader),
+        );
+      }
+      throw ApiException(error.message ?? '验证码加载失败');
+    } catch (error, stackTrace) {
+      AppLogger.error(
+        'api',
+        'captcha image parse failed',
+        error: error,
+        stackTrace: stackTrace,
+        data: {'request_id': requestId, 'ms': stopwatch.elapsedMilliseconds},
+      );
+      rethrow;
     }
-    return ImageCaptcha.fromJson(result.data);
   }
 
   Future<void> register({
@@ -1609,6 +1680,114 @@ class ApiClient {
       );
       rethrow;
     }
+  }
+
+  ImageCaptcha _parseImageCaptchaResponse(
+    Object? body, {
+    required String? contentType,
+  }) {
+    final normalizedType = (contentType ?? '').split(';').first.trim();
+    if (body is List<int>) {
+      if (_looksLikeImageBytes(body, normalizedType)) {
+        final mimeType = normalizedType.startsWith('image/')
+            ? normalizedType
+            : _guessImageMimeType(body);
+        return ImageCaptcha(
+          image: 'data:$mimeType;base64,${base64Encode(body)}',
+        );
+      }
+      final text = utf8.decode(body, allowMalformed: true).trim();
+      if (text.isNotEmpty) {
+        try {
+          final decoded = jsonDecode(text);
+          final result = _parse<Object?>(decoded);
+          if (!result.isSuccess) {
+            throw ApiException(result.message, code: result.code);
+          }
+          return ImageCaptcha.fromJson(result.data);
+        } on FormatException {
+          throw ApiException('验证码返回格式不正确');
+        }
+      }
+    }
+    if (body is Map || body is String) {
+      final result = body is Map
+          ? _parse<Object?>(body)
+          : ApiResult<Object?>(
+              code: 1,
+              message: 'success',
+              data: body,
+              timestamp: 0,
+            );
+      if (!result.isSuccess) {
+        throw ApiException(result.message, code: result.code);
+      }
+      return ImageCaptcha.fromJson(result.data);
+    }
+    throw ApiException('验证码返回格式不正确');
+  }
+
+  bool _looksLikeImageBytes(List<int> bytes, String contentType) {
+    if (contentType.startsWith('image/')) {
+      return true;
+    }
+    if (bytes.length >= 8 &&
+        bytes[0] == 0x89 &&
+        bytes[1] == 0x50 &&
+        bytes[2] == 0x4E &&
+        bytes[3] == 0x47) {
+      return true;
+    }
+    if (bytes.length >= 3 &&
+        bytes[0] == 0xFF &&
+        bytes[1] == 0xD8 &&
+        bytes[2] == 0xFF) {
+      return true;
+    }
+    if (bytes.length >= 6) {
+      final header = String.fromCharCodes(bytes.take(6));
+      if (header == 'GIF87a' || header == 'GIF89a') {
+        return true;
+      }
+    }
+    if (bytes.length >= 12) {
+      final riff = String.fromCharCodes(bytes.take(4));
+      final webp = String.fromCharCodes(bytes.skip(8).take(4));
+      if (riff == 'RIFF' && webp == 'WEBP') {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  String _guessImageMimeType(List<int> bytes) {
+    if (bytes.length >= 4 &&
+        bytes[0] == 0x89 &&
+        bytes[1] == 0x50 &&
+        bytes[2] == 0x4E &&
+        bytes[3] == 0x47) {
+      return 'image/png';
+    }
+    if (bytes.length >= 3 &&
+        bytes[0] == 0xFF &&
+        bytes[1] == 0xD8 &&
+        bytes[2] == 0xFF) {
+      return 'image/jpeg';
+    }
+    if (bytes.length >= 6) {
+      final header = String.fromCharCodes(bytes.take(6));
+      if (header == 'GIF87a' || header == 'GIF89a') {
+        return 'image/gif';
+      }
+    }
+    if (bytes.length >= 12) {
+      final riff = String.fromCharCodes(bytes.take(4));
+      final webp = String.fromCharCodes(bytes.skip(8).take(4));
+      if (riff == 'RIFF' && webp == 'WEBP') {
+        return 'image/webp';
+      }
+    }
+    return 'image/png';
   }
 
   ApiResult<T> _parse<T>(
