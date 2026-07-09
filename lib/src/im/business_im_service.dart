@@ -1015,30 +1015,6 @@ class BusinessImService extends ChangeNotifier {
       );
     }
     final initialSync = _initialHistorySyncing;
-    if (!_conversationHistorySyncEnabled(chat)) {
-      _latestConversations = initialLocal;
-      _serverConversationsSynced = true;
-      if (initialSync) {
-        _setInitialHistorySyncState(
-          syncing: false,
-          progress: 1,
-          text: '同步完成',
-          error: null,
-          notify: false,
-        );
-      }
-      AppLogger.info(
-        'im',
-        'server conversation sync skipped',
-        data: {
-          'reason': 'server_history_sync_disabled',
-          'local_count': initialLocal.length,
-          'private_history_sync_enabled': chat.privateHistorySyncEnabled,
-          'group_history_sync_enabled': chat.groupHistorySyncEnabled,
-        },
-      );
-      return _latestConversations;
-    }
     final statusBeforeSync = _statusText;
     if (initialSync && statusBeforeSync == '已连接') {
       _setStatus('同步中');
@@ -1054,12 +1030,7 @@ class BusinessImService extends ChangeNotifier {
       _updateInitialHistorySyncProgress(0.36, '正在整理会话资料');
       final normalizedServerConversations = list
           .map(_normalizeConversation)
-          .where(
-            (item) => _historySyncEnabledForType(
-              _intValue(item, ['channel_type']),
-              chat,
-            ),
-          )
+          .where((item) => _shouldAcceptServerConversation(item, chat))
           .where(_conversationVisibleAfterClear)
           .map(_rememberConversationProfile)
           .map(_hydrateConversationProfile)
@@ -1302,18 +1273,25 @@ class BusinessImService extends ChangeNotifier {
     required int channelType,
     String groupId = '',
     int limit = 50,
+    bool unreadOnly = false,
+    int unreadLimit = 0,
   }) async {
     channelID = _canonicalChannelId(channelID, channelType);
     final key = _messageKey(channelID, channelType);
+    final syncKey = unreadOnly ? '$key:unread:${max(1, unreadLimit)}' : key;
     if (_invalidMessageChannels.contains(key)) {
       return const <Map<String, Object?>>[];
     }
-    final running = _syncingChannels[key];
+    final running = _syncingChannels[syncKey];
     if (running != null) {
       AppLogger.info(
         'im',
         'reuse running channel history sync',
-        data: {'channel_id': channelID, 'channel_type': channelType},
+        data: {
+          'channel_id': channelID,
+          'channel_type': channelType,
+          'unread_only': unreadOnly,
+        },
       );
       return running;
     }
@@ -1322,13 +1300,15 @@ class BusinessImService extends ChangeNotifier {
       channelType: channelType,
       groupId: groupId,
       limit: limit,
+      unreadOnly: unreadOnly,
+      unreadLimit: unreadLimit,
     );
-    _syncingChannels[key] = future;
+    _syncingChannels[syncKey] = future;
     try {
       return await future;
     } finally {
-      if (identical(_syncingChannels[key], future)) {
-        _syncingChannels.remove(key);
+      if (identical(_syncingChannels[syncKey], future)) {
+        _syncingChannels.remove(syncKey);
       }
     }
   }
@@ -1338,10 +1318,12 @@ class BusinessImService extends ChangeNotifier {
     required int channelType,
     String groupId = '',
     int limit = 50,
+    bool unreadOnly = false,
+    int unreadLimit = 0,
   }) async {
     final session = _requireSession();
     final chat = _requireChat();
-    if (!_historySyncEnabledForType(channelType, chat)) {
+    if (!_historySyncEnabledForType(channelType, chat) && !unreadOnly) {
       _markChannelHistorySynced(channelID, channelType, persist: false);
       AppLogger.info(
         'im',
@@ -1368,6 +1350,8 @@ class BusinessImService extends ChangeNotifier {
         channelType: channelType,
         groupId: groupId,
         limit: max(limit, _historySyncLimit),
+        unreadOnly: unreadOnly,
+        unreadLimit: unreadLimit,
       );
       final list = history.messages;
       final messages = _normalizeServerHistoryMessages(
@@ -1383,14 +1367,16 @@ class BusinessImService extends ChangeNotifier {
         );
       }
       final current = _readMessagesForChannel(channelID, channelType);
-      final authoritativeCurrent = _applyAuthoritativeServerWindow(
-        current: current,
-        serverMessages: messages,
-        serverRawCount: list.length,
-        serverWindowComplete: history.complete,
-        channelId: channelID,
-        channelType: channelType,
-      );
+      final authoritativeCurrent = unreadOnly
+          ? current
+          : _applyAuthoritativeServerWindow(
+              current: current,
+              serverMessages: messages,
+              serverRawCount: list.length,
+              serverWindowComplete: history.complete,
+              channelId: channelID,
+              channelType: channelType,
+            );
       final merged = _mergeMessages(authoritativeCurrent, messages);
       final storedMessages = _sortAndLimit(merged, _messageCacheLimit);
       _writeMessages(channelID, channelType, storedMessages);
@@ -1402,7 +1388,7 @@ class BusinessImService extends ChangeNotifier {
           conversationMessage,
         );
       }
-      _markChannelHistorySynced(channelID, channelType);
+      _markChannelHistorySynced(channelID, channelType, persist: !unreadOnly);
       _historyRetryAfter.remove(_messageKey(channelID, channelType));
       _markMessageChannel(
         source: 'history_sync',
@@ -1418,6 +1404,8 @@ class BusinessImService extends ChangeNotifier {
           'server_raw_count': list.length,
           'server_accepted_count': messages.length,
           'server_history_complete': history.complete,
+          'unread_only': unreadOnly,
+          'unread_limit': unreadLimit,
           'merged_count': merged.length,
           'stored_count': storedMessages.length,
           'server_first_message': _messageLogSummary(
@@ -1486,9 +1474,16 @@ class BusinessImService extends ChangeNotifier {
     required int channelType,
     required String groupId,
     required int limit,
+    bool unreadOnly = false,
+    int unreadLimit = 0,
   }) async {
-    final pageLimit = min(200, max(1, limit));
-    final maxMessages = min(_messageCacheLimit, max(limit, pageLimit));
+    final effectiveUnreadLimit = max(1, unreadLimit);
+    final pageLimit = unreadOnly
+        ? min(200, effectiveUnreadLimit)
+        : min(200, max(1, limit));
+    final maxMessages = unreadOnly
+        ? min(_messageCacheLimit, pageLimit)
+        : min(_messageCacheLimit, max(limit, pageLimit));
     final all = <Map<String, Object?>>[];
     final seen = <String>{};
     var startMessageSeq = 0;
@@ -1507,6 +1502,8 @@ class BusinessImService extends ChangeNotifier {
               startMessageSeq: startMessageSeq,
               limit: pageLimit,
               pullMode: pullMode,
+              unreadOnly: unreadOnly,
+              unreadLimit: effectiveUnreadLimit,
             )
           : await _api.personMessagePage(
               session: session,
@@ -1515,6 +1512,8 @@ class BusinessImService extends ChangeNotifier {
               startMessageSeq: startMessageSeq,
               limit: pageLimit,
               pullMode: pullMode,
+              unreadOnly: unreadOnly,
+              unreadLimit: effectiveUnreadLimit,
             );
       final pageMessages = _historyPageMessages(pageData);
       var added = 0;
@@ -1555,6 +1554,8 @@ class BusinessImService extends ChangeNotifier {
           'next_start_message_seq': nextStartSeq,
           'server_next_start_message_seq': serverNextStartSeq,
           'pull_mode': pullMode,
+          'unread_only': unreadOnly,
+          'unread_limit': unreadOnly ? effectiveUnreadLimit : 0,
           'first_raw_message': _rawHistoryMessageLogSummary(
             pageMessages.isEmpty
                 ? const <String, Object?>{}
@@ -1567,7 +1568,7 @@ class BusinessImService extends ChangeNotifier {
           ),
         },
       );
-      if (!more) {
+      if (unreadOnly || !more) {
         complete = true;
         break;
       }
@@ -1695,6 +1696,21 @@ class BusinessImService extends ChangeNotifier {
     return chat.privateHistorySyncEnabled || chat.groupHistorySyncEnabled;
   }
 
+  int _conversationUnreadCount(Map<String, Object?> item) {
+    return _intValue(item, ['unread_quantity', 'unread', 'unread_count']);
+  }
+
+  bool _shouldAcceptServerConversation(
+    Map<String, Object?> item,
+    ChatSession chat,
+  ) {
+    final channelType = _intValue(item, ['channel_type']);
+    if (_historySyncEnabledForType(channelType, chat)) {
+      return true;
+    }
+    return _conversationUnreadCount(item) > 0;
+  }
+
   bool _isChannelHistorySynced(String channelId, int channelType) {
     final chat = _session?.chat;
     if (chat == null) {
@@ -1783,12 +1799,18 @@ class BusinessImService extends ChangeNotifier {
         final channelId = _value(item, ['channel_id']);
         final channelType = _intValue(item, ['channel_type']);
         final shouldHydrateHistory = onProgress != null;
+        final historyEnabled = _historySyncEnabledForType(
+          channelType,
+          _requireChat(),
+        );
+        final unreadCount = _conversationUnreadCount(item);
+        final unreadOnly = !historyEnabled && unreadCount > 0;
         final hasSummary =
             _value(item, ['content']).isNotEmpty &&
             _value(item, ['content_type']).isNotEmpty &&
             _value(item, ['msg_time', 'timestamp', 'create_time']).isNotEmpty;
-        if ((!shouldHydrateHistory && hasSummary) ||
-            !_historySyncEnabledForType(channelType, _requireChat())) {
+        if ((!shouldHydrateHistory && hasSummary && !unreadOnly) ||
+            (!historyEnabled && !unreadOnly)) {
           hydrated.add(item);
           continue;
         }
@@ -1796,7 +1818,11 @@ class BusinessImService extends ChangeNotifier {
           channelID: channelId,
           channelType: channelType,
           groupId: _value(item, ['group_id', 'id'], fallback: channelId),
-          limit: _historySyncLimit,
+          limit: unreadOnly
+              ? min(max(unreadCount, 1), _historySyncLimit)
+              : _historySyncLimit,
+          unreadOnly: unreadOnly,
+          unreadLimit: unreadCount,
         );
         final lastMessage = _lastConversationMessage(messages);
         if (lastMessage.isEmpty) {
@@ -2706,7 +2732,9 @@ class BusinessImService extends ChangeNotifier {
       var syncedChannels = 0;
       for (final conversation in conversations.take(30)) {
         final channelType = _intValue(conversation, ['channel_type']);
-        if (!_historySyncEnabledForType(channelType, chat)) {
+        final unreadCount = _conversationUnreadCount(conversation);
+        final historyEnabled = _historySyncEnabledForType(channelType, chat);
+        if (!historyEnabled && unreadCount <= 0) {
           continue;
         }
         final channelId = _value(conversation, ['channel_id']);
@@ -2717,7 +2745,11 @@ class BusinessImService extends ChangeNotifier {
           channelID: channelId,
           channelType: channelType,
           groupId: _value(conversation, ['group_id', 'id']),
-          limit: _historySyncLimit,
+          limit: historyEnabled
+              ? _historySyncLimit
+              : min(max(unreadCount, 1), _historySyncLimit),
+          unreadOnly: !historyEnabled,
+          unreadLimit: unreadCount,
         );
         syncedChannels++;
       }
@@ -3628,6 +3660,7 @@ class BusinessImService extends ChangeNotifier {
         action: ChatContentTypes.transferReceived,
       ),
       ChatContentTypes.call => _callContent(payload),
+      ChatContentTypes.walletNotice => _walletNoticeConversationText(payload),
       _ => rawContent,
     };
     return <String, Object?>{
@@ -3715,6 +3748,7 @@ class BusinessImService extends ChangeNotifier {
         action: ChatContentTypes.transferReceived,
       ),
       ChatContentTypes.call => _callContent(payload),
+      ChatContentTypes.walletNotice => _walletNoticeConversationText(payload),
       _ => content.isNotEmpty ? content : _payloadContent(payload),
     };
     return <String, Object?>{
@@ -4021,6 +4055,7 @@ class BusinessImService extends ChangeNotifier {
       ImMessageTypes.sticker => ChatContentTypes.sticker,
       ImMessageTypes.contactCard => ChatContentTypes.contactCard,
       ImMessageTypes.call => ChatContentTypes.call,
+      ImMessageTypes.walletNotice => ChatContentTypes.walletNotice,
       _ => '',
     };
   }
@@ -4041,6 +4076,7 @@ class BusinessImService extends ChangeNotifier {
       ChatContentTypes.sticker => ImMessageTypes.sticker,
       ChatContentTypes.contactCard => ImMessageTypes.contactCard,
       ChatContentTypes.call => ImMessageTypes.call,
+      ChatContentTypes.walletNotice => ImMessageTypes.walletNotice,
       _ => 0,
     };
   }
@@ -7254,6 +7290,7 @@ class BusinessImService extends ChangeNotifier {
         action: ChatContentTypes.transferReceived,
       ),
       ChatContentTypes.call => _callContent(payload),
+      ChatContentTypes.walletNotice => _walletNoticeConversationText(payload),
       _ => '',
     };
   }
@@ -7283,6 +7320,9 @@ class BusinessImService extends ChangeNotifier {
         ...payload,
         if (content.isNotEmpty) 'content': content,
       });
+    }
+    if (contentType == ChatContentTypes.walletNotice) {
+      return _walletNoticeConversationText(payload);
     }
     return content.isNotEmpty ? content : _payloadContent(payload);
   }
@@ -7385,6 +7425,27 @@ class BusinessImService extends ChangeNotifier {
 
   String _transferContent(Map<String, Object?> payload) {
     return '[转账]请收款';
+  }
+
+  Map<String, Object?> _walletNoticePayload(Map<String, Object?> payload) {
+    final notice = _asMap(payload['wallet_notice']);
+    return notice.isNotEmpty ? notice : payload;
+  }
+
+  String _walletNoticeConversationText(Map<String, Object?> payload) {
+    final notice = _walletNoticePayload(payload);
+    final scene = _value(notice, ['scene', 'type']);
+    final title = _value(notice, ['title']);
+    final isCollect = scene == 'scan_collect_success' || title.contains('收款');
+    final summary = _value(notice, ['summary', 'content', 'remark']);
+    if (summary.isNotEmpty) {
+      return '${isCollect ? '[收款]' : '[付款]'}$summary';
+    }
+    final amount = _value(notice, ['amount_label', 'amount']);
+    if (amount.isNotEmpty) {
+      return '${isCollect ? '[收款]' : '[付款]'}${isCollect ? '收款到账' : '扫码付款成功'} $amount';
+    }
+    return isCollect ? '[收款]收款到账' : '[付款]扫码付款成功';
   }
 
   String _paymentReceiptContent(

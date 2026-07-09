@@ -21,9 +21,9 @@ class _ChatHeader extends StatelessWidget {
   final bool online;
   final bool groupPresenceLoading;
   final VoidCallback onBack;
-  final VoidCallback onDetail;
-  final VoidCallback onVoiceCall;
-  final VoidCallback onVideoCall;
+  final VoidCallback? onDetail;
+  final VoidCallback? onVoiceCall;
+  final VoidCallback? onVideoCall;
 
   @override
   Widget build(BuildContext context) {
@@ -224,7 +224,7 @@ class _HeaderIconButton extends StatelessWidget {
 
   final String tooltip;
   final IconData icon;
-  final VoidCallback onPressed;
+  final VoidCallback? onPressed;
   final double iconSize;
 
   @override
@@ -237,7 +237,11 @@ class _HeaderIconButton extends StatelessWidget {
         padding: EdgeInsets.zero,
         splashRadius: 20,
         onPressed: onPressed,
-        icon: Icon(icon, color: _textColor, size: iconSize),
+        icon: Icon(
+          icon,
+          color: onPressed == null ? _mutedColor : _textColor,
+          size: iconSize,
+        ),
       ),
     );
   }

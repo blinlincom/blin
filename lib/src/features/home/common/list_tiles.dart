@@ -446,7 +446,15 @@ class _ConversationSubtitleText extends StatelessWidget {
 }
 
 String _conversationPrefix(String text) {
-  for (final prefix in ['[红包]', '[转账]', '[表情]', '[GIF]', '[贴纸]']) {
+  for (final prefix in [
+    '[红包]',
+    '[转账]',
+    '[收款]',
+    '[付款]',
+    '[表情]',
+    '[GIF]',
+    '[贴纸]',
+  ]) {
     if (text.startsWith(prefix)) {
       return prefix;
     }

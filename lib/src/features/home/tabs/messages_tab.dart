@@ -377,6 +377,12 @@ class _MessagesTabState extends State<MessagesTab> {
     final unread = _intValue(item, ['unread_quantity']);
     final channelType = _channelTypeFromConversation(item);
     final channelId = _conversationChannelId(item, channelType);
+    final contentType = _value(item, [
+      'content_type',
+    ], fallback: _value(_asObjectMap(item['payload']), ['content_type']));
+    final readOnly =
+        channelType == _privateChannelType &&
+        (contentType == ChatContentTypes.walletNotice || title == '支付通知');
     final pinned = _conversationPinned(item);
     return Dismissible(
       key: ValueKey('conversation-$channelType-$channelId'),
@@ -412,6 +418,7 @@ class _MessagesTabState extends State<MessagesTab> {
                         'id',
                       ], fallback: channelId),
                       channelType: channelType,
+                      readOnly: readOnly,
                     ),
                   ),
                 )

@@ -32,6 +32,9 @@ String _conversationSubtitle(Map<String, Object?> item) {
   if (contentType == ChatContentTypes.call) {
     return _callConversationText(payload, content);
   }
+  if (contentType == ChatContentTypes.walletNotice) {
+    return _walletNoticeConversationText(payload);
+  }
   return content;
 }
 

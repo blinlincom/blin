@@ -744,15 +744,33 @@ class SessionController extends ChangeNotifier {
     });
   }
 
-  Future<void> sendEmailCode(String email, {int type = 1}) {
+  Future<void> sendEmailCode(
+    String email, {
+    int type = 1,
+    String captcha = '',
+  }) {
     return _runBusy(
-      () => _api.sendEmailCode(email, device: _device, type: type),
+      () => _api.sendEmailCode(
+        email,
+        device: _device,
+        type: type,
+        captcha: captcha,
+      ),
     );
   }
 
-  Future<void> sendMobileCode(String mobile, {int type = 2}) {
+  Future<void> sendMobileCode(
+    String mobile, {
+    int type = 2,
+    String captcha = '',
+  }) {
     return _runBusy(
-      () => _api.sendMobileCode(mobile, device: _device, type: type),
+      () => _api.sendMobileCode(
+        mobile,
+        device: _device,
+        type: type,
+        captcha: captcha,
+      ),
     );
   }
 
@@ -817,12 +835,71 @@ class SessionController extends ChangeNotifier {
 
   Future<Map<String, Object?>> sendWalletPayPasswordCode({
     String verificationMethod = '',
+    required String captcha,
   }) {
     final current = _requireSession();
     return _api.walletSendPayPasswordCode(
       session: current,
       device: _device,
       verificationMethod: verificationMethod,
+      captcha: captcha,
+    );
+  }
+
+  Future<UserSecurityInfo> loadUserSecurityInfo() {
+    final current = _requireSession();
+    return _api.userSecurityInfo(session: current, device: _device);
+  }
+
+  Future<void> sendMobileBindCode({
+    required String mobile,
+    required String captcha,
+  }) {
+    final current = _requireSession();
+    return _api.sendUserMobileBindCode(
+      session: current,
+      device: _device,
+      mobile: mobile,
+      captcha: captcha,
+    );
+  }
+
+  Future<UserSecurityInfo> confirmMobileBind({
+    required String mobile,
+    required String code,
+  }) {
+    final current = _requireSession();
+    return _api.confirmUserMobileBind(
+      session: current,
+      device: _device,
+      mobile: mobile,
+      code: code,
+    );
+  }
+
+  Future<void> sendEmailBindCode({
+    required String email,
+    required String captcha,
+  }) {
+    final current = _requireSession();
+    return _api.sendUserEmailBindCode(
+      session: current,
+      device: _device,
+      email: email,
+      captcha: captcha,
+    );
+  }
+
+  Future<UserSecurityInfo> confirmEmailBind({
+    required String email,
+    required String code,
+  }) {
+    final current = _requireSession();
+    return _api.confirmUserEmailBind(
+      session: current,
+      device: _device,
+      email: email,
+      code: code,
     );
   }
 

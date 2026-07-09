@@ -461,13 +461,15 @@ String _quoteContentTypeText(String contentType) {
     ChatContentTypes.file => '[文件]',
     ChatContentTypes.contactCard => '[名片]',
     ChatContentTypes.call => '[通话]',
+    ChatContentTypes.walletNotice => '[钱包通知]',
     _ => '[消息]',
   };
 }
 
 bool _isSystemNoticeMessage(Map<String, Object?> item) {
   final contentType = _messageContentType(item);
-  if (contentType == ChatContentTypes.call) {
+  if (contentType == ChatContentTypes.call ||
+      contentType == ChatContentTypes.walletNotice) {
     return false;
   }
   return contentType == ChatContentTypes.redPacketReceived ||
@@ -764,6 +766,51 @@ String _paymentNoticeText(
   return actorIsMe ? '你完成了操作' : '$actorName完成了操作';
 }
 
+Map<String, Object?> _walletNoticePayload(Map<String, Object?> payload) {
+  final notice = _asObjectMap(payload['wallet_notice']);
+  return notice.isNotEmpty ? notice : payload;
+}
+
+String _walletNoticeScene(Map<String, Object?> payload) {
+  return _value(_walletNoticePayload(payload), ['scene', 'type']);
+}
+
+String _walletNoticeTitle(Map<String, Object?> payload) {
+  final notice = _walletNoticePayload(payload);
+  final direct = _value(notice, ['title']);
+  if (direct.isNotEmpty) {
+    return direct;
+  }
+  final scene = _walletNoticeScene(payload);
+  if (scene == 'scan_collect_success') {
+    return '收款到账';
+  }
+  if (scene == 'scan_pay_success') {
+    return '扫码付款成功';
+  }
+  return '钱包通知';
+}
+
+String _walletNoticeSummary(Map<String, Object?> payload) {
+  final notice = _walletNoticePayload(payload);
+  final summary = _value(notice, ['summary', 'content', 'remark']);
+  if (summary.isNotEmpty) {
+    return summary;
+  }
+  final amount = _value(notice, ['amount_label', 'amount']);
+  if (amount.isEmpty) {
+    return '交易成功';
+  }
+  return '${_walletNoticeTitle(payload)} $amount';
+}
+
+String _walletNoticeConversationText(Map<String, Object?> payload) {
+  final title = _walletNoticeTitle(payload);
+  final summary = _walletNoticeSummary(payload);
+  final prefix = title.contains('收款') ? '[收款]' : '[付款]';
+  return '$prefix$summary';
+}
+
 String _paymentAmount(Map<String, Object?> payload) {
   final redPacket = _asObjectMap(payload['red_packet']);
   final transfer = _asObjectMap(payload['transfer']);
@@ -945,6 +992,12 @@ Color? _conversationPrefixColor(String text) {
     return BimColors.redPacket;
   }
   if (text.startsWith('[转账]')) {
+    return BimColors.transfer;
+  }
+  if (text.startsWith('[收款]')) {
+    return BimColors.primary;
+  }
+  if (text.startsWith('[付款]')) {
     return BimColors.transfer;
   }
   if (text.startsWith('[表情]') ||

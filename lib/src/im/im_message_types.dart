@@ -18,6 +18,7 @@ class ImMessageTypes {
   static const sticker = 5203;
   static const contactCard = 5207;
   static const call = 5301;
+  static const walletNotice = 5401;
 
   static const supported = <int>[
     text,
@@ -35,6 +36,7 @@ class ImMessageTypes {
     sticker,
     contactCard,
     call,
+    walletNotice,
   ];
 }
 
@@ -55,6 +57,7 @@ class ChatContentTypes {
   static const redPacketReceived = 'red_packet_received';
   static const transferReceived = 'transfer_received';
   static const call = 'call';
+  static const walletNotice = 'wallet_notice';
 
   static const displayable = <String>{
     text,
@@ -71,5 +74,6 @@ class ChatContentTypes {
     redPacketReceived,
     transferReceived,
     call,
+    walletNotice,
   };
 }

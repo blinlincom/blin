@@ -8,6 +8,7 @@ class ChatPage extends StatefulWidget {
     required this.groupId,
     required this.channelType,
     this.initialClientMsgNo = '',
+    this.readOnly = false,
     super.key,
   });
 
@@ -17,6 +18,7 @@ class ChatPage extends StatefulWidget {
   final String groupId;
   final int channelType;
   final String initialClientMsgNo;
+  final bool readOnly;
 
   @override
   State<ChatPage> createState() => _ChatPageState();
@@ -110,11 +112,14 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   Timer? _quoteHighlightTimer;
 
   bool get _isGroup => widget.channelType == _groupChannelType;
+  bool get _readOnlyServiceConversation =>
+      widget.readOnly || (!_isGroup && widget.title == '支付通知');
   String get _groupId =>
       widget.groupId.isEmpty ? widget.channelId : widget.groupId;
   String get _receiverId => _privateReceiverIdFromChannel(widget.channelId);
   bool get _composerEnabled =>
       !_channelInvalid &&
+      !_readOnlyServiceConversation &&
       (!_isGroup || _groupMuteText(_groupMuteState).isEmpty);
 
   @override
@@ -1657,7 +1662,9 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
-    final muteText = _groupMuteText(_groupMuteState);
+    final muteText = _readOnlyServiceConversation
+        ? '服务号仅用于通知'
+        : _groupMuteText(_groupMuteState);
     final composerEnabled = _composerEnabled;
     final toastText = _error ?? _message;
     final toastIsError = _error != null;
@@ -1691,9 +1698,15 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                           online: !_isGroup && _peerOnline,
                           groupPresenceLoading: _groupPresenceLoading,
                           onBack: () => Navigator.of(context).maybePop(),
-                          onDetail: _openChatDetail,
-                          onVoiceCall: () => _startLiveKitCall('audio'),
-                          onVideoCall: () => _startLiveKitCall('video'),
+                          onDetail: _readOnlyServiceConversation
+                              ? null
+                              : _openChatDetail,
+                          onVoiceCall: _readOnlyServiceConversation
+                              ? null
+                              : () => _startLiveKitCall('audio'),
+                          onVideoCall: _readOnlyServiceConversation
+                              ? null
+                              : () => _startLiveKitCall('video'),
                         ),
                         if (_replyQuote.isNotEmpty ||
                             _burnAfterRead ||

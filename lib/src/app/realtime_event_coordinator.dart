@@ -589,6 +589,7 @@ class RealtimeEventCoordinator {
         '[红包]${content.isEmpty ? '恭喜发财，大吉大利' : content}',
       ChatContentTypes.transfer => '[转账]请收款',
       ChatContentTypes.call => '[通话]',
+      ChatContentTypes.walletNotice => content.isEmpty ? '[钱包通知]' : content,
       _ => content.isEmpty ? '[消息]' : content,
     };
   }
@@ -622,6 +623,7 @@ class RealtimeEventCoordinator {
       ImMessageTypes.sticker => ChatContentTypes.sticker,
       ImMessageTypes.contactCard => ChatContentTypes.contactCard,
       ImMessageTypes.call => ChatContentTypes.call,
+      ImMessageTypes.walletNotice => ChatContentTypes.walletNotice,
       _ => ChatContentTypes.text,
     };
   }

@@ -189,7 +189,8 @@ class _AuthPageState extends State<AuthPage> {
                       child: const Text('获取验证码'),
                     ),
                   ),
-                if (config.loginCaptchaEnabled) ...[
+                if (config.loginCaptchaEnabled ||
+                    mode == _LoginMode.mobile) ...[
                   const SizedBox(height: 14),
                   _ImageCaptchaInput(
                     controller: _loginImageCaptcha,
@@ -321,8 +322,10 @@ class _AuthPageState extends State<AuthPage> {
                     ),
                   ),
                 ),
-                if (mode == _RegisterMode.username &&
-                    config.registerCaptchaEnabled) ...[
+                if ((mode == _RegisterMode.username &&
+                        config.registerCaptchaEnabled) ||
+                    mode == _RegisterMode.mobile ||
+                    mode == _RegisterMode.email) ...[
                   const SizedBox(height: 14),
                   _ImageCaptchaInput(
                     controller: _registerImageCaptcha,
@@ -558,14 +561,28 @@ class _AuthPageState extends State<AuthPage> {
           _showSnack('请先填写手机号');
           return;
         }
-        await widget.controller.sendMobileCode(mobile, type: 2);
+        final captcha = _registerImageCaptcha.text.trim();
+        if (captcha.isEmpty) {
+          _showSnack('请先输入图片验证码');
+          return;
+        }
+        await widget.controller.sendMobileCode(
+          mobile,
+          type: 2,
+          captcha: captcha,
+        );
       } else if (mode == _RegisterMode.email) {
         final email = _registerEmail.text.trim();
         if (email.isEmpty) {
           _showSnack('请先填写邮箱');
           return;
         }
-        await widget.controller.sendEmailCode(email, type: 1);
+        final captcha = _registerImageCaptcha.text.trim();
+        if (captcha.isEmpty) {
+          _showSnack('请先输入图片验证码');
+          return;
+        }
+        await widget.controller.sendEmailCode(email, type: 1, captcha: captcha);
       } else {
         return;
       }
@@ -584,8 +601,17 @@ class _AuthPageState extends State<AuthPage> {
       _showSnack('请先填写手机号');
       return;
     }
+    final captcha = _loginImageCaptcha.text.trim();
+    if (captcha.isEmpty) {
+      _showSnack('请先输入图片验证码');
+      return;
+    }
     try {
-      await widget.controller.sendMobileCode(account, type: 1);
+      await widget.controller.sendMobileCode(
+        account,
+        type: 1,
+        captcha: captcha,
+      );
       if (!mounted) {
         return;
       }

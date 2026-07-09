@@ -71,6 +71,7 @@ class _MessageBubble extends StatelessWidget {
   Color _bubbleColor(String contentType, Map<String, Object?> payload) {
     if (contentType == ChatContentTypes.redPacket ||
         contentType == ChatContentTypes.transfer ||
+        contentType == ChatContentTypes.walletNotice ||
         contentType == ChatContentTypes.sticker ||
         contentType == ChatContentTypes.video) {
       return Colors.transparent;
@@ -86,7 +87,8 @@ class _MessageBubble extends StatelessWidget {
     final mediaLike = _messageRendersAsMedia(contentType, payload);
     return switch (contentType) {
       ChatContentTypes.redPacket ||
-      ChatContentTypes.transfer => EdgeInsets.zero,
+      ChatContentTypes.transfer ||
+      ChatContentTypes.walletNotice => EdgeInsets.zero,
       ChatContentTypes.image ||
       ChatContentTypes.gif ||
       ChatContentTypes.sticker ||
@@ -116,6 +118,7 @@ class _MessageBubble extends StatelessWidget {
     return switch (contentType) {
       ChatContentTypes.transfer || ChatContentTypes.redPacket =>
         (width * 0.72).clamp(220.0, 240.0).toDouble(),
+      ChatContentTypes.walletNotice => (width * 0.76).clamp(232.0, 282.0),
       ChatContentTypes.file ||
       ChatContentTypes.video ||
       ChatContentTypes.contactCard ||
@@ -333,6 +336,7 @@ class _MessageBubbleContent extends StatelessWidget {
         content: content,
         isMe: isMe,
       ),
+      ChatContentTypes.walletNotice => _WalletNoticePreview(payload: payload),
       _ => Text(
         content.isEmpty ? '[消息]' : content,
         style: const TextStyle(
@@ -343,6 +347,109 @@ class _MessageBubbleContent extends StatelessWidget {
         ),
       ),
     };
+  }
+}
+
+class _WalletNoticePreview extends StatelessWidget {
+  const _WalletNoticePreview({required this.payload});
+
+  final Map<String, Object?> payload;
+
+  @override
+  Widget build(BuildContext context) {
+    final notice = _walletNoticePayload(payload);
+    final title = _walletNoticeTitle(payload);
+    final summary = _walletNoticeSummary(payload);
+    final orderNo = _value(notice, ['order_no']);
+    final paidTime = _value(notice, ['paid_time']);
+    final isCollect =
+        _walletNoticeScene(payload) == 'scan_collect_success' ||
+        title.contains('收款');
+    final accent = isCollect ? BimColors.primary : BimColors.transfer;
+    final icon = isCollect
+        ? Icons.call_received_rounded
+        : Icons.call_made_rounded;
+    return Container(
+      width: 260,
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: Border.all(color: BimColors.border),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(13, 12, 13, 10),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  width: 34,
+                  height: 34,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: accent.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Icon(icon, color: accent, size: 19),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: BimColors.textDark,
+                          fontSize: 15,
+                          fontWeight: FontWeight.w800,
+                          height: 1.15,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        summary,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: BimColors.secondaryText,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          height: 1.25,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Container(height: 1, color: BimColors.borderLight),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(13, 8, 13, 9),
+            child: Text(
+              orderNo.isNotEmpty
+                  ? '订单号 $orderNo'
+                  : (paidTime.isNotEmpty ? paidTime : '交易成功'),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: BimColors.mutedText,
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                height: 1.1,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 

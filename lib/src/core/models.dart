@@ -360,6 +360,46 @@ class WalletSecurityMethod {
   };
 }
 
+class UserSecurityInfo {
+  const UserSecurityInfo({
+    this.mobileBound = false,
+    this.emailBound = false,
+    this.mobile = '',
+    this.email = '',
+    this.securityBound = false,
+    this.securityMethods = const [],
+  });
+
+  final bool mobileBound;
+  final bool emailBound;
+  final String mobile;
+  final String email;
+  final bool securityBound;
+  final List<WalletSecurityMethod> securityMethods;
+
+  factory UserSecurityInfo.fromJson(Object? value) {
+    final map = _objectMap(value);
+    final methods = <WalletSecurityMethod>[];
+    final rawMethods = map['security_methods'];
+    if (rawMethods is Iterable) {
+      for (final item in rawMethods) {
+        final method = WalletSecurityMethod.fromJson(item);
+        if (method.method.isNotEmpty) {
+          methods.add(method);
+        }
+      }
+    }
+    return UserSecurityInfo(
+      mobileBound: _enabled(map['mobile_bound']),
+      emailBound: _enabled(map['email_bound']),
+      mobile: map['mobile']?.toString() ?? '',
+      email: map['email']?.toString() ?? '',
+      securityBound: _enabled(map['security_bound']),
+      securityMethods: methods,
+    );
+  }
+}
+
 class WalletOrder {
   const WalletOrder({
     this.id = 0,

@@ -122,11 +122,16 @@ class ApiClient {
     String email, {
     required String device,
     int type = 1,
+    String captcha = '',
   }) async {
     final result = await securePublicPost<Object?>(
       'get_email_verification_code',
       device: device,
-      params: {'email': email, 'type': type.toString()},
+      params: {
+        'email': email,
+        'type': type.toString(),
+        if (captcha.isNotEmpty) 'captcha': captcha,
+      },
       expectSecureResponse: false,
     );
     if (!result.isSuccess) {
@@ -138,11 +143,16 @@ class ApiClient {
     String mobile, {
     required String device,
     int type = 2,
+    String captcha = '',
   }) async {
     final result = await securePublicPost<Object?>(
       'get_mobile_verification_code',
       device: device,
-      params: {'mobile': mobile, 'type': type.toString()},
+      params: {
+        'mobile': mobile,
+        'type': type.toString(),
+        if (captcha.isNotEmpty) 'captcha': captcha,
+      },
       expectSecureResponse: false,
     );
     if (!result.isSuccess) {
@@ -254,6 +264,7 @@ class ApiClient {
     required UserSession session,
     required String device,
     required String verificationMethod,
+    required String captcha,
   }) async {
     final result = await secureSignedImPost<Map<String, Object?>>(
       'wallet_security_code_send',
@@ -262,6 +273,7 @@ class ApiClient {
       params: {
         if (verificationMethod.isNotEmpty)
           'verification_method': verificationMethod,
+        'captcha': captcha,
       },
       secureResponse: true,
     );
@@ -269,6 +281,97 @@ class ApiClient {
       throw ApiException(result.message, code: result.code);
     }
     return result.data;
+  }
+
+  Future<UserSecurityInfo> userSecurityInfo({
+    required UserSession session,
+    required String device,
+  }) async {
+    final result = await secureSignedImPost<Map<String, Object?>>(
+      'user_security_info',
+      session: session,
+      device: device,
+      params: const {},
+      secureResponse: true,
+    );
+    if (!result.isSuccess) {
+      throw ApiException(result.message, code: result.code);
+    }
+    return UserSecurityInfo.fromJson(result.data);
+  }
+
+  Future<void> sendUserMobileBindCode({
+    required UserSession session,
+    required String device,
+    required String mobile,
+    required String captcha,
+  }) async {
+    final result = await secureSignedImPost<Object?>(
+      'user_mobile_bind_code_send',
+      session: session,
+      device: device,
+      params: {'mobile': mobile, 'captcha': captcha},
+      secureResponse: true,
+    );
+    if (!result.isSuccess) {
+      throw ApiException(result.message, code: result.code);
+    }
+  }
+
+  Future<UserSecurityInfo> confirmUserMobileBind({
+    required UserSession session,
+    required String device,
+    required String mobile,
+    required String code,
+  }) async {
+    final result = await secureSignedImPost<Map<String, Object?>>(
+      'user_mobile_bind_confirm',
+      session: session,
+      device: device,
+      params: {'mobile': mobile, 'code': code},
+      secureResponse: true,
+    );
+    if (!result.isSuccess) {
+      throw ApiException(result.message, code: result.code);
+    }
+    return UserSecurityInfo.fromJson(result.data);
+  }
+
+  Future<void> sendUserEmailBindCode({
+    required UserSession session,
+    required String device,
+    required String email,
+    required String captcha,
+  }) async {
+    final result = await secureSignedImPost<Object?>(
+      'user_email_bind_code_send',
+      session: session,
+      device: device,
+      params: {'email': email, 'captcha': captcha},
+      secureResponse: true,
+    );
+    if (!result.isSuccess) {
+      throw ApiException(result.message, code: result.code);
+    }
+  }
+
+  Future<UserSecurityInfo> confirmUserEmailBind({
+    required UserSession session,
+    required String device,
+    required String email,
+    required String code,
+  }) async {
+    final result = await secureSignedImPost<Map<String, Object?>>(
+      'user_email_bind_confirm',
+      session: session,
+      device: device,
+      params: {'email': email, 'code': code},
+      secureResponse: true,
+    );
+    if (!result.isSuccess) {
+      throw ApiException(result.message, code: result.code);
+    }
+    return UserSecurityInfo.fromJson(result.data);
   }
 
   Future<void> walletRechargeKm({
@@ -571,6 +674,8 @@ class ApiClient {
     int endMessageSeq = 0,
     int limit = 50,
     int pullMode = 0,
+    bool unreadOnly = false,
+    int unreadLimit = 0,
   }) async {
     final result = await secureSignedImPost<Map<String, Object?>>(
       'im_person_messages',
@@ -583,6 +688,8 @@ class ApiClient {
         'end_message_seq': endMessageSeq.toString(),
         'limit': limit.toString(),
         'pull_mode': pullMode.toString(),
+        if (unreadOnly) 'unread_only': '1',
+        if (unreadLimit > 0) 'unread_limit': unreadLimit.toString(),
       },
     );
     if (!result.isSuccess) {
@@ -645,6 +752,8 @@ class ApiClient {
     int endMessageSeq = 0,
     int limit = 50,
     int pullMode = 0,
+    bool unreadOnly = false,
+    int unreadLimit = 0,
   }) async {
     final result = await secureSignedImPost<Map<String, Object?>>(
       'im_group_messages',
@@ -657,6 +766,8 @@ class ApiClient {
         'end_message_seq': endMessageSeq.toString(),
         'limit': limit.toString(),
         'pull_mode': pullMode.toString(),
+        if (unreadOnly) 'unread_only': '1',
+        if (unreadLimit > 0) 'unread_limit': unreadLimit.toString(),
       },
     );
     if (!result.isSuccess) {
