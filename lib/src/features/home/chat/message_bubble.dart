@@ -362,11 +362,18 @@ class _WalletNoticePreview extends StatelessWidget {
     final summary = _walletNoticeSummary(payload);
     final orderNo = _value(notice, ['order_no']);
     final paidTime = _value(notice, ['paid_time']);
+    final isRisk = _walletNoticeIsRisk(payload);
     final isCollect =
         _walletNoticeScene(payload) == 'scan_collect_success' ||
         title.contains('收款');
-    final accent = isCollect ? BimColors.primary : BimColors.transfer;
-    final icon = isCollect
+    final accent = isRisk
+        ? BimColors.danger
+        : isCollect
+        ? BimColors.primary
+        : BimColors.transfer;
+    final icon = isRisk
+        ? Icons.account_balance_wallet_rounded
+        : isCollect
         ? Icons.call_received_rounded
         : Icons.call_made_rounded;
     return Container(

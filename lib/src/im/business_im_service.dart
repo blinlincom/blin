@@ -7436,16 +7436,36 @@ class BusinessImService extends ChangeNotifier {
     final notice = _walletNoticePayload(payload);
     final scene = _value(notice, ['scene', 'type']);
     final title = _value(notice, ['title']);
+    final isRisk = _walletNoticeIsRisk(scene, title);
     final isCollect = scene == 'scan_collect_success' || title.contains('收款');
     final summary = _value(notice, ['summary', 'content', 'remark']);
     if (summary.isNotEmpty) {
+      if (isRisk) {
+        return '[${title.isEmpty ? '钱包通知' : title}]$summary';
+      }
       return '${isCollect ? '[收款]' : '[付款]'}$summary';
     }
     final amount = _value(notice, ['amount_label', 'amount']);
     if (amount.isNotEmpty) {
+      if (isRisk) {
+        return '[${title.isEmpty ? '钱包通知' : title}]$amount';
+      }
       return '${isCollect ? '[收款]' : '[付款]'}${isCollect ? '收款到账' : '扫码付款成功'} $amount';
     }
+    if (isRisk) {
+      return '[${title.isEmpty ? '钱包通知' : title}]';
+    }
     return isCollect ? '[收款]收款到账' : '[付款]扫码付款成功';
+  }
+
+  bool _walletNoticeIsRisk(String scene, String title) {
+    return scene == 'wallet_lock' ||
+        scene == 'wallet_unlock' ||
+        scene == 'wallet_freeze' ||
+        scene == 'wallet_unfreeze' ||
+        title.contains('钱包') ||
+        title.contains('冻结') ||
+        title.contains('解冻');
   }
 
   String _paymentReceiptContent(
