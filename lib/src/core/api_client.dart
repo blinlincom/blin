@@ -35,6 +35,15 @@ class ApiClient {
   final RequestStamp _signer;
   final Random _nonceRandom = Random.secure();
 
+  String get _clientPlatform {
+    if (Platform.isAndroid) return 'android';
+    if (Platform.isIOS) return 'ios';
+    if (Platform.isWindows) return 'windows';
+    if (Platform.isMacOS) return 'macos';
+    if (Platform.isLinux) return 'linux';
+    return 'web';
+  }
+
   Future<AppInfo> getAppInfo() async {
     final result = await post<Map<String, Object?>>('get_app_info', {
       'timestamp': _timestamp(),
@@ -1440,6 +1449,7 @@ class ApiClient {
       ...params,
       'usertoken': session.userToken,
       'device': device,
+      'client_platform': _clientPlatform,
       'device_flag': AppConfig.imDeviceFlagApp.toString(),
       'device_level': AppConfig.imDeviceLevelMaster.toString(),
       'timestamp': timestamp,
@@ -1519,6 +1529,7 @@ class ApiClient {
     final payload = <String, Object?>{
       'usertoken': session.userToken,
       'device': device,
+      'client_platform': _clientPlatform,
       'device_flag': AppConfig.imDeviceFlagApp.toString(),
       'device_level': AppConfig.imDeviceLevelMaster.toString(),
       'timestamp': timestamp,
@@ -1568,6 +1579,7 @@ class ApiClient {
     final nonce = _nonce();
     final payload = <String, Object?>{
       'device': device,
+      'client_platform': _clientPlatform,
       'device_flag': AppConfig.imDeviceFlagApp.toString(),
       'device_level': AppConfig.imDeviceLevelMaster.toString(),
       'timestamp': timestamp,

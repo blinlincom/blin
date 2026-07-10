@@ -68,23 +68,21 @@ class _BimAppState extends State<BimApp> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: widget.controller,
-      builder: (context, _) {
-        return MaterialApp(
-          navigatorKey: _navigatorKey,
-          title: AppConfig.appName,
-          debugShowCheckedModeBanner: false,
-          theme: BimTheme.light(),
-          builder: (context, child) {
-            return CallOverlayHost(
-              key: _callOverlayKey,
-              child: child ?? const SizedBox.shrink(),
-            );
-          },
-          home: _root(),
+    return MaterialApp(
+      navigatorKey: _navigatorKey,
+      title: AppConfig.appName,
+      debugShowCheckedModeBanner: false,
+      theme: BimTheme.light(),
+      builder: (context, child) {
+        return CallOverlayHost(
+          key: _callOverlayKey,
+          child: child ?? const SizedBox.shrink(),
         );
       },
+      home: AnimatedBuilder(
+        animation: widget.controller,
+        builder: (context, _) => _root(),
+      ),
     );
   }
 

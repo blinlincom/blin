@@ -3,6 +3,7 @@ import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/scheduler.dart';
 
 import 'src/app/bim_app.dart';
 import 'src/app/session_controller.dart';
@@ -45,6 +46,8 @@ Future<void> main() async {
   });
 }
 
+Timer? _bootstrapWatchdog;
+
 Future<void> _initializeAndRun() async {
   unawaited(
     SystemChrome.setPreferredOrientations([
@@ -52,11 +55,9 @@ Future<void> _initializeAndRun() async {
       DeviceOrientation.portraitDown,
     ]),
   );
-  unawaited(
-    Future<void>.delayed(const Duration(seconds: 3), () {
-      AppLogger.warn('bootstrap', 'first frame watchdog still on bootstrap');
-    }),
-  );
+  _bootstrapWatchdog = Timer(const Duration(seconds: 3), () {
+    AppLogger.warn('bootstrap', 'first frame watchdog still on bootstrap');
+  });
   try {
     await AppLogger.initialize().timeout(const Duration(seconds: 2));
     AppLogger.info('bootstrap', 'initialize start');
@@ -79,6 +80,11 @@ Future<void> _initializeAndRun() async {
     );
     AppLogger.info('bootstrap', 'controller ready');
     runApp(BimApp(controller: controller));
+    SchedulerBinding.instance.addPostFrameCallback((_) {
+      _bootstrapWatchdog?.cancel();
+      _bootstrapWatchdog = null;
+      AppLogger.info('bootstrap', 'main app first frame rendered');
+    });
   } catch (error, stackTrace) {
     AppLogger.error(
       'bootstrap',

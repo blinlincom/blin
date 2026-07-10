@@ -85,6 +85,7 @@ class BusinessImService extends ChangeNotifier {
   bool _foreground = true;
   bool _backgroundKeepAliveEnabled = true;
   bool _authInvalid = false;
+  String? _sessionRevocationMessage;
   bool _gatewayAckDraining = false;
   bool _networkAvailable = true;
   bool _realtimeValidated = false;
@@ -130,6 +131,7 @@ class BusinessImService extends ChangeNotifier {
   Stream<BusinessImFriendEvent> get friendEvents => _friendEvents.stream;
   bool get isStarted => _started;
   String get statusText => _statusText;
+  String? get sessionRevocationMessage => _sessionRevocationMessage;
   String? get lastError => _lastError;
   bool get backgroundKeepAliveEnabled => _backgroundKeepAliveEnabled;
   int get conversationVersion => _conversationVersion;
@@ -243,6 +245,7 @@ class BusinessImService extends ChangeNotifier {
     _manualStop = false;
     _started = true;
     _authInvalid = false;
+    _sessionRevocationMessage = null;
     _backgroundKeepAliveEnabled = backgroundKeepAliveEnabled;
     _session = session;
     _device = device;
@@ -690,6 +693,7 @@ class BusinessImService extends ChangeNotifier {
             'error': error.toString(),
           },
         );
+        return false;
       }),
     );
     _openMessageChannels.remove(key);
@@ -714,16 +718,21 @@ class BusinessImService extends ChangeNotifier {
       );
       return;
     }
-    await markConversationRead(channelID: channelID, channelType: channelType);
-    _readVisibleMessageChannels.add(key);
-    AppLogger.info(
-      'im',
-      'conversation visible read',
-      data: {'channel_id': channelID, 'channel_type': channelType},
+    final changed = await markConversationRead(
+      channelID: channelID,
+      channelType: channelType,
     );
+    _readVisibleMessageChannels.add(key);
+    if (changed) {
+      AppLogger.info(
+        'im',
+        'conversation visible read',
+        data: {'channel_id': channelID, 'channel_type': channelType},
+      );
+    }
   }
 
-  Future<void> markConversationRead({
+  Future<bool> markConversationRead({
     required String channelID,
     required int channelType,
   }) async {
@@ -739,22 +748,35 @@ class BusinessImService extends ChangeNotifier {
       channelId: channelID,
       channelType: channelType,
     );
-    _writeReadMarkerForMessages(channelID, channelType, messages);
-    unawaited(
-      _reportReadReceiptsForMessages(
-        channelId: channelID,
-        channelType: channelType,
-        messages: messages,
-        previousMarker: previousMarker,
-      ),
+    final markerAdvanced = _writeReadMarkerForMessages(
+      channelID,
+      channelType,
+      messages,
+      previousMarker: previousMarker,
     );
-    if (_clearConversationUnread(channelID, channelType, source: 'mark_read')) {
+    if (markerAdvanced) {
+      unawaited(
+        _reportReadReceiptsForMessages(
+          channelId: channelID,
+          channelType: channelType,
+          messages: messages,
+          previousMarker: previousMarker,
+        ),
+      );
+    }
+    final unreadCleared = _clearConversationUnread(
+      channelID,
+      channelType,
+      source: 'mark_read',
+    );
+    if (unreadCleared) {
       _markMessageChannel(
         source: 'mark_read',
         channelId: channelID,
         channelType: channelType,
       );
     }
+    return markerAdvanced || unreadCleared;
   }
 
   Future<void> _reportReadReceiptsForMessages({
@@ -2447,19 +2469,37 @@ class BusinessImService extends ChangeNotifier {
         _asMap(confirmed['payload']),
         contentType: contentType,
       )) {
+        final existing = _readMessagesForChannel(channelID, channelType)
+            .where(
+              (item) => _sameMessageIdentity(
+                item,
+                clientMsgNo,
+                _intValue(confirmed, ['message_seq']),
+              ),
+            )
+            .firstOrNull;
+        final alreadyConfirmed =
+            existing != null &&
+            _value(existing, ['message_id']) ==
+                _value(confirmed, ['message_id']) &&
+            _intValue(existing, ['message_seq']) ==
+                _intValue(confirmed, ['message_seq']) &&
+            _value(existing, ['status']) == _value(confirmed, ['status']);
         _upsertMessage(channelID, channelType, confirmed);
         _upsertConversationFromMessage(confirmed);
-        _publishMessageEvent(
-          source: 'send_confirmed',
-          channelId: channelID,
-          channelType: channelType,
-          message: confirmed,
-        );
-        _markMessageChannel(
-          source: 'send_confirmed',
-          channelId: channelID,
-          channelType: channelType,
-        );
+        if (!alreadyConfirmed) {
+          _publishMessageEvent(
+            source: 'send_confirmed',
+            channelId: channelID,
+            channelType: channelType,
+            message: confirmed,
+          );
+          _markMessageChannel(
+            source: 'send_confirmed',
+            channelId: channelID,
+            channelType: channelType,
+          );
+        }
       }
       AppLogger.info(
         'im',
@@ -3118,7 +3158,28 @@ class BusinessImService extends ChangeNotifier {
       return;
     }
     if (frame.isKick) {
-      _lastError = frame.reason.isEmpty ? 'Gateway 已断开' : frame.reason;
+      final reason = frame.reason.trim();
+      if (reason == 'device_replaced' || reason == 'session_revoked') {
+        _authInvalid = true;
+        _started = false;
+        _manualStop = true;
+        _connecting = false;
+        _sessionRevocationMessage = reason == 'device_replaced'
+            ? '账号已在另一台同平台设备登录'
+            : '登录状态已失效';
+        _lastError = _sessionRevocationMessage;
+        _reconnectTimer?.cancel();
+        _networkReconnectTimer?.cancel();
+        _setStatus('未登录');
+        unawaited(_closeRealtimeOnly());
+        AppLogger.warn(
+          'im',
+          'terminal gateway kick received',
+          data: {'reason': reason},
+        );
+        return;
+      }
+      _lastError = reason.isEmpty ? 'Gateway 已断开' : reason;
       _handleRealtimeClosed('gateway_kick', _lastError);
       return;
     }
@@ -6718,11 +6779,12 @@ class BusinessImService extends ChangeNotifier {
     );
   }
 
-  void _writeReadMarkerForMessages(
+  bool _writeReadMarkerForMessages(
     String channelId,
     int channelType,
-    List<Map<String, Object?>> messages,
-  ) {
+    List<Map<String, Object?>> messages, {
+    Map<String, Object?>? previousMarker,
+  }) {
     final chat = _requireChat();
     final lastSeq = messages.fold<int>(
       0,
@@ -6732,6 +6794,20 @@ class BusinessImService extends ChangeNotifier {
     final lastMsgNo = sorted.isEmpty
         ? ''
         : sorted.last['client_msg_no']?.toString() ?? '';
+    final previous =
+        previousMarker ??
+        _cache.readReadMarker(
+          uid: chat.uid,
+          channelId: channelId,
+          channelType: channelType,
+        );
+    final previousSeq = _intValue(previous, ['message_seq']);
+    final previousMsgNo = _value(previous, ['client_msg_no']);
+    if (lastSeq < previousSeq ||
+        (lastSeq == previousSeq &&
+            (lastSeq > 0 || lastMsgNo.isEmpty || lastMsgNo == previousMsgNo))) {
+      return false;
+    }
     _cache.writeReadMarker(
       uid: chat.uid,
       channelId: channelId,
@@ -6753,6 +6829,7 @@ class BusinessImService extends ChangeNotifier {
         'client_msg_no': lastMsgNo,
       },
     );
+    return true;
   }
 
   void _upsertConversationFromMessage(Map<String, Object?> message) {

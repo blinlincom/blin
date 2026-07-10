@@ -51,6 +51,7 @@ class SessionController extends ChangeNotifier {
   String _device = '';
   bool _booting = true;
   bool _busy = false;
+  bool _loginTransitioning = false;
   String? _error;
   int _lastColdLaunchAt = 0;
   int _lastHotResumeAt = 0;
@@ -58,6 +59,7 @@ class SessionController extends ChangeNotifier {
   int _lastSessionVerifiedAt = 0;
   DateTime? _lastHotRefreshAt;
   String _lastImStatusText = '';
+  bool _handlingImRevocation = false;
   bool _appInfoResolved = false;
   Future<bool>? _appInfoRequest;
   Future<void>? _presenceRefreshRequest;
@@ -99,8 +101,9 @@ class SessionController extends ChangeNotifier {
   bool get busy => _busy;
   String? get error => _error;
   bool get isLoggedIn =>
-      _session?.userToken.isNotEmpty == true ||
-      _store.readSession()?.userToken.isNotEmpty == true;
+      !_loginTransitioning &&
+      (_session?.userToken.isNotEmpty == true ||
+          _store.readSession()?.userToken.isNotEmpty == true);
   bool get isSessionRestoring =>
       _booting || _refreshRequest != null || (isLoggedIn && !_im.isStarted);
   int get lastColdLaunchAt => _lastColdLaunchAt;
@@ -540,6 +543,7 @@ class SessionController extends ChangeNotifier {
       'token revoked',
       'session revoked',
       'credential revoked',
+      'login session expired',
       'device kicked',
       'forced logout',
       'force logout',
@@ -564,6 +568,8 @@ class SessionController extends ChangeNotifier {
       '会话已吊销',
       '凭证已吊销',
       '凭证被吊销',
+      '登录状态已失效',
+      '登录会话已失效',
       '设备已被踢',
       '设备被踢',
       '被踢下线',
@@ -726,31 +732,29 @@ class SessionController extends ChangeNotifier {
     String captcha = '',
   }) async {
     await _runBusy(() async {
-      final session = await _api.login(
-        username: username,
-        password: password,
-        captcha: captcha,
-        device: _device,
-      );
-      _session = session;
-      _store.writeSession(session);
+      _loginTransitioning = true;
       try {
-        await _refreshLoggedInSession();
-      } on ApiException catch (error, stackTrace) {
-        _handleSessionRefreshApiError(
-          error,
-          source: 'login_password',
-          stackTrace: stackTrace,
+        final session = await _api.login(
+          username: username,
+          password: password,
+          captcha: captcha,
+          device: _device,
         );
-        if (_shouldEndCachedLogin(error)) {
+        _handlingImRevocation = false;
+        _session = session;
+        _store.writeSession(session);
+        try {
+          await _refreshLoggedInSession();
+        } catch (error, stackTrace) {
+          await _rollbackFreshLogin(
+            source: 'login_password',
+            error: error,
+            stackTrace: stackTrace,
+          );
           rethrow;
         }
-      } catch (error, stackTrace) {
-        _handleSessionRefreshUnexpectedError(
-          error,
-          source: 'login_password',
-          stackTrace: stackTrace,
-        );
+      } finally {
+        _loginTransitioning = false;
       }
     });
   }
@@ -761,37 +765,63 @@ class SessionController extends ChangeNotifier {
     String captcha = '',
   }) async {
     await _runBusy(() async {
-      final session = await _api.loginWithMobile(
-        mobile: mobile,
-        code: code,
-        captcha: captcha,
-        device: _device,
-      );
-      _session = session;
-      _store.writeSession(session);
+      _loginTransitioning = true;
       try {
-        await _refreshLoggedInSession();
-      } on ApiException catch (error, stackTrace) {
-        _handleSessionRefreshApiError(
-          error,
-          source: 'login_mobile',
-          stackTrace: stackTrace,
+        final session = await _api.loginWithMobile(
+          mobile: mobile,
+          code: code,
+          captcha: captcha,
+          device: _device,
         );
-        if (_shouldEndCachedLogin(error)) {
+        _handlingImRevocation = false;
+        _session = session;
+        _store.writeSession(session);
+        try {
+          await _refreshLoggedInSession();
+        } catch (error, stackTrace) {
+          await _rollbackFreshLogin(
+            source: 'login_mobile',
+            error: error,
+            stackTrace: stackTrace,
+          );
           rethrow;
         }
-      } catch (error, stackTrace) {
-        _handleSessionRefreshUnexpectedError(
-          error,
-          source: 'login_mobile',
-          stackTrace: stackTrace,
-        );
+      } finally {
+        _loginTransitioning = false;
       }
     });
   }
 
   Future<ImageCaptcha> loadImageCaptcha({required int type}) {
     return _api.getImageCaptcha(type: type);
+  }
+
+  Future<void> _rollbackFreshLogin({
+    required String source,
+    required Object error,
+    required StackTrace stackTrace,
+  }) async {
+    _store.clearSession();
+    _session = null;
+    _clearListCaches();
+    await _im.stop().catchError((Object stopError, StackTrace stopStack) {
+      AppLogger.warn(
+        'session',
+        'fresh login rollback im stop failed',
+        data: {
+          'source': source,
+          'error': stopError.toString(),
+          'stack': stopStack.toString(),
+        },
+      );
+    });
+    AppLogger.error(
+      'session',
+      'fresh login initialization failed and rolled back',
+      error: error,
+      stackTrace: stackTrace,
+      data: {'source': source},
+    );
   }
 
   Future<void> register({
@@ -3535,6 +3565,20 @@ class SessionController extends ChangeNotifier {
 
   void _onImServiceChanged() {
     final status = _im.statusText;
+    final revocationMessage = _im.sessionRevocationMessage;
+    if (revocationMessage != null && !_handlingImRevocation) {
+      _handlingImRevocation = true;
+      _store.clearSession();
+      _session = null;
+      _clearListCaches();
+      _error = revocationMessage;
+      unawaited(BackgroundReceiveGuard.stop(reason: 'session_revoked'));
+      AppLogger.warn(
+        'session',
+        'session ended by gateway revocation',
+        data: {'message': revocationMessage},
+      );
+    }
     final becameConnected = status == '已连接' && _lastImStatusText != status;
     _lastImStatusText = status;
     final chat = _session?.chat;
@@ -3787,12 +3831,20 @@ class SessionController extends ChangeNotifier {
       await task();
     } on ApiException catch (error) {
       _error = error.message;
-      AppLogger.error(
-        'session',
-        'busy task api error',
-        error: error,
-        data: {'code': error.code},
-      );
+      if (error.code == 0) {
+        AppLogger.warn(
+          'session',
+          'busy task rejected by business rule',
+          data: {'code': error.code, 'message': error.message},
+        );
+      } else {
+        AppLogger.error(
+          'session',
+          'busy task api error',
+          error: error,
+          data: {'code': error.code},
+        );
+      }
       rethrow;
     } catch (error) {
       _error = error.toString();
