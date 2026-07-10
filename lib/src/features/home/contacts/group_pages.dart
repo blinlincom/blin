@@ -209,8 +209,8 @@ class GroupDetailPage extends StatefulWidget {
 
 class _GroupDetailPageState extends State<GroupDetailPage> {
   int? _loadedMemberCount;
-  Future<Map<String, Object?>>? _membersFuture;
   List<Map<String, Object?>> _members = const [];
+  bool _membersLoading = true;
   String _error = '';
   String _message = '';
   late bool _pinned;
@@ -237,60 +237,57 @@ class _GroupDetailPageState extends State<GroupDetailPage> {
         ],
       ),
       body: SafeArea(
-        child: ListView(
-          padding: const EdgeInsets.only(bottom: 28),
-          children: [
-            FutureBuilder<Map<String, Object?>>(
-              future: _membersFuture,
-              builder: (context, snapshot) {
-                final done = snapshot.connectionState == ConnectionState.done;
-                return _GroupInfoMemberGrid(
-                  loading: !done && _members.isEmpty,
+        child: Align(
+          alignment: Alignment.topCenter,
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxWidth: BimBreakpoints.contentMaxWidth(context),
+            ),
+            child: ListView(
+              padding: const EdgeInsets.only(bottom: BimSpacing.x8),
+              children: [
+                _GroupInfoMemberGrid(
+                  loading: _membersLoading,
+                  expectedMemberCount: _loadedMemberCount ?? widget.memberCount,
                   members: _members,
                   onOpenAll: _openMembers,
                   onAdd: _addMembers,
-                );
-              },
+                ),
+                const _SectionHeader(text: '群聊资料'),
+                _GroupSettingsInfoTile(
+                  title: '群聊名称',
+                  value: widget.title.isEmpty ? '群聊' : widget.title,
+                  onTap: _updateGroup,
+                ),
+                _GroupSettingsInfoTile(
+                  title: '群公告',
+                  value: '查看或更新群公告',
+                  onTap: _updateGroup,
+                ),
+                const _SectionHeader(text: '聊天设置'),
+                _GroupSettingsNavTile(
+                  title: '查找聊天记录',
+                  onTap: _openMessageSearch,
+                ),
+                _GroupSettingsSwitchTile(
+                  title: '置顶聊天',
+                  subtitle: '在消息列表顶部显示该群聊',
+                  value: _pinned,
+                  onChanged: _changePinned,
+                ),
+                const _SectionHeader(text: '聊天数据'),
+                _GroupSettingsDangerTile(
+                  title: '清空聊天记录',
+                  onTap: _clearGroupConversation,
+                ),
+                const _SectionHeader(text: '群管理'),
+                _GroupSettingsDangerTile(title: '退出群聊', onTap: _leaveGroup),
+                _GroupSettingsDangerTile(title: '解散群聊', onTap: _deleteGroup),
+                _ResultBlock(text: _message),
+                _ErrorBlock(text: _error),
+              ],
             ),
-            const _GroupGap(),
-            _GroupSettingsInfoTile(
-              title: '群聊名称',
-              value: widget.title.isEmpty ? '群聊' : widget.title,
-              onTap: _updateGroup,
-            ),
-            _GroupSettingsInfoTile(
-              title: '群公告',
-              value: '查看或更新群公告',
-              onTap: _updateGroup,
-            ),
-            _GroupSettingsNavTile(title: '添加成员', onTap: _addMembers),
-            const _GroupGap(),
-            _GroupSettingsNavTile(title: '查找聊天记录', onTap: _openMessageSearch),
-            const _GroupGap(),
-            _GroupSettingsSwitchTile(
-              title: '置顶聊天',
-              value: _pinned,
-              onChanged: _changePinned,
-            ),
-            const _GroupGap(),
-            _GroupSettingsDangerTile(
-              title: '清空聊天记录',
-              onTap: _clearGroupConversation,
-            ),
-            const _GroupGap(),
-            _GroupSettingsDangerTile(
-              title: '退出群聊',
-              onTap: () =>
-                  _run(() => widget.controller.leaveGroup(widget.groupId)),
-            ),
-            _GroupSettingsDangerTile(
-              title: '解散群聊',
-              onTap: () =>
-                  _run(() => widget.controller.deleteGroup(widget.groupId)),
-            ),
-            _ResultBlock(text: _message),
-            _ErrorBlock(text: _error),
-          ],
+          ),
         ),
       ),
     );
@@ -302,8 +299,10 @@ class _GroupDetailPageState extends State<GroupDetailPage> {
   }
 
   void _refreshMembers() {
+    if (_members.isEmpty) {
+      _membersLoading = true;
+    }
     final future = widget.controller.groupMembers(widget.groupId);
-    _membersFuture = future;
     unawaited(
       future
           .then((data) {
@@ -313,13 +312,22 @@ class _GroupDetailPageState extends State<GroupDetailPage> {
             final members = _listFromResult(data);
             if (_sameMapList(_members, members) &&
                 _loadedMemberCount == members.length) {
+              if (_membersLoading) {
+                setState(() => _membersLoading = false);
+              }
               return;
             }
-            setState(() => _syncLoadedMembers(members));
+            setState(() {
+              _syncLoadedMembers(members);
+              _membersLoading = false;
+            });
           })
           .catchError((Object error) {
             if (mounted) {
-              setState(() => _error = error.toString());
+              setState(() {
+                _membersLoading = false;
+                _error = error.toString();
+              });
             }
           }),
     );
@@ -404,7 +412,7 @@ class _GroupDetailPageState extends State<GroupDetailPage> {
       ),
     );
     if (mounted) {
-      setState(_refreshMembers);
+      _refreshMembers();
     }
   }
 
@@ -471,6 +479,32 @@ class _GroupDetailPageState extends State<GroupDetailPage> {
         channelId: widget.channelId,
       ),
     );
+  }
+
+  Future<void> _leaveGroup() async {
+    final confirmed = await _confirmDanger(
+      context,
+      title: '退出群聊',
+      content: '退出后将不再接收该群聊消息，需要其他成员重新邀请才能加入。',
+      confirmText: '退出',
+    );
+    if (!confirmed) {
+      return;
+    }
+    await _run(() => widget.controller.leaveGroup(widget.groupId));
+  }
+
+  Future<void> _deleteGroup() async {
+    final confirmed = await _confirmDanger(
+      context,
+      title: '解散群聊',
+      content: '解散后所有成员都将退出，且该操作无法撤销。',
+      confirmText: '解散',
+    );
+    if (!confirmed) {
+      return;
+    }
+    await _run(() => widget.controller.deleteGroup(widget.groupId));
   }
 
   Future<void> _run(Future<Map<String, Object?>> Function() task) async {
@@ -700,89 +734,171 @@ class _GroupMemberListPageState extends State<GroupMemberListPage> {
 class _GroupInfoMemberGrid extends StatelessWidget {
   const _GroupInfoMemberGrid({
     required this.loading,
+    required this.expectedMemberCount,
     required this.members,
     required this.onOpenAll,
     required this.onAdd,
   });
 
   final bool loading;
+  final int? expectedMemberCount;
   final List<Map<String, Object?>> members;
   final VoidCallback onOpenAll;
   final VoidCallback onAdd;
 
   @override
   Widget build(BuildContext context) {
-    final width = MediaQuery.sizeOf(context).width;
-    const columns = 5;
-    const rows = 4;
-    const spacing = 8.0;
-    final availableWidth = max(0.0, width - 36);
-    final itemWidth = (availableWidth - spacing * (columns - 1)) / columns;
-    final avatarSize = min(56.0, itemWidth);
-    final previewCount = columns * rows - 1;
-    final preview = members.take(previewCount).toList(growable: false);
-    final showMore = members.length > previewCount;
     return ColoredBox(
       color: _surfaceColor,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(18, 18, 18, 20),
-        child: Column(
-          children: [
-            Wrap(
-              spacing: spacing,
-              runSpacing: 18,
-              children: [
-                for (final member in preview)
-                  _GroupMemberGridItem(
-                    width: itemWidth,
-                    avatarSize: avatarSize,
-                    title: _memberTitle(member),
-                    avatarUrl: _avatarUrlFromMap(member),
-                    onTap: onOpenAll,
-                  ),
-                _GroupMemberAddItem(
-                  width: itemWidth,
-                  avatarSize: avatarSize,
-                  onTap: onAdd,
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 520),
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              const columns = 4;
+              const maxRows = 4;
+              const horizontalPadding = BimSpacing.x4;
+              const columnSpacing = BimSpacing.x2;
+              const rowSpacing = BimSpacing.x5;
+              const previewCapacity = columns * maxRows - 1;
+              final availableWidth = max(
+                0.0,
+                constraints.maxWidth - horizontalPadding * 2,
+              );
+              final itemWidth =
+                  (availableWidth - columnSpacing * (columns - 1)) / columns;
+              final avatarSize = min(BimDimensions.avatarLg, itemWidth - 8);
+              final preview = members
+                  .take(previewCapacity)
+                  .toList(growable: false);
+              final resolvedCount = expectedMemberCount ?? members.length;
+              final showMore = resolvedCount > previewCapacity;
+              final placeholderCount = loading && members.isEmpty
+                  ? min(
+                      previewCapacity,
+                      max(3, resolvedCount > 0 ? resolvedCount : 7),
+                    )
+                  : 0;
+              return Padding(
+                padding: const EdgeInsets.fromLTRB(
+                  horizontalPadding,
+                  BimSpacing.x5,
+                  horizontalPadding,
+                  BimSpacing.x3,
                 ),
-              ],
-            ),
-            if (loading && members.isEmpty) ...[
-              const SizedBox(height: 18),
-              const SizedBox(
-                height: 24,
-                width: 24,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              ),
-            ] else if (showMore) ...[
-              const SizedBox(height: 22),
-              InkWell(
-                onTap: onOpenAll,
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 8),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    mainAxisSize: MainAxisSize.min,
-                    children: const [
-                      Text(
-                        '更多群成员',
-                        style: TextStyle(
-                          color: _secondaryTextColor,
-                          fontSize: 16,
-                          fontWeight: FontWeight.w700,
+                child: Column(
+                  children: [
+                    Wrap(
+                      spacing: columnSpacing,
+                      runSpacing: rowSpacing,
+                      children: [
+                        for (final member in preview)
+                          _GroupMemberGridItem(
+                            width: itemWidth,
+                            avatarSize: avatarSize,
+                            title: _memberTitle(member),
+                            avatarUrl: _avatarUrlFromMap(member),
+                            onTap: onOpenAll,
+                          ),
+                        for (var index = 0; index < placeholderCount; index++)
+                          _GroupMemberPlaceholderItem(
+                            width: itemWidth,
+                            avatarSize: avatarSize,
+                          ),
+                        _GroupMemberAddItem(
+                          width: itemWidth,
+                          avatarSize: avatarSize,
+                          onTap: onAdd,
                         ),
+                      ],
+                    ),
+                    if (showMore) ...[
+                      const SizedBox(height: BimSpacing.x4),
+                      _GroupMemberMoreButton(
+                        memberCount: resolvedCount,
+                        onTap: onOpenAll,
                       ),
-                      SizedBox(width: 4),
-                      Icon(
-                        Icons.keyboard_arrow_down,
-                        color: _mutedColor,
-                        size: 24,
-                      ),
-                    ],
-                  ),
+                    ] else
+                      const SizedBox(height: BimSpacing.x2),
+                  ],
                 ),
+              );
+            },
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _GroupMemberPlaceholderItem extends StatelessWidget {
+  const _GroupMemberPlaceholderItem({
+    required this.width,
+    required this.avatarSize,
+  });
+
+  final double width;
+  final double avatarSize;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: width,
+      child: Column(
+        children: [
+          Container(
+            width: avatarSize,
+            height: avatarSize,
+            decoration: BoxDecoration(
+              color: BimColors.fill,
+              borderRadius: BorderRadius.circular(_avatarRadius(avatarSize)),
+            ),
+          ),
+          const SizedBox(height: BimSpacing.x2),
+          Container(
+            width: min(48, width - 8),
+            height: 12,
+            color: BimColors.fill,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _GroupMemberMoreButton extends StatelessWidget {
+  const _GroupMemberMoreButton({
+    required this.memberCount,
+    required this.onTap,
+  });
+
+  final int memberCount;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return BimPressable(
+      onTap: onTap,
+      semanticLabel: '查看全部群成员，共$memberCount人',
+      child: SizedBox(
+        height: BimDimensions.touchTarget,
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Text(
+              '查看全部群成员 ($memberCount)',
+              style: const TextStyle(
+                color: BimColors.secondaryText,
+                fontSize: BimTypography.body,
+                fontWeight: FontWeight.w600,
               ),
-            ],
+            ),
+            const SizedBox(width: BimSpacing.x1),
+            const Icon(
+              Icons.chevron_right,
+              color: BimColors.mutedText,
+              size: 20,
+            ),
           ],
         ),
       ),
@@ -917,11 +1033,13 @@ class _GroupSettingsInfoTile extends StatelessWidget {
 class _GroupSettingsSwitchTile extends StatelessWidget {
   const _GroupSettingsSwitchTile({
     required this.title,
+    this.subtitle = '',
     required this.value,
     required this.onChanged,
   });
 
   final String title;
+  final String subtitle;
   final bool value;
   final ValueChanged<bool> onChanged;
 
@@ -929,6 +1047,7 @@ class _GroupSettingsSwitchTile extends StatelessWidget {
   Widget build(BuildContext context) {
     return BimSettingsSwitchTile(
       title: title,
+      subtitle: subtitle,
       value: value,
       onChanged: onChanged,
     );
