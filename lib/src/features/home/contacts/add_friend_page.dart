@@ -25,10 +25,10 @@ class _AddFriendPageState extends State<AddFriendPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: _pageColor,
-      appBar: const BimTopBar(title: '添加好友'),
-      body: SafeArea(
+    return BimScaffold(
+      topBar: const BimTopBar(title: '添加好友'),
+      body: BimContentViewport(
+        maxWidth: 680,
         child: ListView(
           padding: const EdgeInsets.only(bottom: 24),
           children: [

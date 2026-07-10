@@ -11,6 +11,8 @@ export 'list/bim_selectable_tile.dart';
 export 'list/bim_settings_tile.dart';
 export 'motion/bim_reveal.dart';
 export 'navigation/bim_top_bar.dart';
+export 'navigation/bim_adaptive_shell.dart';
 export 'scaffold/bim_scaffold.dart';
+export 'scaffold/bim_content_viewport.dart';
 export 'sheet/bim_action_sheet.dart';
 export 'button/bim_button.dart';

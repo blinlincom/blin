@@ -329,7 +329,7 @@ class _MediaLoadPlaceholder extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             if (value == null)
-              Icon(icon, color: const Color(0xff8e96a3), size: 28)
+              Icon(icon, color: BimColors.mutedText, size: 28)
             else
               SizedBox(
                 width: 28,
@@ -337,7 +337,7 @@ class _MediaLoadPlaceholder extends StatelessWidget {
                 child: CircularProgressIndicator(
                   value: value.clamp(0, 1).toDouble(),
                   strokeWidth: 2.2,
-                  color: const Color(0xff8e96a3),
+                  color: BimColors.mutedText,
                   backgroundColor: const Color(0x338e96a3),
                 ),
               ),
@@ -656,7 +656,7 @@ class _MediaMessageMetaBar extends StatelessWidget {
                     timeLabel,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: _textStyle(const Color(0xffffffff)),
+                    style: _textStyle(BimColors.inverseText),
                   ),
                 if (timeLabel.isNotEmpty && statusText.isNotEmpty)
                   const SizedBox(width: 8),
@@ -705,7 +705,7 @@ class _MediaMessageMetaBar extends StatelessWidget {
     return switch (status) {
       'failed' => const Color(0xffffd2d2),
       'read' => const Color(0xffc9f7d5),
-      'sent' => const Color(0xffffffff),
+      'sent' => BimColors.inverseText,
       _ => const Color(0xe6ffffff),
     };
   }
@@ -745,7 +745,7 @@ class _MediaUploadOverlay extends StatelessWidget {
       behavior: HitTestBehavior.opaque,
       onTap: failed ? onRetry : null,
       child: ColoredBox(
-        color: const Color(0x66000000),
+        color: BimColors.scrim,
         child: Center(
           child: Container(
             width: failed ? 76 : 58,

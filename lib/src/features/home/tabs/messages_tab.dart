@@ -16,65 +16,62 @@ class _MessagesHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ColoredBox(
-      color: _surfaceColor,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 10),
-        child: Row(
-          children: [
-            Expanded(
-              child: BimPressable(
-                onTap: () => _push(context, SearchPage(controller: controller)),
-                child: Container(
-                  height: 40,
-                  padding: const EdgeInsets.symmetric(horizontal: 12),
-                  decoration: BoxDecoration(
-                    color: _fillColor,
-                    borderRadius: BorderRadius.circular(BimRadius.sm),
-                  ),
-                  child: const Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(Icons.search, color: _mutedColor, size: 17),
-                      SizedBox(width: 8),
-                      Text(
-                        '搜索',
-                        style: TextStyle(
-                          color: _mutedColor,
-                          fontSize: 13,
-                          fontWeight: FontWeight.w500,
-                        ),
+    return Container(
+      color: BimColors.surface,
+      padding: const EdgeInsets.fromLTRB(
+        BimSpacing.x4,
+        BimSpacing.x2,
+        BimSpacing.x4,
+        BimSpacing.x3,
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: BimPressable(
+              onTap: () => _push(context, SearchPage(controller: controller)),
+              semanticLabel: '搜索消息和联系人',
+              child: Container(
+                height: BimDimensions.touchTarget,
+                padding: const EdgeInsets.symmetric(horizontal: BimSpacing.x3),
+                decoration: BoxDecoration(
+                  color: BimColors.fill,
+                  borderRadius: BorderRadius.circular(BimRadius.sm),
+                ),
+                child: const Row(
+                  children: [
+                    Icon(Icons.search, color: BimColors.mutedText, size: 19),
+                    SizedBox(width: BimSpacing.x2),
+                    Text(
+                      '搜索消息和联系人',
+                      style: TextStyle(
+                        color: BimColors.mutedText,
+                        fontSize: BimTypography.meta,
+                        fontWeight: FontWeight.w500,
                       ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
               ),
             ),
-            const SizedBox(width: 8),
-            Semantics(
-              button: true,
-              label: '扫一扫',
-              child: BimPressable(
-                onTap: () =>
-                    _push(context, FriendQrScannerPage(controller: controller)),
-                child: Container(
-                  width: 44,
-                  height: 40,
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    color: _fillColor,
-                    borderRadius: BorderRadius.circular(BimRadius.sm),
-                  ),
-                  child: const Icon(
-                    Icons.qr_code_scanner,
-                    color: _textColor,
-                    size: 22,
-                  ),
-                ),
+          ),
+          const SizedBox(width: BimSpacing.x2),
+          BimPressable(
+            onTap: () =>
+                _push(context, FriendQrScannerPage(controller: controller)),
+            semanticLabel: '扫一扫',
+            child: Container(
+              width: BimDimensions.touchTarget,
+              height: BimDimensions.touchTarget,
+              alignment: Alignment.center,
+              color: BimColors.fill,
+              child: const Icon(
+                Icons.qr_code_scanner,
+                color: BimColors.text,
+                size: 21,
               ),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -323,7 +320,7 @@ class _MessagesTabState extends State<MessagesTab> {
   Widget build(BuildContext context) {
     final header = _MessagesHeader(controller: widget.controller);
     return ColoredBox(
-      color: _surfaceColor,
+      color: BimColors.surface,
       child: ListView.builder(
         physics: const ClampingScrollPhysics(),
         itemCount: _conversations.isEmpty ? 2 : _conversations.length + 1,

@@ -79,97 +79,104 @@ class _ChatToolsPanelState extends State<_ChatToolsPanel> {
       if (widget.isGroup && widget.onGroupMembers != null)
         _ToolItem('群成员', widget.onGroupMembers!, Icons.groups_rounded),
     ];
-    final pages = <List<_ToolItem>>[];
-    for (var index = 0; index < items.length; index += 8) {
-      pages.add(items.sublist(index, (index + 8).clamp(0, items.length)));
-    }
     return Container(
       height: widget.height,
       decoration: const BoxDecoration(
-        color: _fillColor,
-        border: Border(top: BorderSide(color: _lightBorderColor)),
+        color: BimColors.fill,
+        border: Border(top: BorderSide(color: BimColors.borderLight)),
       ),
-      child: Column(
-        children: [
-          Expanded(
-            child: PageView.builder(
-              controller: _pageController,
-              itemCount: pages.length,
-              physics: const BouncingScrollPhysics(),
-              onPageChanged: (value) => setState(() => _pageIndex = value),
-              itemBuilder: (context, pageIndex) {
-                final pageItems = pages[pageIndex];
-                return Padding(
-                  padding: const EdgeInsets.fromLTRB(28, 22, 28, 8),
-                  child: _ToolPageGrid(items: pageItems),
-                );
-              },
-            ),
-          ),
-          Padding(
-            padding: EdgeInsets.only(
-              bottom: max(18.0, MediaQuery.viewPaddingOf(context).bottom + 6),
-            ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                for (var index = 0; index < pages.length; index++)
-                  AnimatedContainer(
-                    duration: const Duration(milliseconds: 180),
-                    curve: Curves.easeOut,
-                    width: 8,
-                    height: 8,
-                    margin: const EdgeInsets.symmetric(horizontal: 5),
-                    decoration: BoxDecoration(
-                      color: _pageIndex == index
-                          ? const Color(0xff7f858d)
-                          : const Color(0xffd9dce1),
-                      borderRadius: BorderRadius.circular(BimRadius.pill),
-                    ),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final columns = constraints.maxWidth >= BimBreakpoints.desktop
+              ? 6
+              : constraints.maxWidth >= BimBreakpoints.medium
+              ? 5
+              : 4;
+          final perPage = columns * 2;
+          final pages = <List<_ToolItem>>[];
+          for (var index = 0; index < items.length; index += perPage) {
+            pages.add(items.sublist(index, min(index + perPage, items.length)));
+          }
+          return Column(
+            children: [
+              Expanded(
+                child: PageView.builder(
+                  controller: _pageController,
+                  itemCount: pages.length,
+                  physics: const BouncingScrollPhysics(),
+                  onPageChanged: (value) => setState(() => _pageIndex = value),
+                  itemBuilder: (context, pageIndex) {
+                    return Padding(
+                      padding: const EdgeInsets.fromLTRB(
+                        BimSpacing.x4,
+                        BimSpacing.x5,
+                        BimSpacing.x4,
+                        BimSpacing.x2,
+                      ),
+                      child: _ToolPageGrid(
+                        items: pages[pageIndex],
+                        columns: columns,
+                      ),
+                    );
+                  },
+                ),
+              ),
+              Padding(
+                padding: EdgeInsets.only(
+                  bottom: max(
+                    BimSpacing.x4,
+                    MediaQuery.viewPaddingOf(context).bottom + BimSpacing.x1,
                   ),
-              ],
-            ),
-          ),
-        ],
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    for (var index = 0; index < pages.length; index++)
+                      AnimatedContainer(
+                        duration: BimMotion.normal,
+                        curve: BimMotion.curve,
+                        width: _pageIndex == index ? 16 : 6,
+                        height: 6,
+                        margin: const EdgeInsets.symmetric(
+                          horizontal: BimSpacing.x1,
+                        ),
+                        decoration: BoxDecoration(
+                          color: _pageIndex == index
+                              ? BimColors.primary
+                              : BimColors.border,
+                          borderRadius: BorderRadius.circular(BimRadius.pill),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
 }
 
 class _ToolPageGrid extends StatelessWidget {
-  const _ToolPageGrid({required this.items});
+  const _ToolPageGrid({required this.items, required this.columns});
 
   final List<_ToolItem> items;
+  final int columns;
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      children: [
-        for (var row = 0; row < 2; row++) ...[
-          Expanded(
-            child: Row(
-              children: [
-                for (var column = 0; column < 4; column++)
-                  Expanded(
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 10),
-                      child: Builder(
-                        builder: (context) {
-                          final index = row * 4 + column;
-                          if (index >= items.length) {
-                            return const SizedBox.shrink();
-                          }
-                          return _ToolButton(item: items[index]);
-                        },
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-          ),
-          if (row == 0) const SizedBox(height: 22),
-        ],
-      ],
+    return GridView.builder(
+      physics: const NeverScrollableScrollPhysics(),
+      padding: EdgeInsets.zero,
+      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: columns,
+        mainAxisSpacing: BimSpacing.x4,
+        crossAxisSpacing: BimSpacing.x2,
+        childAspectRatio: 0.92,
+      ),
+      itemCount: items.length,
+      itemBuilder: (context, index) => _ToolButton(item: items[index]),
     );
   }
 }
@@ -189,9 +196,9 @@ class _ToolButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
+    return BimPressable(
       onTap: item.onTap,
-      borderRadius: BorderRadius.circular(8),
+      semanticLabel: item.label,
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
@@ -200,19 +207,19 @@ class _ToolButton extends StatelessWidget {
             height: BimDimensions.toolIcon,
             alignment: Alignment.center,
             decoration: BoxDecoration(
-              color: _surfaceColor,
-              borderRadius: BorderRadius.circular(BimRadius.lg),
+              color: BimColors.surface,
+              borderRadius: BorderRadius.circular(BimRadius.md),
             ),
-            child: Icon(item.icon, size: 24, color: _textColor),
+            child: Icon(item.icon, size: 23, color: BimColors.text),
           ),
-          const SizedBox(height: 9),
+          const SizedBox(height: BimSpacing.x2),
           Text(
             item.label,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: const TextStyle(
-              fontSize: 13,
-              color: _secondaryTextColor,
+              fontSize: BimTypography.meta,
+              color: BimColors.secondaryText,
               fontWeight: FontWeight.w500,
               height: 1,
             ),

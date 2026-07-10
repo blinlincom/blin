@@ -41,9 +41,8 @@ class _CreateGroupPageState extends State<CreateGroupPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: _pageColor,
-      appBar: BimTopBar(
+    return BimScaffold(
+      topBar: BimTopBar(
         title: '发起群聊',
         actions: [
           TextButton(
@@ -58,7 +57,8 @@ class _CreateGroupPageState extends State<CreateGroupPage> {
           ),
         ],
       ),
-      body: SafeArea(
+      body: BimContentViewport(
+        maxWidth: 760,
         child: ListView(
           padding: const EdgeInsets.only(bottom: 24),
           children: [
@@ -224,9 +224,8 @@ class _GroupDetailPageState extends State<GroupDetailPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: _pageColor,
-      appBar: BimTopBar(
+    return BimScaffold(
+      topBar: BimTopBar(
         title: '聊天信息${_groupCountTitleSuffix()}',
         actions: [
           IconButton(
@@ -236,58 +235,48 @@ class _GroupDetailPageState extends State<GroupDetailPage> {
           ),
         ],
       ),
-      body: SafeArea(
-        child: Align(
-          alignment: Alignment.topCenter,
-          child: ConstrainedBox(
-            constraints: BoxConstraints(
-              maxWidth: BimBreakpoints.contentMaxWidth(context),
+      body: BimContentViewport(
+        maxWidth: 760,
+        child: ListView(
+          padding: const EdgeInsets.only(bottom: BimSpacing.x8),
+          children: [
+            _GroupInfoMemberGrid(
+              loading: _membersLoading,
+              expectedMemberCount: _loadedMemberCount ?? widget.memberCount,
+              members: _members,
+              onOpenAll: _openMembers,
+              onAdd: _addMembers,
             ),
-            child: ListView(
-              padding: const EdgeInsets.only(bottom: BimSpacing.x8),
-              children: [
-                _GroupInfoMemberGrid(
-                  loading: _membersLoading,
-                  expectedMemberCount: _loadedMemberCount ?? widget.memberCount,
-                  members: _members,
-                  onOpenAll: _openMembers,
-                  onAdd: _addMembers,
-                ),
-                const _SectionHeader(text: '群聊资料'),
-                _GroupSettingsInfoTile(
-                  title: '群聊名称',
-                  value: widget.title.isEmpty ? '群聊' : widget.title,
-                  onTap: _updateGroup,
-                ),
-                _GroupSettingsInfoTile(
-                  title: '群公告',
-                  value: '查看或更新群公告',
-                  onTap: _updateGroup,
-                ),
-                const _SectionHeader(text: '聊天设置'),
-                _GroupSettingsNavTile(
-                  title: '查找聊天记录',
-                  onTap: _openMessageSearch,
-                ),
-                _GroupSettingsSwitchTile(
-                  title: '置顶聊天',
-                  subtitle: '在消息列表顶部显示该群聊',
-                  value: _pinned,
-                  onChanged: _changePinned,
-                ),
-                const _SectionHeader(text: '聊天数据'),
-                _GroupSettingsDangerTile(
-                  title: '清空聊天记录',
-                  onTap: _clearGroupConversation,
-                ),
-                const _SectionHeader(text: '群管理'),
-                _GroupSettingsDangerTile(title: '退出群聊', onTap: _leaveGroup),
-                _GroupSettingsDangerTile(title: '解散群聊', onTap: _deleteGroup),
-                _ResultBlock(text: _message),
-                _ErrorBlock(text: _error),
-              ],
+            const _SectionHeader(text: '群聊资料'),
+            _GroupSettingsInfoTile(
+              title: '群聊名称',
+              value: widget.title.isEmpty ? '群聊' : widget.title,
+              onTap: _updateGroup,
             ),
-          ),
+            _GroupSettingsInfoTile(
+              title: '群公告',
+              value: '查看或更新群公告',
+              onTap: _updateGroup,
+            ),
+            const _SectionHeader(text: '聊天设置'),
+            _GroupSettingsNavTile(title: '查找聊天记录', onTap: _openMessageSearch),
+            _GroupSettingsSwitchTile(
+              title: '置顶聊天',
+              subtitle: '在消息列表顶部显示该群聊',
+              value: _pinned,
+              onChanged: _changePinned,
+            ),
+            const _SectionHeader(text: '聊天数据'),
+            _GroupSettingsDangerTile(
+              title: '清空聊天记录',
+              onTap: _clearGroupConversation,
+            ),
+            const _SectionHeader(text: '群管理'),
+            _GroupSettingsDangerTile(title: '退出群聊', onTap: _leaveGroup),
+            _GroupSettingsDangerTile(title: '解散群聊', onTap: _deleteGroup),
+            _ResultBlock(text: _message),
+            _ErrorBlock(text: _error),
+          ],
         ),
       ),
     );
@@ -556,10 +545,10 @@ class _GroupProfilePageState extends State<GroupProfilePage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: _pageColor,
-      appBar: const BimTopBar(title: '群聊资料'),
-      body: SafeArea(
+    return BimScaffold(
+      topBar: const BimTopBar(title: '群聊资料'),
+      body: BimContentViewport(
+        maxWidth: 680,
         child: ListView(
           padding: const EdgeInsets.only(bottom: 24),
           children: [
@@ -681,10 +670,10 @@ class _GroupMemberListPageState extends State<GroupMemberListPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: _pageColor,
-      appBar: const BimTopBar(title: '群成员'),
-      body: SafeArea(
+    return BimScaffold(
+      topBar: const BimTopBar(title: '群成员'),
+      body: BimContentViewport(
+        maxWidth: 760,
         child: FutureBuilder<Map<String, Object?>>(
           key: ValueKey(_version),
           future: widget.controller.groupMembers(widget.groupId),
@@ -728,757 +717,5 @@ class _GroupMemberListPageState extends State<GroupMemberListPage> {
         ),
       ),
     );
-  }
-}
-
-class _GroupInfoMemberGrid extends StatelessWidget {
-  const _GroupInfoMemberGrid({
-    required this.loading,
-    required this.expectedMemberCount,
-    required this.members,
-    required this.onOpenAll,
-    required this.onAdd,
-  });
-
-  final bool loading;
-  final int? expectedMemberCount;
-  final List<Map<String, Object?>> members;
-  final VoidCallback onOpenAll;
-  final VoidCallback onAdd;
-
-  @override
-  Widget build(BuildContext context) {
-    return ColoredBox(
-      color: _surfaceColor,
-      child: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 520),
-          child: LayoutBuilder(
-            builder: (context, constraints) {
-              const columns = 4;
-              const maxRows = 4;
-              const horizontalPadding = BimSpacing.x4;
-              const columnSpacing = BimSpacing.x2;
-              const rowSpacing = BimSpacing.x5;
-              const previewCapacity = columns * maxRows - 1;
-              final availableWidth = max(
-                0.0,
-                constraints.maxWidth - horizontalPadding * 2,
-              );
-              final itemWidth =
-                  (availableWidth - columnSpacing * (columns - 1)) / columns;
-              final avatarSize = min(BimDimensions.avatarLg, itemWidth - 8);
-              final preview = members
-                  .take(previewCapacity)
-                  .toList(growable: false);
-              final resolvedCount = expectedMemberCount ?? members.length;
-              final showMore = resolvedCount > previewCapacity;
-              final placeholderCount = loading && members.isEmpty
-                  ? min(
-                      previewCapacity,
-                      max(3, resolvedCount > 0 ? resolvedCount : 7),
-                    )
-                  : 0;
-              return Padding(
-                padding: const EdgeInsets.fromLTRB(
-                  horizontalPadding,
-                  BimSpacing.x5,
-                  horizontalPadding,
-                  BimSpacing.x3,
-                ),
-                child: Column(
-                  children: [
-                    Wrap(
-                      spacing: columnSpacing,
-                      runSpacing: rowSpacing,
-                      children: [
-                        for (final member in preview)
-                          _GroupMemberGridItem(
-                            width: itemWidth,
-                            avatarSize: avatarSize,
-                            title: _memberTitle(member),
-                            avatarUrl: _avatarUrlFromMap(member),
-                            onTap: onOpenAll,
-                          ),
-                        for (var index = 0; index < placeholderCount; index++)
-                          _GroupMemberPlaceholderItem(
-                            width: itemWidth,
-                            avatarSize: avatarSize,
-                          ),
-                        _GroupMemberAddItem(
-                          width: itemWidth,
-                          avatarSize: avatarSize,
-                          onTap: onAdd,
-                        ),
-                      ],
-                    ),
-                    if (showMore) ...[
-                      const SizedBox(height: BimSpacing.x4),
-                      _GroupMemberMoreButton(
-                        memberCount: resolvedCount,
-                        onTap: onOpenAll,
-                      ),
-                    ] else
-                      const SizedBox(height: BimSpacing.x2),
-                  ],
-                ),
-              );
-            },
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _GroupMemberPlaceholderItem extends StatelessWidget {
-  const _GroupMemberPlaceholderItem({
-    required this.width,
-    required this.avatarSize,
-  });
-
-  final double width;
-  final double avatarSize;
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      width: width,
-      child: Column(
-        children: [
-          Container(
-            width: avatarSize,
-            height: avatarSize,
-            decoration: BoxDecoration(
-              color: BimColors.fill,
-              borderRadius: BorderRadius.circular(_avatarRadius(avatarSize)),
-            ),
-          ),
-          const SizedBox(height: BimSpacing.x2),
-          Container(
-            width: min(48, width - 8),
-            height: 12,
-            color: BimColors.fill,
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _GroupMemberMoreButton extends StatelessWidget {
-  const _GroupMemberMoreButton({
-    required this.memberCount,
-    required this.onTap,
-  });
-
-  final int memberCount;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return BimPressable(
-      onTap: onTap,
-      semanticLabel: '查看全部群成员，共$memberCount人',
-      child: SizedBox(
-        height: BimDimensions.touchTarget,
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Text(
-              '查看全部群成员 ($memberCount)',
-              style: const TextStyle(
-                color: BimColors.secondaryText,
-                fontSize: BimTypography.body,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            const SizedBox(width: BimSpacing.x1),
-            const Icon(
-              Icons.chevron_right,
-              color: BimColors.mutedText,
-              size: 20,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _GroupMemberGridItem extends StatelessWidget {
-  const _GroupMemberGridItem({
-    required this.width,
-    required this.avatarSize,
-    required this.title,
-    required this.avatarUrl,
-    required this.onTap,
-  });
-
-  final double width;
-  final double avatarSize;
-  final String title;
-  final String avatarUrl;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      child: SizedBox(
-        width: width,
-        child: Column(
-          children: [
-            _Avatar(
-              label: title,
-              imageUrl: avatarUrl,
-              size: avatarSize,
-              color: const Color(0xff8e99a8),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              title,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              textAlign: TextAlign.center,
-              style: const TextStyle(color: _mutedColor, fontSize: 13),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _GroupMemberAddItem extends StatelessWidget {
-  const _GroupMemberAddItem({
-    required this.width,
-    required this.avatarSize,
-    required this.onTap,
-  });
-
-  final double width;
-  final double avatarSize;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      child: SizedBox(
-        width: width,
-        child: Column(
-          children: [
-            Container(
-              width: avatarSize,
-              height: avatarSize,
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                color: _surfaceColor,
-                border: Border.all(color: _mutedColor.withValues(alpha: 0.45)),
-                borderRadius: BorderRadius.circular(_avatarRadius(56)),
-              ),
-              child: const Icon(Icons.add, color: _mutedColor, size: 30),
-            ),
-            const SizedBox(height: 8),
-            const Text(
-              '添加',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              textAlign: TextAlign.center,
-              style: TextStyle(color: _mutedColor, fontSize: 13),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _GroupSettingsNavTile extends StatelessWidget {
-  const _GroupSettingsNavTile({required this.title, required this.onTap});
-
-  final String title;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return BimSettingsTile(title: title, onTap: onTap, minHeight: 62);
-  }
-}
-
-class _GroupSettingsInfoTile extends StatelessWidget {
-  const _GroupSettingsInfoTile({
-    required this.title,
-    required this.value,
-    required this.onTap,
-  });
-
-  final String title;
-  final String value;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return BimSettingsTile(
-      title: title,
-      value: value,
-      onTap: onTap,
-      valueMaxLines: 2,
-      minHeight: 62,
-    );
-  }
-}
-
-class _GroupSettingsSwitchTile extends StatelessWidget {
-  const _GroupSettingsSwitchTile({
-    required this.title,
-    this.subtitle = '',
-    required this.value,
-    required this.onChanged,
-  });
-
-  final String title;
-  final String subtitle;
-  final bool value;
-  final ValueChanged<bool> onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    return BimSettingsSwitchTile(
-      title: title,
-      subtitle: subtitle,
-      value: value,
-      onChanged: onChanged,
-    );
-  }
-}
-
-class _GroupSettingsDangerTile extends StatelessWidget {
-  const _GroupSettingsDangerTile({required this.title, required this.onTap});
-
-  final String title;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return BimSettingsTile(
-      title: title,
-      onTap: onTap,
-      tone: BimSettingsTileTone.danger,
-      showChevron: false,
-      minHeight: 62,
-    );
-  }
-}
-
-class MyGroupsPage extends StatefulWidget {
-  const MyGroupsPage({required this.controller, super.key});
-
-  final SessionController controller;
-
-  @override
-  State<MyGroupsPage> createState() => _MyGroupsPageState();
-}
-
-class _MyGroupsPageState extends State<MyGroupsPage> {
-  final _search = TextEditingController();
-  List<Map<String, Object?>> _groups = const [];
-  bool _loading = false;
-  String? _error;
-
-  @override
-  void initState() {
-    super.initState();
-    widget.controller.addListener(_onControllerChanged);
-    _groups = widget.controller.cachedGroups();
-    _precacheContactAvatars(context, const [], _groups);
-    _refresh(showLoading: _groups.isEmpty);
-    _search.addListener(_onSearchChanged);
-  }
-
-  @override
-  void dispose() {
-    _search
-      ..removeListener(_onSearchChanged)
-      ..dispose();
-    widget.controller.removeListener(_onControllerChanged);
-    super.dispose();
-  }
-
-  void _onSearchChanged() => setState(() {});
-
-  Future<void> _openCreateGroup() async {
-    await _push(context, CreateGroupPage(controller: widget.controller));
-    if (mounted) {
-      await _refresh(showLoading: false);
-    }
-  }
-
-  void _onControllerChanged() {
-    final groups = widget.controller.cachedGroups();
-    if (_sameMapList(_groups, groups)) {
-      return;
-    }
-    _precacheContactAvatars(context, const [], groups);
-    setState(() {
-      _groups = groups;
-      _loading = false;
-      _error = null;
-    });
-  }
-
-  Future<void> _refresh({bool showLoading = true}) async {
-    if (showLoading && mounted) {
-      setState(() {
-        _loading = true;
-        _error = null;
-      });
-    }
-    try {
-      final groups = await widget.controller.loadGroups();
-      if (!mounted) {
-        return;
-      }
-      _precacheContactAvatars(context, const [], groups);
-      setState(() {
-        _groups = groups;
-        _loading = false;
-        _error = null;
-      });
-    } catch (error) {
-      if (!mounted) {
-        return;
-      }
-      setState(() {
-        _loading = false;
-        _error = error.toString();
-      });
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final keyword = _search.text.trim().toLowerCase();
-    final visibleGroups = keyword.isEmpty
-        ? _groups
-        : _groups
-              .where((item) {
-                final title = _groupTitle(item).toLowerCase();
-                final notice = _value(item, [
-                  'notice',
-                  'description',
-                ]).toLowerCase();
-                return title.contains(keyword) || notice.contains(keyword);
-              })
-              .toList(growable: false);
-    return BimScaffold(
-      topBar: BimTopBar(
-        title: '我的群聊',
-        actions: [
-          IconButton(
-            tooltip: '发起群聊',
-            onPressed: _openCreateGroup,
-            icon: const Icon(Icons.add),
-          ),
-        ],
-      ),
-      body: _loading && _groups.isEmpty
-          ? const BimLoadingState(label: '正在加载群聊')
-          : _error != null && _groups.isEmpty
-          ? _ErrorState(text: _error!, onRetry: () => _refresh())
-          : RefreshIndicator(
-              onRefresh: () => _refresh(showLoading: false),
-              child: ListView(
-                physics: const AlwaysScrollableScrollPhysics(),
-                padding: const EdgeInsets.only(bottom: BimSpacing.x6),
-                children: [
-                  Padding(
-                    padding: EdgeInsets.fromLTRB(
-                      BimBreakpoints.horizontalPadding(context),
-                      BimSpacing.x3,
-                      BimBreakpoints.horizontalPadding(context),
-                      BimSpacing.x2,
-                    ),
-                    child: ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 680),
-                      child: TextField(
-                        controller: _search,
-                        textInputAction: TextInputAction.search,
-                        decoration: InputDecoration(
-                          hintText: '搜索群聊名称或公告',
-                          prefixIcon: const Icon(Icons.search, size: 20),
-                          suffixIcon: keyword.isEmpty
-                              ? null
-                              : IconButton(
-                                  tooltip: '清空搜索',
-                                  onPressed: _search.clear,
-                                  icon: const Icon(Icons.close, size: 19),
-                                ),
-                        ),
-                      ),
-                    ),
-                  ),
-                  Padding(
-                    padding: EdgeInsets.symmetric(
-                      horizontal: BimBreakpoints.horizontalPadding(context),
-                    ),
-                    child: ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 680),
-                      child: BimSectionHeader(
-                        text: keyword.isEmpty
-                            ? '共 ${_groups.length} 个群聊'
-                            : '找到 ${visibleGroups.length} 个群聊',
-                      ),
-                    ),
-                  ),
-                  if (visibleGroups.isEmpty)
-                    BimEmptyState(
-                      title: keyword.isEmpty ? '还没有群聊' : '没有找到相关群聊',
-                      message: keyword.isEmpty
-                          ? '可以从联系人中选择好友发起群聊'
-                          : '请尝试其他群聊名称或公告关键词',
-                      icon: Icons.groups_outlined,
-                      actionLabel: keyword.isEmpty ? '发起群聊' : '清空搜索',
-                      onAction: keyword.isEmpty
-                          ? _openCreateGroup
-                          : _search.clear,
-                    )
-                  else
-                    Align(
-                      alignment: Alignment.topCenter,
-                      child: ConstrainedBox(
-                        constraints: const BoxConstraints(maxWidth: 680),
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(BimRadius.sm),
-                          child: Column(
-                            children: [
-                              for (
-                                var index = 0;
-                                index < visibleGroups.length;
-                                index++
-                              )
-                                BimListTile(
-                                  title: _groupTitle(visibleGroups[index]),
-                                  subtitle: _value(visibleGroups[index], [
-                                    'notice',
-                                    'description',
-                                  ]),
-                                  subtitleMaxLines: 2,
-                                  leading: _Avatar(
-                                    label: _groupTitle(visibleGroups[index]),
-                                    imageUrl: _groupAvatarUrl(
-                                      visibleGroups[index],
-                                    ),
-                                    size: 46,
-                                    color: BimColors.primary,
-                                    icon: Icons.groups_outlined,
-                                  ),
-                                  trailing: Text(
-                                    '${_intValue(visibleGroups[index], ['member_count', 'members'])}人',
-                                    style: const TextStyle(
-                                      color: BimColors.mutedText,
-                                      fontSize: BimTypography.caption,
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                                  showDivider:
-                                      index != visibleGroups.length - 1,
-                                  onTap: () => _openGroupChat(
-                                    context,
-                                    widget.controller,
-                                    visibleGroups[index],
-                                  ),
-                                  onLongPress: () => _push(
-                                    context,
-                                    GroupDetailPage(
-                                      controller: widget.controller,
-                                      title: _groupTitle(visibleGroups[index]),
-                                      groupId: _groupIdFromItem(
-                                        visibleGroups[index],
-                                      ),
-                                      channelId: _groupChannelId(
-                                        visibleGroups[index],
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                  if (_error != null) BimNoticeBanner(text: '群聊刷新失败：$_error'),
-                ],
-              ),
-            ),
-    );
-  }
-}
-
-class GroupMemberActionPage extends StatefulWidget {
-  const GroupMemberActionPage({
-    required this.controller,
-    required this.groupId,
-    required this.member,
-    super.key,
-  });
-
-  final SessionController controller;
-  final String groupId;
-  final Map<String, Object?> member;
-
-  @override
-  State<GroupMemberActionPage> createState() => _GroupMemberActionPageState();
-}
-
-class _GroupMemberActionPageState extends State<GroupMemberActionPage> {
-  String _message = '';
-  String _error = '';
-
-  @override
-  Widget build(BuildContext context) {
-    final memberId = _memberUserId(widget.member);
-    return Scaffold(
-      appBar: BimTopBar(title: _memberTitle(widget.member)),
-      body: SafeArea(
-        child: ListView(
-          children: [
-            _PlainListTile(
-              icon: Icons.badge_outlined,
-              title: '成员',
-              subtitle: _memberSubtitle(widget.member),
-              trailing: _memberRoleText(widget.member),
-            ),
-            _PlainListTile(
-              icon: Icons.volume_off_outlined,
-              title: '永久禁言',
-              subtitle: '由系统或管理员限制该成员发言',
-              trailing: '',
-              onTap: () => _mute(memberId, permanent: true),
-            ),
-            _PlainListTile(
-              icon: Icons.timer_outlined,
-              title: '限时禁言',
-              subtitle: '设置禁言秒数和原因',
-              trailing: '',
-              onTap: () => _mute(memberId, permanent: false),
-            ),
-            _PlainListTile(
-              icon: Icons.volume_up_outlined,
-              title: '解除禁言',
-              subtitle: '恢复该成员群内发言',
-              trailing: '',
-              onTap: () => _run(
-                () => widget.controller.unmuteGroupMember(
-                  groupId: widget.groupId,
-                  memberId: memberId,
-                ),
-              ),
-            ),
-            _PlainListTile(
-              icon: Icons.admin_panel_settings_outlined,
-              title: '设为管理员',
-              subtitle: '仅群主可操作',
-              trailing: '',
-              onTap: () => _run(
-                () => widget.controller.setGroupAdmin(
-                  groupId: widget.groupId,
-                  memberId: memberId,
-                  isAdmin: true,
-                ),
-              ),
-            ),
-            _PlainListTile(
-              icon: Icons.remove_moderator_outlined,
-              title: '取消管理员',
-              subtitle: '仅群主可操作',
-              trailing: '',
-              onTap: () => _run(
-                () => widget.controller.setGroupAdmin(
-                  groupId: widget.groupId,
-                  memberId: memberId,
-                  isAdmin: false,
-                ),
-              ),
-            ),
-            _PlainListTile(
-              icon: Icons.workspace_premium_outlined,
-              title: '转让群主',
-              subtitle: '新群主必须是当前成员',
-              trailing: '',
-              onTap: () => _run(
-                () => widget.controller.transferGroupOwner(
-                  groupId: widget.groupId,
-                  newOwnerId: memberId,
-                ),
-              ),
-            ),
-            _PlainListTile(
-              icon: Icons.person_remove_outlined,
-              title: '移出群聊',
-              subtitle: '同步移除频道订阅者',
-              trailing: '',
-              onTap: () => _run(
-                () => widget.controller.removeGroupMembers(
-                  groupId: widget.groupId,
-                  memberIds: [memberId],
-                ),
-              ),
-            ),
-            _ResultBlock(text: _message),
-            _ErrorBlock(text: _error),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Future<void> _mute(String memberId, {required bool permanent}) async {
-    var seconds = 0;
-    var reason = '';
-    if (!permanent) {
-      final data = await _openInput(
-        context,
-        title: '限时禁言',
-        fields: const [
-          ActionInputField(
-            id: 'expire_seconds',
-            label: '禁言秒数',
-            keyboardType: TextInputType.number,
-          ),
-          ActionInputField(id: 'reason', label: '原因'),
-        ],
-      );
-      if (data == null) {
-        return;
-      }
-      seconds = int.tryParse(data['expire_seconds'] ?? '') ?? 0;
-      reason = data['reason'] ?? '';
-      if (seconds <= 0) {
-        setState(() => _error = '限时禁言秒数必须大于 0');
-        return;
-      }
-    }
-    await _run(
-      () => widget.controller.muteGroupMember(
-        groupId: widget.groupId,
-        memberId: memberId,
-        expireSeconds: seconds,
-        reason: reason,
-      ),
-    );
-  }
-
-  Future<void> _run(Future<Map<String, Object?>> Function() task) async {
-    try {
-      final result = await task();
-      setState(() {
-        _message = _friendlyResult(result);
-        _error = '';
-      });
-    } catch (error) {
-      setState(() => _error = error.toString());
-    }
   }
 }

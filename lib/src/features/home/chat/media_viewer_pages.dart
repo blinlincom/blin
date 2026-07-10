@@ -359,10 +359,11 @@ class _FileMediaViewerPage extends StatelessWidget {
     final title = media.title.isEmpty ? '文件' : media.title;
     final size = media.displaySize;
     final mime = media.mime;
-    return Scaffold(
-      backgroundColor: _surfaceColor,
-      appBar: const BimTopBar(title: '文件'),
-      body: SafeArea(
+    return BimScaffold(
+      backgroundColor: BimColors.surface,
+      topBar: const BimTopBar(title: '文件'),
+      body: BimContentViewport(
+        maxWidth: 680,
         child: ListView(
           padding: const EdgeInsets.fromLTRB(22, 30, 22, 24),
           children: [

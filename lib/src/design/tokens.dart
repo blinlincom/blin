@@ -13,6 +13,8 @@ abstract final class BimColors {
   static const chatBackground = Color(0xfff7f8fa);
   static const surface = Color(0xffffffff);
   static const surfaceElevated = Color(0xfffbfcfd);
+  static const navigationSurface = Color(0xfff9fafc);
+  static const selectedSurface = Color(0xffeaf3ff);
   static const fill = Color(0xfff4f5f7);
   static const fillPressed = Color(0xffeceef2);
   static const border = Color(0xffe7e8ec);
@@ -31,6 +33,22 @@ abstract final class BimColors {
   static const transfer = Color(0xffff8a00);
   static const mineBubble = Color(0xffdff6d8);
   static const scrim = Color(0x66000000);
+  static const scrimStrong = Color(0x99000000);
+  static const inverseSurface = Color(0xff141821);
+  static const inverseSurfaceMuted = Color(0xff242a36);
+  static const inverseText = Color(0xffffffff);
+  static const inverseSecondaryText = Color(0xffb6bdc9);
+  static const mediaPlaceholder = Color(0xffe8eaed);
+  static const successSurface = Color(0xfff0fdf4);
+  static const successBorder = Color(0xffbbf7d0);
+  static const successText = Color(0xff166534);
+  static const warningSurface = Color(0xfffffbeb);
+  static const warningBorder = Color(0xfffde68a);
+  static const warningText = Color(0xff92400e);
+  static const dangerSurface = Color(0xfffef2f2);
+  static const dangerBorder = Color(0xfffecaca);
+  static const serviceBackground = Color(0xfff1f2f4);
+  static const momentsAction = Color(0xff526996);
 }
 
 abstract final class BimRadius {
@@ -73,6 +91,9 @@ abstract final class BimDimensions {
   static const composerControl = 42.0;
   static const chatToolsPanel = 328.0;
   static const chatToolsPanelMax = 348.0;
+  static const navigationRail = 76.0;
+  static const navigationSidebar = 224.0;
+  static const workspaceMax = 1180.0;
   static const toolIcon = 54.0;
   static const avatarSm = 32.0;
   static const avatarMd = 42.0;

@@ -65,10 +65,10 @@ class _ContactCardPickerPageState extends State<_ContactCardPickerPage> {
   @override
   Widget build(BuildContext context) {
     final filteredFriends = _filteredFriends();
-    return Scaffold(
-      backgroundColor: _pageColor,
-      appBar: const BimTopBar(title: '选择名片'),
-      body: SafeArea(
+    return BimScaffold(
+      topBar: const BimTopBar(title: '选择名片'),
+      body: BimContentViewport(
+        maxWidth: 760,
         child: RefreshIndicator(
           onRefresh: () => _loadFriends(showLoading: false),
           child: ListView(

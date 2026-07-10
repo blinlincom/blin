@@ -82,9 +82,10 @@ class _SearchPageState extends State<SearchPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: const BimTopBar(title: '搜索'),
-      body: SafeArea(
+    return BimScaffold(
+      topBar: const BimTopBar(title: '搜索'),
+      body: BimContentViewport(
+        maxWidth: 760,
         child: _loading && _friends.isEmpty
             ? const BimLoadingState(label: '正在加载联系人')
             : _loadError != null && _friends.isEmpty

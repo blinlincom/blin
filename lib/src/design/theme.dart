@@ -148,6 +148,38 @@ abstract final class BimTheme {
         selectedItemColor: primary,
         unselectedItemColor: BimColors.secondaryText,
       ),
+      navigationBarTheme: const NavigationBarThemeData(
+        height: 64,
+        elevation: 0,
+        backgroundColor: BimColors.surface,
+        indicatorColor: BimColors.primaryWeak,
+        labelTextStyle: WidgetStatePropertyAll(
+          TextStyle(
+            color: BimColors.secondaryText,
+            fontSize: BimTypography.caption,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ),
+      navigationRailTheme: const NavigationRailThemeData(
+        backgroundColor: BimColors.navigationSurface,
+        indicatorColor: BimColors.primaryWeak,
+        selectedIconTheme: IconThemeData(color: BimColors.primary, size: 24),
+        unselectedIconTheme: IconThemeData(
+          color: BimColors.secondaryText,
+          size: 23,
+        ),
+        selectedLabelTextStyle: TextStyle(
+          color: BimColors.primary,
+          fontSize: BimTypography.caption,
+          fontWeight: FontWeight.w700,
+        ),
+        unselectedLabelTextStyle: TextStyle(
+          color: BimColors.secondaryText,
+          fontSize: BimTypography.caption,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
       snackBarTheme: const SnackBarThemeData(
         elevation: 0,
         behavior: SnackBarBehavior.fixed,

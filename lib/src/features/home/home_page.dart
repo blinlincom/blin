@@ -38,22 +38,36 @@ part 'tabs/mine_tab.dart';
 part 'contacts/quick_actions_page.dart';
 part 'contacts/search_page.dart';
 part 'contacts/qr_friend_pages.dart';
+part 'contacts/qr_album_picker.dart';
+part 'contacts/qr_album_picker_state.dart';
 part 'contacts/connection_pages.dart';
 part 'contacts/add_friend_page.dart';
 part 'contacts/friend_requests_page.dart';
 part 'contacts/group_pages.dart';
+part 'contacts/group_settings_widgets.dart';
+part 'contacts/group_management_pages.dart';
 part 'contacts/private_chat_actions_page.dart';
+part 'contacts/friend_profile_pages.dart';
+part 'contacts/profile_widgets.dart';
 part 'wallet/wallet_page.dart';
+part 'wallet/wallet_code_pages.dart';
+part 'wallet/wallet_security_pages.dart';
+part 'wallet/wallet_history_pages.dart';
 part 'wallet/payment_code_widgets.dart';
 part 'wallet/payment_service_page.dart';
+part 'wallet/payment_service_widgets.dart';
+part 'wallet/service_account_settings_page.dart';
 part 'chat/chat_page.dart';
 part 'chat/action_input_pages.dart';
 part 'chat/media_picker_pages.dart';
+part 'chat/media_picker_grid_widgets.dart';
+part 'chat/media_picker_control_widgets.dart';
 part 'common/list_tiles.dart';
 part 'common/avatar.dart';
 part 'chat/message_list.dart';
 part 'chat/chat_header.dart';
 part 'chat/message_bubble.dart';
+part 'chat/message_interaction_widgets.dart';
 part 'common/media_preview.dart';
 part 'chat/media_viewer_pages.dart';
 part 'chat/payment_detail_pages.dart';
@@ -62,6 +76,7 @@ part 'chat/composer_bar.dart';
 part 'chat/emoji_picker.dart';
 part 'chat/contact_card_picker.dart';
 part 'calls/livekit_call_page.dart';
+part 'calls/livekit_call_views.dart';
 part 'common/section_header.dart';
 part 'common/navigation_helpers.dart';
 part 'chat/message_helpers.dart';
@@ -283,75 +298,55 @@ class _HomePageState extends State<HomePage> {
       DiscoverTab(controller: widget.controller),
       MineTab(controller: widget.controller),
     ];
-    return Scaffold(
-      appBar: _index == 3
-          ? null
-          : BimTopBar(title: _title, actions: _actions(showInitialSyncOverlay)),
-      backgroundColor: _pageColor,
-      body: SafeArea(
-        child: Stack(
-          children: [
-            AbsorbPointer(
-              absorbing: showInitialSyncOverlay,
-              child: _HomeTabStack(index: _index, children: pages),
-            ),
-            if (showInitialSyncOverlay)
-              Positioned.fill(
-                child: _InitialHistorySyncOverlay(
-                  state: widget.controller.initialHistorySyncState,
-                  onRetry: _retryInitialSync,
-                ),
+    return BimAdaptiveShell(
+      title: _title,
+      selectedIndex: _index,
+      blocked: showInitialSyncOverlay,
+      onBlockedInteraction: _showInitialSyncLockedTip,
+      onDestinationSelected: (value) {
+        if (value == _index) {
+          return;
+        }
+        setState(() => _index = value);
+      },
+      actions: _actions(showInitialSyncOverlay),
+      destinations: [
+        BimShellDestination(
+          label: '消息',
+          icon: Icons.chat_bubble_outline,
+          selectedIcon: Icons.chat_bubble,
+          badge: _totalUnread,
+        ),
+        const BimShellDestination(
+          label: '联系人',
+          icon: Icons.people_outline,
+          selectedIcon: Icons.people,
+        ),
+        const BimShellDestination(
+          label: '发现',
+          icon: Icons.explore_outlined,
+          selectedIcon: Icons.explore,
+        ),
+        const BimShellDestination(
+          label: '我的',
+          icon: Icons.person_outline,
+          selectedIcon: Icons.person,
+        ),
+      ],
+      body: Stack(
+        children: [
+          AbsorbPointer(
+            absorbing: showInitialSyncOverlay,
+            child: _HomeTabStack(index: _index, children: pages),
+          ),
+          if (showInitialSyncOverlay)
+            Positioned.fill(
+              child: _InitialHistorySyncOverlay(
+                state: widget.controller.initialHistorySyncState,
+                onRetry: _retryInitialSync,
               ),
-          ],
-        ),
-      ),
-      bottomNavigationBar: Container(
-        decoration: const BoxDecoration(
-          border: Border(top: BorderSide(color: _borderColor)),
-          color: Colors.white,
-        ),
-        child: BottomNavigationBar(
-          currentIndex: _index,
-          onTap: showInitialSyncOverlay
-              ? (_) => _showInitialSyncLockedTip()
-              : (value) {
-                  if (value == _index) {
-                    return;
-                  }
-                  setState(() => _index = value);
-                },
-          type: BottomNavigationBarType.fixed,
-          elevation: 0,
-          backgroundColor: _surfaceColor,
-          selectedItemColor: _primaryColor,
-          unselectedItemColor: const Color(0xff5f6772),
-          selectedFontSize: 11,
-          unselectedFontSize: 11,
-          selectedLabelStyle: const TextStyle(fontWeight: FontWeight.w700),
-          unselectedLabelStyle: const TextStyle(fontWeight: FontWeight.w500),
-          iconSize: 24,
-          items: [
-            BottomNavigationBarItem(
-              icon: _BottomNavIcon(
-                icon: Icons.sms_outlined,
-                unread: _totalUnread,
-              ),
-              label: '消息',
             ),
-            const BottomNavigationBarItem(
-              icon: Icon(Icons.contacts_outlined),
-              label: '联系人',
-            ),
-            const BottomNavigationBarItem(
-              icon: Icon(Icons.explore_outlined),
-              label: '发现',
-            ),
-            const BottomNavigationBarItem(
-              icon: Icon(Icons.person_outline),
-              label: '我',
-            ),
-          ],
-        ),
+        ],
       ),
     );
   }
@@ -686,34 +681,6 @@ class _InitialHistorySyncOverlay extends StatelessWidget {
             ),
           ),
         ),
-      ),
-    );
-  }
-}
-
-class _BottomNavIcon extends StatelessWidget {
-  const _BottomNavIcon({required this.icon, required this.unread});
-
-  final IconData icon;
-  final int unread;
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      width: 32,
-      height: 28,
-      child: Stack(
-        clipBehavior: Clip.none,
-        alignment: Alignment.center,
-        children: [
-          Icon(icon),
-          if (unread > 0)
-            Positioned(
-              top: -2,
-              right: 0,
-              child: _UnreadBadge(count: unread, compact: true),
-            ),
-        ],
       ),
     );
   }

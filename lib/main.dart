@@ -15,6 +15,7 @@ import 'src/features/moments/moments_cache_store.dart';
 import 'src/im/business_im_service.dart';
 import 'src/im/chat_feature_service.dart';
 import 'src/im/im_cache_store.dart';
+import 'src/design/tokens.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -106,38 +107,23 @@ class _BootstrapApp extends StatelessWidget {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       home: Scaffold(
-        backgroundColor: Colors.white,
-        body: Center(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 32),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Text(
-                  'BIM',
-                  style: TextStyle(
-                    color: Color(0xff111827),
-                    fontSize: 24,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 0,
-                  ),
-                ),
-                if (error != null) ...[
-                  const SizedBox(height: 16),
-                  const Text(
+        backgroundColor: BimColors.background,
+        body: error == null
+            ? const SizedBox.expand()
+            : const Center(
+                child: Padding(
+                  padding: EdgeInsets.symmetric(horizontal: BimSpacing.x8),
+                  child: Text(
                     '启动失败，请查看本地日志',
                     textAlign: TextAlign.center,
                     style: TextStyle(
-                      color: Color(0xffdc2626),
-                      fontSize: 14,
+                      color: BimColors.danger,
+                      fontSize: BimTypography.body,
                       height: 1.4,
                     ),
                   ),
-                ],
-              ],
-            ),
-          ),
-        ),
+                ),
+              ),
       ),
     );
   }

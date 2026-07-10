@@ -29,9 +29,10 @@ class QuickActionsPage extends StatelessWidget {
         () => _startMeeting(context, controller, mediaType: 'video'),
       ),
     ];
-    return Scaffold(
-      appBar: const BimTopBar(title: '快捷操作'),
-      body: SafeArea(
+    return BimScaffold(
+      topBar: const BimTopBar(title: '快捷操作'),
+      body: BimContentViewport(
+        maxWidth: 680,
         child: Padding(
           padding: const EdgeInsets.fromLTRB(18, 8, 18, 24),
           child: GridView.builder(
@@ -113,8 +114,8 @@ class _MeetingInvitePickerPageState extends State<_MeetingInvitePickerPage> {
   Widget build(BuildContext context) {
     final title = widget.mediaType == 'video' ? '选择视频会议成员' : '选择语音会议成员';
     final selected = _selectedIds.toList(growable: false);
-    return Scaffold(
-      appBar: BimTopBar(
+    return BimScaffold(
+      topBar: BimTopBar(
         title: title,
         actions: [
           TextButton(
@@ -125,7 +126,8 @@ class _MeetingInvitePickerPageState extends State<_MeetingInvitePickerPage> {
           ),
         ],
       ),
-      body: SafeArea(
+      body: BimContentViewport(
+        maxWidth: 760,
         child: FutureBuilder<List<Map<String, Object?>>>(
           future: _future,
           builder: (context, snapshot) {

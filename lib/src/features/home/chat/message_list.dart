@@ -48,11 +48,11 @@ class _MessageRow extends StatelessWidget {
             status == 'read' ||
             status == 'failed');
     return AnimatedContainer(
-      duration: const Duration(milliseconds: 220),
-      curve: Curves.easeOutCubic,
-      color: highlighted ? const Color(0x241677ff) : Colors.transparent,
+      duration: BimMotion.normal,
+      curve: BimMotion.curve,
+      color: highlighted ? BimColors.primaryWeak : Colors.transparent,
       child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 5),
+        padding: const EdgeInsets.symmetric(vertical: BimSpacing.x1),
         child: Row(
           mainAxisAlignment: isMe
               ? MainAxisAlignment.end
@@ -61,7 +61,7 @@ class _MessageRow extends StatelessWidget {
           children: [
             if (!isMe) ...[
               _Avatar(label: sender, imageUrl: avatarUrl, size: 36),
-              const SizedBox(width: 7),
+              const SizedBox(width: BimSpacing.x2),
             ],
             Flexible(
               child: Column(
@@ -77,8 +77,8 @@ class _MessageRow extends StatelessWidget {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
-                          color: _mutedColor,
-                          fontSize: 11,
+                          color: BimColors.mutedText,
+                          fontSize: BimTypography.caption,
                           fontWeight: FontWeight.w500,
                         ),
                       ),
@@ -96,7 +96,7 @@ class _MessageRow extends StatelessWidget {
                             onRetry: onRetry,
                           ),
                         ),
-                        const SizedBox(width: 5),
+                        const SizedBox(width: BimSpacing.x1),
                       ],
                       GestureDetector(
                         onTap: onTap,
@@ -116,12 +116,12 @@ class _MessageRow extends StatelessWidget {
               ),
             ),
             if (isMe) ...[
-              const SizedBox(width: 7),
+              const SizedBox(width: BimSpacing.x2),
               _Avatar(
                 label: '我',
                 imageUrl: avatarUrl,
                 size: 36,
-                color: _primaryColor,
+                color: BimColors.primary,
               ),
             ],
           ],
@@ -142,25 +142,26 @@ class _SystemNoticeRow extends StatelessWidget {
       return const SizedBox.shrink();
     }
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 7),
+      padding: const EdgeInsets.symmetric(vertical: BimSpacing.x2),
       child: Center(
         child: ConstrainedBox(
-          constraints: BoxConstraints(
-            maxWidth: MediaQuery.sizeOf(context).width * 0.74,
-          ),
+          constraints: const BoxConstraints(maxWidth: 520),
           child: DecoratedBox(
             decoration: BoxDecoration(
-              color: const Color(0xffeceff3),
-              borderRadius: BorderRadius.circular(5),
+              color: BimColors.fillPressed,
+              borderRadius: BorderRadius.circular(BimRadius.xs),
             ),
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+              padding: const EdgeInsets.symmetric(
+                horizontal: BimSpacing.x3,
+                vertical: BimSpacing.x1,
+              ),
               child: Text(
                 text,
                 textAlign: TextAlign.center,
                 style: const TextStyle(
-                  color: _secondaryTextColor,
-                  fontSize: 12,
+                  color: BimColors.secondaryText,
+                  fontSize: BimTypography.caption,
                   fontWeight: FontWeight.w600,
                   height: 1.25,
                 ),

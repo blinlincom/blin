@@ -59,10 +59,11 @@ class _ActionInputPageState extends State<ActionInputPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: _pageColor,
-      appBar: BimTopBar(title: widget.title),
-      body: SafeArea(
+    return BimScaffold(
+      topBar: BimTopBar(title: widget.title),
+      resizeToAvoidBottomInset: true,
+      body: BimContentViewport(
+        maxWidth: 680,
         child: Column(
           children: [
             Expanded(
@@ -142,7 +143,7 @@ class _ActionInputPageState extends State<ActionInputPage> {
               ),
             ),
             activeThumbColor: _chatAckColor,
-            activeTrackColor: const Color(0xffd8f4df),
+            activeTrackColor: BimColors.successBorder,
           ),
         ),
       );
@@ -290,7 +291,7 @@ class _ActionChoiceButton extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 12),
         alignment: Alignment.center,
         decoration: BoxDecoration(
-          color: selected ? const Color(0xffe9f8ed) : _surfaceColor,
+          color: selected ? BimColors.successSurface : _surfaceColor,
           borderRadius: BorderRadius.circular(8),
           border: Border.all(
             color: selected ? _chatAckColor : _lightBorderColor,
@@ -299,7 +300,7 @@ class _ActionChoiceButton extends StatelessWidget {
         child: Text(
           label,
           style: TextStyle(
-            color: selected ? const Color(0xff208a45) : _textColor,
+            color: selected ? BimColors.successText : _textColor,
             fontSize: 14,
             fontWeight: FontWeight.w700,
           ),

@@ -60,29 +60,31 @@ class _RedPacketDetailPageState extends State<_RedPacketDetailPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: _pageColor,
-      appBar: const BimTopBar(title: '红包详情'),
-      body: FutureBuilder<Map<String, Object?>>(
-        future: _request,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState != ConnectionState.done) {
-            return const BimLoadingState(label: '正在加载红包详情');
-          }
-          if (snapshot.hasError) {
-            return _PaymentErrorView(
-              text: snapshot.error.toString(),
-              onRetry: () => setState(() => _request = _load()),
+    return BimScaffold(
+      topBar: const BimTopBar(title: '红包详情'),
+      body: BimContentViewport(
+        maxWidth: 680,
+        child: FutureBuilder<Map<String, Object?>>(
+          future: _request,
+          builder: (context, snapshot) {
+            if (snapshot.connectionState != ConnectionState.done) {
+              return const BimLoadingState(label: '正在加载红包详情');
+            }
+            if (snapshot.hasError) {
+              return _PaymentErrorView(
+                text: snapshot.error.toString(),
+                onRetry: () => setState(() => _request = _load()),
+              );
+            }
+            final detail = snapshot.data ?? const {};
+            return _RedPacketDetailBody(
+              detail: detail,
+              receiving: _receiving,
+              message: _message,
+              onReceive: _receive,
             );
-          }
-          final detail = snapshot.data ?? const {};
-          return _RedPacketDetailBody(
-            detail: detail,
-            receiving: _receiving,
-            message: _message,
-            onReceive: _receive,
-          );
-        },
+          },
+        ),
       ),
     );
   }
@@ -146,29 +148,31 @@ class _TransferDetailPageState extends State<_TransferDetailPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: _pageColor,
-      appBar: const BimTopBar(title: '转账详情'),
-      body: FutureBuilder<Map<String, Object?>>(
-        future: _request,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState != ConnectionState.done) {
-            return const BimLoadingState(label: '正在加载转账详情');
-          }
-          if (snapshot.hasError) {
-            return _PaymentErrorView(
-              text: snapshot.error.toString(),
-              onRetry: () => setState(() => _request = _load()),
+    return BimScaffold(
+      topBar: const BimTopBar(title: '转账详情'),
+      body: BimContentViewport(
+        maxWidth: 680,
+        child: FutureBuilder<Map<String, Object?>>(
+          future: _request,
+          builder: (context, snapshot) {
+            if (snapshot.connectionState != ConnectionState.done) {
+              return const BimLoadingState(label: '正在加载转账详情');
+            }
+            if (snapshot.hasError) {
+              return _PaymentErrorView(
+                text: snapshot.error.toString(),
+                onRetry: () => setState(() => _request = _load()),
+              );
+            }
+            final detail = snapshot.data ?? const {};
+            return _TransferDetailBody(
+              detail: detail,
+              receiving: _receiving,
+              message: _message,
+              onReceive: _receive,
             );
-          }
-          final detail = snapshot.data ?? const {};
-          return _TransferDetailBody(
-            detail: detail,
-            receiving: _receiving,
-            message: _message,
-            onReceive: _receive,
-          );
-        },
+          },
+        ),
       ),
     );
   }

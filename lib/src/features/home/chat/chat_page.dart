@@ -1661,7 +1661,9 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => _buildChatSurface(context);
+
+  Widget _buildChatSurface(BuildContext context) {
     final muteText = _readOnlyServiceConversation
         ? '服务号仅用于通知'
         : _groupMuteText(_groupMuteState);
@@ -4557,8 +4559,8 @@ class _GroupCallInvitePickerPageState
   @override
   Widget build(BuildContext context) {
     final title = widget.mediaType == 'video' ? '选择视频通话成员' : '选择语音通话成员';
-    return Scaffold(
-      appBar: BimTopBar(
+    return BimScaffold(
+      topBar: BimTopBar(
         title: title,
         actions: [
           TextButton(
@@ -4573,41 +4575,44 @@ class _GroupCallInvitePickerPageState
           ),
         ],
       ),
-      body: FutureBuilder<List<Map<String, Object?>>>(
-        future: _future,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState != ConnectionState.done) {
-            return const BimLoadingState(label: '正在加载群成员');
-          }
-          if (snapshot.hasError) {
-            return _ErrorState(text: snapshot.error.toString());
-          }
-          final members = snapshot.data ?? const <Map<String, Object?>>[];
-          if (members.isEmpty) {
-            return const _EmptyRow(text: '暂无可邀请成员');
-          }
-          return ListView.separated(
-            itemCount: members.length,
-            separatorBuilder: (_, _) => const Divider(height: 1),
-            itemBuilder: (context, index) {
-              final member = members[index];
-              final userId = _memberUserId(member);
-              final selected = _selectedIds.contains(userId);
-              return BimSelectableTile(
-                title: _memberTitle(member),
-                subtitle: _memberSubtitle(member),
-                selected: selected,
-                control: BimSelectableControl.checkbox,
-                onChanged: (_) => _toggle(userId),
-                leading: _Avatar(
-                  label: _memberTitle(member),
-                  imageUrl: _avatarUrlFromMap(member),
-                  size: 38,
-                ),
-              );
-            },
-          );
-        },
+      body: BimContentViewport(
+        maxWidth: 760,
+        child: FutureBuilder<List<Map<String, Object?>>>(
+          future: _future,
+          builder: (context, snapshot) {
+            if (snapshot.connectionState != ConnectionState.done) {
+              return const BimLoadingState(label: '正在加载群成员');
+            }
+            if (snapshot.hasError) {
+              return _ErrorState(text: snapshot.error.toString());
+            }
+            final members = snapshot.data ?? const <Map<String, Object?>>[];
+            if (members.isEmpty) {
+              return const _EmptyRow(text: '暂无可邀请成员');
+            }
+            return ListView.separated(
+              itemCount: members.length,
+              separatorBuilder: (_, _) => const Divider(height: 1),
+              itemBuilder: (context, index) {
+                final member = members[index];
+                final userId = _memberUserId(member);
+                final selected = _selectedIds.contains(userId);
+                return BimSelectableTile(
+                  title: _memberTitle(member),
+                  subtitle: _memberSubtitle(member),
+                  selected: selected,
+                  control: BimSelectableControl.checkbox,
+                  onChanged: (_) => _toggle(userId),
+                  leading: _Avatar(
+                    label: _memberTitle(member),
+                    imageUrl: _avatarUrlFromMap(member),
+                    size: 38,
+                  ),
+                );
+              },
+            );
+          },
+        ),
       ),
     );
   }

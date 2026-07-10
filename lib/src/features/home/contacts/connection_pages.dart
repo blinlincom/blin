@@ -11,9 +11,10 @@ class ConnectionInfoPage extends StatelessWidget {
       animation: controller,
       builder: (context, _) {
         final session = controller.session;
-        return Scaffold(
-          appBar: const BimTopBar(title: '消息连接'),
-          body: SafeArea(
+        return BimScaffold(
+          topBar: const BimTopBar(title: '消息与存储'),
+          body: BimContentViewport(
+            maxWidth: 720,
             child: ListView(
               children: [
                 _MenuTile(
@@ -39,7 +40,7 @@ class ConnectionInfoPage extends StatelessWidget {
                 ),
                 _MenuTile(
                   icon: Icons.notifications_active_outlined,
-                  iconColor: const Color(0xff34c759),
+                  iconColor: BimColors.success,
                   title: '后台消息接收',
                   subtitle: _backgroundReceiveSubtitle(controller),
                   trailing: Switch.adaptive(
@@ -62,7 +63,7 @@ class ConnectionInfoPage extends StatelessWidget {
                 ),
                 _MenuTile(
                   icon: Icons.replay_circle_filled_outlined,
-                  iconColor: const Color(0xffff9f0a),
+                  iconColor: BimColors.warning,
                   title: '热启动',
                   subtitle: _formatTime(controller.lastHotResumeAt),
                   onTap: () {},
@@ -156,9 +157,10 @@ class _BackgroundReceiveProtectionPageState
       builder: (context, _) {
         final controller = widget.controller;
         final status = controller.backgroundReceiveStatus;
-        return Scaffold(
-          appBar: const BimTopBar(title: '消息接收保护'),
-          body: SafeArea(
+        return BimScaffold(
+          topBar: const BimTopBar(title: '消息接收保护'),
+          body: BimContentViewport(
+            maxWidth: 720,
             child: ListView(
               children: [
                 BimSettingsSwitchTile(
@@ -259,13 +261,13 @@ class _ProtectionStatusTile extends StatelessWidget {
   Widget build(BuildContext context) {
     return _MenuTile(
       icon: icon,
-      iconColor: ok ? const Color(0xff34c759) : const Color(0xffff9f0a),
+      iconColor: ok ? BimColors.success : BimColors.warning,
       title: title,
       subtitle: value,
       onTap: onTap ?? () {},
       trailing: Icon(
         ok ? Icons.check_circle_outline : Icons.error_outline,
-        color: ok ? const Color(0xff34c759) : const Color(0xffff9f0a),
+        color: ok ? BimColors.success : BimColors.warning,
         size: 20,
       ),
     );
@@ -277,8 +279,8 @@ class DiagnosticsLogPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: BimTopBar(
+    return BimScaffold(
+      topBar: BimTopBar(
         title: '诊断日志',
         actions: [
           IconButton(
@@ -293,7 +295,8 @@ class DiagnosticsLogPage extends StatelessWidget {
           ),
         ],
       ),
-      body: SafeArea(
+      body: BimContentViewport(
+        maxWidth: 900,
         child: ValueListenableBuilder<int>(
           valueListenable: AppLogger.revision,
           builder: (context, _, _) {

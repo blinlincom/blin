@@ -41,15 +41,15 @@ class _Composer extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       decoration: const BoxDecoration(
-        color: _surfaceColor,
-        border: Border(top: BorderSide(color: _lightBorderColor)),
+        color: BimColors.surface,
+        border: Border(top: BorderSide(color: BimColors.borderLight)),
       ),
       child: Padding(
         padding: EdgeInsets.fromLTRB(
-          10,
-          8,
-          10,
-          MediaQuery.viewPaddingOf(context).bottom > 0 ? 13 : 12,
+          BimSpacing.x2,
+          BimSpacing.x2,
+          BimSpacing.x2,
+          max(BimSpacing.x2, MediaQuery.viewPaddingOf(context).bottom),
         ),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.end,
@@ -59,7 +59,7 @@ class _Composer extends StatelessWidget {
               icon: voiceMode ? Icons.keyboard_alt_outlined : Icons.mic_none,
               onPressed: !enabled ? null : onVoice,
             ),
-            const SizedBox(width: 6),
+            const SizedBox(width: BimSpacing.x1),
             Expanded(
               child: voiceMode
                   ? _VoiceRecordButton(
@@ -75,8 +75,8 @@ class _Composer extends StatelessWidget {
                         minHeight: BimDimensions.composerControl,
                       ),
                       decoration: BoxDecoration(
-                        color: _fillColor,
-                        borderRadius: BorderRadius.circular(6),
+                        color: BimColors.fill,
+                        borderRadius: BorderRadius.circular(BimRadius.sm),
                       ),
                       child: TextField(
                         controller: controller,
@@ -104,13 +104,13 @@ class _Composer extends StatelessWidget {
                         decoration: InputDecoration(
                           hintText: enabled ? '输入消息' : disabledText,
                           hintStyle: const TextStyle(
-                            color: Color(0xffaeb4bd),
-                            fontSize: 15,
+                            color: BimColors.mutedText,
+                            fontSize: BimTypography.body,
                           ),
                           filled: true,
                           fillColor: !enabled
-                              ? const Color(0xffeeeeee)
-                              : _fillColor,
+                              ? BimColors.fillPressed
+                              : BimColors.fill,
                           isDense: true,
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(6),

@@ -135,7 +135,7 @@ class _ContactsTabState extends State<ContactsTab> {
               ),
               _MenuTile(
                 icon: Icons.group_add,
-                iconColor: const Color(0xffffa51f),
+                iconColor: BimColors.warning,
                 title: '新的朋友',
                 subtitle: '',
                 onTap: () => _push(
@@ -151,7 +151,7 @@ class _ContactsTabState extends State<ContactsTab> {
               ),
               _MenuTile(
                 icon: Icons.groups,
-                iconColor: const Color(0xff36c56f),
+                iconColor: BimColors.success,
                 title: '群聊',
                 subtitle: '',
                 onTap: () =>
@@ -159,7 +159,7 @@ class _ContactsTabState extends State<ContactsTab> {
               ),
               _MenuTile(
                 icon: Icons.verified_user_outlined,
-                iconColor: const Color(0xff2563eb),
+                iconColor: BimColors.primary,
                 title: '服务号',
                 subtitle: _serviceAccountsSubtitle,
                 onTap: () => _push(
@@ -340,10 +340,10 @@ class _ServiceAccountsPageState extends State<ServiceAccountsPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: _pageColor,
-      appBar: const BimTopBar(title: '服务号'),
-      body: SafeArea(
+    return BimScaffold(
+      topBar: const BimTopBar(title: '服务号'),
+      body: BimContentViewport(
+        maxWidth: 760,
         child: Stack(
           children: [
             RefreshIndicator(
@@ -531,10 +531,10 @@ class _ContactsListPageState extends State<ContactsListPage> {
   @override
   Widget build(BuildContext context) {
     final visibleFriends = _visibleFriends;
-    return Scaffold(
-      backgroundColor: _pageColor,
-      appBar: const BimTopBar(title: '联系人'),
-      body: SafeArea(
+    return BimScaffold(
+      topBar: const BimTopBar(title: '联系人'),
+      body: BimContentViewport(
+        maxWidth: 760,
         child: Stack(
           children: [
             RefreshIndicator(
