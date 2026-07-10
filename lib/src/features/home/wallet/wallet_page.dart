@@ -390,30 +390,16 @@ class WalletPayReceivePage extends StatefulWidget {
 }
 
 class _WalletPayReceivePageState extends State<WalletPayReceivePage> {
-  final _amount = TextEditingController();
-  final _remark = TextEditingController();
   WalletOrder? _payOrder;
-  WalletOrder? _collectOrder;
   String _payError = '';
-  String _collectError = '';
   bool _payLoading = false;
-  bool _collectLoading = true;
-  bool _settingCollectAmount = false;
   bool _payUnlocked = false;
   Timer? _payTimer;
   int _paySecondsLeft = 0;
 
   @override
-  void initState() {
-    super.initState();
-    unawaited(_loadCollectCode(showLoading: false));
-  }
-
-  @override
   void dispose() {
     _payTimer?.cancel();
-    _amount.dispose();
-    _remark.dispose();
     super.dispose();
   }
 
@@ -465,41 +451,6 @@ class _WalletPayReceivePageState extends State<WalletPayReceivePage> {
     }
   }
 
-  Future<void> _loadCollectCode({
-    String amount = '',
-    String remark = '',
-    bool showLoading = true,
-  }) async {
-    if (showLoading && mounted) {
-      setState(() {
-        _collectLoading = true;
-        _collectError = '';
-      });
-    }
-    try {
-      final order = await widget.controller.currentWalletCollectCode(
-        amount: amount,
-        remark: remark,
-      );
-      if (!mounted) {
-        return;
-      }
-      setState(() {
-        _collectOrder = order;
-        _collectError = '';
-        _collectLoading = false;
-      });
-    } catch (error) {
-      if (!mounted) {
-        return;
-      }
-      setState(() {
-        _collectError = _walletInlineError(error);
-        _collectLoading = false;
-      });
-    }
-  }
-
   void _startPayCountdown(WalletOrder order) {
     _payTimer?.cancel();
     _paySecondsLeft = order.expireSeconds;
@@ -520,140 +471,72 @@ class _WalletPayReceivePageState extends State<WalletPayReceivePage> {
     });
   }
 
-  Future<void> _refreshAll() async {
-    await Future.wait([
-      if (_payUnlocked || _payOrder != null)
-        _loadPayCode(requirePassword: false),
-      _loadCollectCode(
-        amount: _amount.text.trim(),
-        remark: _remark.text.trim(),
-      ),
-    ]);
-  }
-
-  Future<void> _setCollectAmount() async {
-    if (_settingCollectAmount) {
-      return;
-    }
-    setState(() => _settingCollectAmount = true);
-    await _loadCollectCode(
-      amount: _amount.text.trim(),
-      remark: _remark.text.trim(),
-    );
-    if (mounted) {
-      setState(() => _settingCollectAmount = false);
-      if (_collectError.isEmpty) {
-        _showWalletMessage(context, '收款码已更新');
-      }
-    }
-  }
-
-  String get _paySubtitle {
-    if (_payError.isNotEmpty) {
-      return '付款码生成失败';
-    }
-    if (_payOrder == null) {
-      return '验证支付密码后显示';
-    }
-    return _paySecondsLeft > 0 ? '${_paySecondsLeft}s 后自动刷新' : '短时有效，自动刷新';
-  }
-
-  String get _collectTitle {
-    final order = _collectOrder;
-    if (order == null || order.needsAmountInput) {
-      return '我的收款码';
-    }
-    return '收款金额 ¥${order.amountLabel}';
-  }
-
-  String get _collectSubtitle {
-    if (_collectError.isNotEmpty) {
-      return '收款码生成失败';
-    }
-    final order = _collectOrder;
-    if (order == null) {
-      return '正在生成收款码';
-    }
-    return order.remark.isEmpty ? '扫一扫，向我付款' : order.remark;
-  }
-
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: _pageColor,
-      appBar: BimTopBar(
+    return BimScaffold(
+      topBar: BimTopBar(
         title: '收付款',
         actions: [
-          IconButton(
-            tooltip: '刷新',
-            onPressed: (_payLoading || _collectLoading) ? null : _refreshAll,
-            icon: const Icon(Icons.refresh),
-          ),
+          if (_payOrder != null)
+            IconButton(
+              tooltip: '刷新付款码',
+              onPressed: _payLoading
+                  ? null
+                  : () => _loadPayCode(requirePassword: false),
+              icon: const Icon(Icons.refresh),
+            ),
         ],
       ),
-      body: SafeArea(
-        child: ListView(
-          padding: const EdgeInsets.fromLTRB(0, 0, 0, 28),
-          children: [
-            _WalletQrPanel(
-              order: _payOrder,
-              title: '付款码',
-              subtitle: _paySubtitle,
-              loading: _payLoading,
-              showBarcode: true,
-              errorText: _payError,
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
-              child: TextButton.icon(
-                onPressed: _payLoading
-                    ? null
-                    : () => _loadPayCode(
-                        requirePassword: !_payUnlocked || _payOrder == null,
-                      ),
-                icon: Icon(
-                  _payOrder == null ? Icons.lock_open : Icons.refresh,
-                  size: 18,
+      body: SingleChildScrollView(
+        padding: EdgeInsets.fromLTRB(
+          BimBreakpoints.horizontalPadding(context),
+          BimSpacing.x4,
+          BimBreakpoints.horizontalPadding(context),
+          BimSpacing.x8,
+        ),
+        child: Align(
+          alignment: Alignment.topCenter,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 560),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _WalletPaymentCodeSurface(
+                  order: _payOrder,
+                  secondsLeft: _paySecondsLeft,
+                  busy: _payLoading,
+                  errorText: _payError,
+                  onOpen: _payLoading
+                      ? null
+                      : () => _loadPayCode(
+                          requirePassword: !_payUnlocked || _payOrder == null,
+                        ),
                 ),
-                label: Text(_payOrder == null ? '打开付款码' : '刷新付款码'),
-              ),
-            ),
-            const _GroupGap(),
-            _WalletQrPanel(
-              order: _collectOrder,
-              title: _collectTitle,
-              subtitle: _collectSubtitle,
-              loading: _collectLoading,
-              errorText: _collectError,
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  _WalletTextField(
-                    controller: _amount,
-                    label: '设置金额',
-                    hint: '不填则由付款方输入',
-                    keyboardType: const TextInputType.numberWithOptions(
-                      decimal: true,
-                    ),
+                const SizedBox(height: BimSpacing.x3),
+                BimIconTile(
+                  icon: Icons.qr_code_rounded,
+                  iconColor: BimColors.success,
+                  title: '我的收款码',
+                  subtitle: '设置收款金额和备注',
+                  onTap: () => _push(
+                    context,
+                    WalletCollectCodePage(controller: widget.controller),
                   ),
-                  const SizedBox(height: 12),
-                  _WalletTextField(
-                    controller: _remark,
-                    label: '备注',
-                    hint: '选填',
+                ),
+                BimIconTile(
+                  icon: Icons.qr_code_scanner,
+                  iconColor: BimColors.primary,
+                  title: '扫一扫',
+                  subtitle: '扫描付款码或收款码',
+                  showDivider: false,
+                  onTap: () => _push(
+                    context,
+                    WalletScanPage(controller: widget.controller),
                   ),
-                  const SizedBox(height: 18),
-                  _WalletPrimaryButton(
-                    text: _settingCollectAmount ? '更新中...' : '设置收款金额',
-                    onPressed: _settingCollectAmount ? null : _setCollectAmount,
-                  ),
-                ],
-              ),
+                ),
+              ],
             ),
-          ],
+          ),
         ),
       ),
     );
@@ -803,17 +686,12 @@ class WalletPayCodePage extends StatefulWidget {
 }
 
 class _WalletPayCodePageState extends State<WalletPayCodePage> {
-  Future<WalletOrder>? _request;
   WalletOrder? _order;
+  String _error = '';
   bool _busy = false;
   bool _unlocked = false;
   Timer? _timer;
   int _secondsLeft = 0;
-
-  @override
-  void initState() {
-    super.initState();
-  }
 
   @override
   void dispose() {
@@ -832,7 +710,10 @@ class _WalletPayCodePageState extends State<WalletPayCodePage> {
         return;
       }
     }
-    setState(() => _busy = true);
+    setState(() {
+      _busy = true;
+      _error = '';
+    });
     try {
       final order = await widget.controller.currentWalletPayCode(
         payPassword: payPassword,
@@ -843,19 +724,19 @@ class _WalletPayCodePageState extends State<WalletPayCodePage> {
       _startCountdown(order);
       setState(() {
         _order = order;
-        _request = Future.value(order);
+        _error = '';
         _unlocked = true;
       });
     } catch (error) {
       if (mounted) {
-        if (error.toString().contains('支付密码')) {
+        final errorText = _walletInlineError(error);
+        if (errorText.contains('支付密码')) {
           setState(() {
             _order = null;
-            _request = null;
             _unlocked = false;
           });
         }
-        _showWalletMessage(context, error.toString());
+        setState(() => _error = errorText);
       }
     } finally {
       if (mounted) {
@@ -887,14 +768,13 @@ class _WalletPayCodePageState extends State<WalletPayCodePage> {
   @override
   Widget build(BuildContext context) {
     final order = _order;
-    return Scaffold(
-      backgroundColor: _pageColor,
-      appBar: BimTopBar(
+    return BimScaffold(
+      topBar: BimTopBar(
         title: '付款码',
         actions: [
           if (order != null)
             IconButton(
-              tooltip: '刷新',
+              tooltip: '刷新付款码',
               onPressed: _busy
                   ? null
                   : () => _createOrRefresh(requirePassword: false),
@@ -902,35 +782,25 @@ class _WalletPayCodePageState extends State<WalletPayCodePage> {
             ),
         ],
       ),
-      body: SafeArea(
-        child: ListView(
-          padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
-          children: [
-            if (order == null) ...[
-              _WalletPayCodeIntro(),
-              const SizedBox(height: 22),
-              _WalletPrimaryButton(
-                text: _busy ? '生成中...' : '打开付款码',
-                onPressed: _busy ? null : _createOrRefresh,
-              ),
-            ] else
-              FutureBuilder<WalletOrder>(
-                future: _request,
-                initialData: order,
-                builder: (context, snapshot) {
-                  final current = snapshot.data ?? order;
-                  return _WalletQrPanel(
-                    order: current,
-                    title: '付款码',
-                    subtitle: _secondsLeft > 0
-                        ? '${_secondsLeft}s 后自动刷新'
-                        : '短时有效，自动刷新',
-                    loading: _busy && current.qrPayload.isEmpty,
-                    showBarcode: true,
-                  );
-                },
-              ),
-          ],
+      body: SingleChildScrollView(
+        padding: EdgeInsets.fromLTRB(
+          BimBreakpoints.horizontalPadding(context),
+          BimSpacing.x4,
+          BimBreakpoints.horizontalPadding(context),
+          BimSpacing.x8,
+        ),
+        child: Align(
+          alignment: Alignment.topCenter,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 560),
+            child: _WalletPaymentCodeSurface(
+              order: order,
+              secondsLeft: _secondsLeft,
+              busy: _busy,
+              errorText: _error,
+              onOpen: _busy ? null : _createOrRefresh,
+            ),
+          ),
         ),
       ),
     );
@@ -2501,58 +2371,18 @@ class _WalletPrimaryButton extends StatelessWidget {
   }
 }
 
-class _WalletPayCodeIntro extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return const ColoredBox(
-      color: _surfaceColor,
-      child: Padding(
-        padding: EdgeInsets.fromLTRB(20, 22, 20, 22),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Icon(Icons.qr_code_2, color: _primaryColor, size: 34),
-            SizedBox(height: 14),
-            Text(
-              '付款码',
-              style: TextStyle(
-                color: _textColor,
-                fontSize: 22,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-            SizedBox(height: 8),
-            Text(
-              '出示给商户扫码，金额由商户输入，付款方确认后完成付款。',
-              style: TextStyle(
-                color: _secondaryTextColor,
-                fontSize: 14,
-                height: 1.5,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
 class _WalletQrPanel extends StatelessWidget {
   const _WalletQrPanel({
     required this.order,
     required this.title,
     required this.subtitle,
     this.loading = false,
-    this.showBarcode = false,
-    this.errorText = '',
   });
 
   final WalletOrder? order;
   final String title;
   final String subtitle;
   final bool loading;
-  final bool showBarcode;
-  final String errorText;
 
   @override
   Widget build(BuildContext context) {
@@ -2580,44 +2410,12 @@ class _WalletQrPanel extends StatelessWidget {
               style: const TextStyle(color: _mutedColor, fontSize: 14),
             ),
             const SizedBox(height: 24),
-            if (showBarcode && current != null)
-              _WalletBarcode(
-                value: current.barPayload.isEmpty
-                    ? current.qrToken
-                    : current.barPayload,
-              ),
-            if (showBarcode) const SizedBox(height: 18),
             Container(
               width: 246,
               height: 246,
               alignment: Alignment.center,
               color: Colors.white,
-              child: errorText.isNotEmpty
-                  ? Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 24),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Icon(
-                            Icons.info_outline,
-                            color: _mutedColor,
-                            size: 30,
-                          ),
-                          const SizedBox(height: 10),
-                          Text(
-                            errorText,
-                            textAlign: TextAlign.center,
-                            style: const TextStyle(
-                              color: _mutedColor,
-                              fontSize: 14,
-                              fontWeight: FontWeight.w600,
-                              height: 1.45,
-                            ),
-                          ),
-                        ],
-                      ),
-                    )
-                  : loading || payload.isEmpty
+              child: loading || payload.isEmpty
                   ? const SizedBox(
                       width: 28,
                       height: 28,
