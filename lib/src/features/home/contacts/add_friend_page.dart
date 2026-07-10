@@ -27,7 +27,7 @@ class _AddFriendPageState extends State<AddFriendPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: _pageColor,
-      appBar: AppBar(title: const Text('添加好友')),
+      appBar: const BimTopBar(title: '添加好友'),
       body: SafeArea(
         child: ListView(
           padding: const EdgeInsets.only(bottom: 24),
@@ -65,16 +65,17 @@ class _AddFriendPageState extends State<AddFriendPage> {
               padding: const EdgeInsets.symmetric(horizontal: 16),
               child: Column(
                 children: [
-                  FilledButton.icon(
+                  BimButton(
+                    label: '发送申请',
                     onPressed: _loading ? null : _apply,
-                    icon: const Icon(Icons.send_outlined),
-                    label: const Text('发送申请'),
+                    icon: Icons.send_outlined,
                   ),
                   const SizedBox(height: 10),
-                  OutlinedButton.icon(
+                  BimButton(
+                    label: '查看好友状态',
                     onPressed: _loading ? null : _checkStatus,
-                    icon: const Icon(Icons.manage_search),
-                    label: const Text('查看好友状态'),
+                    icon: Icons.manage_search,
+                    kind: BimButtonKind.secondary,
                   ),
                 ],
               ),

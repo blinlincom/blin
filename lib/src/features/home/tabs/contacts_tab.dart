@@ -23,7 +23,7 @@ class _ContactsTabState extends State<ContactsTab> {
     widget.controller.addListener(_onControllerChanged);
     _friends = widget.controller.hasLoadedFriends
         ? widget.controller.cachedFriends(allowDisk: false)
-        : const [];
+        : widget.controller.cachedFriends(allowDisk: true);
     _serviceAccounts = widget.controller.hasLoadedServiceAccounts
         ? widget.controller.cachedServiceAccounts(allowDisk: false)
         : widget.controller.cachedServiceAccounts();
@@ -176,10 +176,7 @@ class _ContactsTabState extends State<ContactsTab> {
               ),
               const _SectionHeader(text: '联系人'),
               if (_loading && _friends.isEmpty)
-                const SizedBox(
-                  height: 180,
-                  child: Center(child: CircularProgressIndicator()),
-                )
+                const SizedBox(height: 180, child: BimLoadingState())
               else if (_error != null && _friends.isEmpty)
                 SizedBox(
                   height: 200,
@@ -345,7 +342,7 @@ class _ServiceAccountsPageState extends State<ServiceAccountsPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: _pageColor,
-      appBar: AppBar(title: const Text('服务号')),
+      appBar: const BimTopBar(title: '服务号'),
       body: SafeArea(
         child: Stack(
           children: [
@@ -359,10 +356,7 @@ class _ServiceAccountsPageState extends State<ServiceAccountsPage> {
                 children: [
                   const _SectionHeader(text: '服务号'),
                   if (_loading && _accounts.isEmpty)
-                    const SizedBox(
-                      height: 180,
-                      child: Center(child: CircularProgressIndicator()),
-                    )
+                    const SizedBox(height: 180, child: BimLoadingState())
                   else if (_error != null && _accounts.isEmpty)
                     SizedBox(
                       height: 200,
@@ -539,7 +533,7 @@ class _ContactsListPageState extends State<ContactsListPage> {
     final visibleFriends = _visibleFriends;
     return Scaffold(
       backgroundColor: _pageColor,
-      appBar: AppBar(title: const Text('联系人')),
+      appBar: const BimTopBar(title: '联系人'),
       body: SafeArea(
         child: Stack(
           children: [
@@ -554,10 +548,7 @@ class _ContactsListPageState extends State<ContactsListPage> {
                   _ContactsListSearchField(controller: _searchController),
                   const _SectionHeader(text: '联系人'),
                   if (_loading && _friends.isEmpty)
-                    const SizedBox(
-                      height: 180,
-                      child: Center(child: CircularProgressIndicator()),
-                    )
+                    const SizedBox(height: 180, child: BimLoadingState())
                   else if (_error != null && _friends.isEmpty)
                     SizedBox(
                       height: 200,

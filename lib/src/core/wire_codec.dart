@@ -5,12 +5,12 @@ import 'dart:math';
 import 'package:crypto/crypto.dart';
 import 'package:path_provider/path_provider.dart';
 
-import 'crypto_helpers.dart';
+import 'binary_codec.dart';
 
-class ApiPayloadCrypto {
-  const ApiPayloadCrypto._();
+class WireCodec {
+  const WireCodec._();
 
-  static Map<String, String> encrypt({
+  static Map<String, String> pack({
     required Map<String, Object?> payload,
     required String appId,
     required String appKey,
@@ -28,19 +28,19 @@ class ApiPayloadCrypto {
       nonce: nonce,
     );
     final plain = jsonEncode(_normalized(payload));
-    final encrypted = CryptoHelpers.aesCbcPkcs7Encrypt(
+    final packed = BinaryCodec.aesCbcPkcs7Encrypt(
       key: key.codeUnits,
       iv: iv.codeUnits,
       plain: utf8.encode(plain),
     );
     return {
-      'secure_payload': base64Encode(encrypted),
+      'secure_payload': base64Encode(packed),
       'secure_payload_alg': 'AES-128-CBC',
       'secure_payload_version': '1',
     };
   }
 
-  static Map<String, Object?> decryptResponse({
+  static Map<String, Object?> unpackResponse({
     required Map<String, Object?> payload,
     required String appId,
     required String appKey,
@@ -59,7 +59,7 @@ class ApiPayloadCrypto {
     final key = _key(appId: appId, appKey: appKey, userToken: userToken);
     final iv = _responseIv(device: device, timestamp: timestamp, nonce: nonce);
     final plain = utf8.decode(
-      CryptoHelpers.aesCbcPkcs7Decrypt(
+      BinaryCodec.aesCbcPkcs7Decrypt(
         key: key.codeUnits,
         iv: iv.codeUnits,
         cipherText: base64Decode(cipherText),
@@ -72,7 +72,7 @@ class ApiPayloadCrypto {
     throw const FormatException('secure_payload格式错误');
   }
 
-  static Future<EncryptedApiFile> encryptFile({
+  static Future<PackedWireFile> packFile({
     required String filePath,
     required String device,
     required String clientMsgNo,
@@ -93,7 +93,7 @@ class ApiPayloadCrypto {
       timestamp: timestamp,
       nonce: nonce,
     );
-    final encryptedBytes = CryptoHelpers.aesCbcPkcs7Encrypt(
+    final packedBytes = BinaryCodec.aesCbcPkcs7Encrypt(
       key: key.codeUnits,
       iv: iv.codeUnits,
       plain: bytes,
@@ -102,14 +102,14 @@ class ApiPayloadCrypto {
     final safeName = _basename(
       filePath,
     ).replaceAll(RegExp(r'[^A-Za-z0-9._-]'), '_');
-    final encryptedPath =
-        '${dir.path}${Platform.pathSeparator}bim_secure_${DateTime.now().microsecondsSinceEpoch}_$safeName.bin';
-    await File(encryptedPath).writeAsBytes(encryptedBytes, flush: true);
-    return EncryptedApiFile(
-      path: encryptedPath,
+    final packedPath =
+        '${dir.path}${Platform.pathSeparator}bim_wire_${DateTime.now().microsecondsSinceEpoch}_$safeName.bin';
+    await File(packedPath).writeAsBytes(packedBytes, flush: true);
+    return PackedWireFile(
+      path: packedPath,
       originalName: safeName.isEmpty ? 'file' : safeName,
       originalSize: bytes.length,
-      cipherSha256: sha256.convert(encryptedBytes).toString(),
+      packedSha256: sha256.convert(packedBytes).toString(),
     );
   }
 
@@ -206,16 +206,16 @@ class ApiPayloadCrypto {
   }
 }
 
-class EncryptedApiFile {
-  const EncryptedApiFile({
+class PackedWireFile {
+  const PackedWireFile({
     required this.path,
     required this.originalName,
     required this.originalSize,
-    required this.cipherSha256,
+    required this.packedSha256,
   });
 
   final String path;
   final String originalName;
   final int originalSize;
-  final String cipherSha256;
+  final String packedSha256;
 }

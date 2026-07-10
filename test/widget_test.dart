@@ -1,10 +1,10 @@
-import 'package:bim/src/core/api_payload_crypto.dart';
-import 'package:bim/src/core/api_signer.dart';
+import 'package:bim/src/core/wire_codec.dart';
+import 'package:bim/src/core/request_stamp.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   test('builds IM request sign using backend rule', () {
-    const signer = ApiSigner('demo_appkey');
+    const signer = RequestStamp('demo_appkey');
     final sign = signer.sign({
       'appid': '900000002',
       'usertoken': 'token',
@@ -21,7 +21,7 @@ void main() {
   });
 
   test('encrypts secure payload using backend AES-128-CBC rule', () {
-    final result = ApiPayloadCrypto.encrypt(
+    final result = WireCodec.pack(
       payload: const {'type': '1', 'content': 'hello'},
       appId: '1',
       appKey: 'appkey',

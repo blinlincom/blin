@@ -361,14 +361,7 @@ class _FileMediaViewerPage extends StatelessWidget {
     final mime = media.mime;
     return Scaffold(
       backgroundColor: _surfaceColor,
-      appBar: AppBar(
-        title: const Text('文件'),
-        centerTitle: true,
-        elevation: 0,
-        scrolledUnderElevation: 0,
-        backgroundColor: _surfaceColor,
-        foregroundColor: _textColor,
-      ),
+      appBar: const BimTopBar(title: '文件'),
       body: SafeArea(
         child: ListView(
           padding: const EdgeInsets.fromLTRB(22, 30, 22, 24),
@@ -504,9 +497,7 @@ class _MediaDownloadButtonState extends State<_MediaDownloadButton> {
       if (!mounted) {
         return;
       }
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('已保存到 $path')));
+      showBimSnackBar(context, '已保存到 $path', tone: BimNoticeTone.success);
     } catch (error, stackTrace) {
       AppLogger.error(
         'chat',
@@ -520,9 +511,7 @@ class _MediaDownloadButtonState extends State<_MediaDownloadButton> {
         },
       );
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('下载失败：$error')));
+        showBimSnackBar(context, '下载失败：$error', tone: BimNoticeTone.error);
       }
     } finally {
       if (mounted) {

@@ -24,7 +24,7 @@ import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
 class MainActivity : FlutterActivity() {
-    private val cacheSecurityChannelName = "bimotc.com/cache_security"
+    private val localVaultChannelName = "bimotc.com/local_vault"
     private val backgroundReceiveChannelName = "bimotc.com/background_receive"
     private val realtimeNotificationChannelName = "bimotc.com/realtime_notifications"
     private val keyboardContentChannelName = "bimotc.com/keyboard_content"
@@ -38,12 +38,12 @@ class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
-        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, cacheSecurityChannelName).setMethodCallHandler { call, result ->
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, localVaultChannelName).setMethodCallHandler { call, result ->
             when (call.method) {
                 "getCacheKey" -> runCatching {
-                    SecureCacheKeyStore(applicationContext).getOrCreateCacheKey()
+                    LocalVaultKeyStore(applicationContext).getOrCreateCacheKey()
                 }.onSuccess(result::success).onFailure {
-                    result.error("CACHE_KEY_ERROR", it.message, null)
+                    result.error("LOCAL_KEY_ERROR", it.message, null)
                 }
                 else -> result.notImplemented()
             }
@@ -201,16 +201,16 @@ class MainActivity : FlutterActivity() {
     }
 }
 
-private class SecureCacheKeyStore(private val context: Context) {
-    private val prefs = context.getSharedPreferences("bim_cache_state", Context.MODE_PRIVATE)
-    private val alias = "bim_cache_key_wrap_v1"
-    private val valueKey = "cache_key_cipher"
-    private val ivKey = "cache_key_iv"
+private class LocalVaultKeyStore(private val context: Context) {
+    private val prefs = context.getSharedPreferences("bim_local_state", Context.MODE_PRIVATE)
+    private val alias = "bim_local_key_wrap_v1"
+    private val valueKey = "local_key_body"
+    private val ivKey = "local_key_nonce"
     private val androidKeyStore = "AndroidKeyStore"
     private val transformation = "AES/GCM/NoPadding"
     private val keyAlphabet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
 
-    // MMKV only receives a short cryptKey at runtime; the persisted copy is wrapped by Android Keystore.
+    // MMKV only receives a short runtime key; the persisted copy is wrapped by Android Keystore.
     fun getOrCreateCacheKey(): String {
         val storedCipher = prefs.getString(valueKey, null)
         val storedIv = prefs.getString(ivKey, null)

@@ -47,7 +47,7 @@ class _AsyncListState extends State<_AsyncList> {
       future: _future,
       builder: (context, snapshot) {
         if (snapshot.connectionState != ConnectionState.done) {
-          return const Center(child: CircularProgressIndicator());
+          return const BimLoadingState();
         }
         if (snapshot.hasError) {
           return _ErrorState(text: snapshot.error.toString(), onRetry: _reload);
@@ -88,36 +88,29 @@ class _PlainListTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return DecoratedBox(
-      decoration: const BoxDecoration(
-        border: Border(bottom: BorderSide(color: _lightBorderColor)),
-      ),
-      child: ListTile(
-        leading: avatarUrl.isNotEmpty
-            ? _Avatar(label: title, imageUrl: avatarUrl, size: 38, icon: icon)
-            : icon == null
-            ? null
-            : Icon(icon, color: _mutedColor),
-        onTap: onTap,
-        onLongPress: onLongPress,
-        title: Text(
-          title,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: const TextStyle(fontWeight: FontWeight.w700),
-        ),
-        subtitle: subtitle.isEmpty
-            ? null
-            : Text(subtitle, maxLines: 1, overflow: TextOverflow.ellipsis),
-        trailing: trailing.isEmpty
-            ? null
-            : Text(
-                trailing,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(color: _mutedColor),
+    return BimListTile(
+      title: title,
+      subtitle: subtitle,
+      minHeight: BimDimensions.contactRow,
+      leading: avatarUrl.isNotEmpty
+          ? _Avatar(label: title, imageUrl: avatarUrl, size: 38, icon: icon)
+          : icon == null
+          ? null
+          : Icon(icon, color: _mutedColor),
+      trailing: trailing.isEmpty
+          ? null
+          : Text(
+              trailing,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: BimColors.mutedText,
+                fontSize: BimTypography.meta,
+                fontWeight: FontWeight.w500,
               ),
-      ),
+            ),
+      onTap: onTap,
+      onLongPress: onLongPress,
     );
   }
 }
@@ -130,40 +123,7 @@ class _SearchBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ColoredBox(
-      color: _surfaceColor,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(14, 8, 14, 10),
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(6),
-          child: Container(
-            height: 34,
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            decoration: BoxDecoration(
-              color: _fillColor,
-              borderRadius: BorderRadius.circular(6),
-            ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              mainAxisSize: MainAxisSize.max,
-              children: [
-                const Icon(Icons.search, color: _mutedColor, size: 17),
-                const SizedBox(width: 8),
-                Text(
-                  hintText,
-                  style: const TextStyle(
-                    color: _mutedColor,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
+    return BimSearchEntry(hintText: hintText, onTap: onTap);
   }
 }
 
@@ -195,7 +155,9 @@ class _ConversationTile extends StatelessWidget {
     return InkWell(
       onTap: onTap,
       onLongPress: onLongPress,
-      child: Container(
+      child: AnimatedContainer(
+        duration: BimMotion.fast,
+        curve: BimMotion.curve,
         constraints: const BoxConstraints(
           minHeight: BimDimensions.conversationRow,
         ),
@@ -566,74 +528,16 @@ class _SelectableContactTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      child: Container(
-        constraints: const BoxConstraints(minHeight: 58),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
-        decoration: const BoxDecoration(
-          color: _surfaceColor,
-          border: Border(bottom: BorderSide(color: _lightBorderColor)),
-        ),
-        child: Row(
-          children: [
-            _Avatar(
-              label: title,
-              imageUrl: avatarUrl,
-              size: 40,
-              color: _primaryColor,
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Text(
-                    title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: _textColor,
-                      fontSize: 15,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  if (subtitle.isNotEmpty)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 3),
-                      child: Text(
-                        subtitle,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: _mutedColor,
-                          fontSize: 12,
-                        ),
-                      ),
-                    ),
-                ],
-              ),
-            ),
-            AnimatedContainer(
-              duration: const Duration(milliseconds: 160),
-              curve: Curves.easeOutCubic,
-              width: 24,
-              height: 24,
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                color: selected ? _primaryColor : _surfaceColor,
-                border: Border.all(
-                  color: selected ? _primaryColor : _borderColor,
-                ),
-                shape: BoxShape.circle,
-              ),
-              child: selected
-                  ? const Icon(Icons.check, color: Colors.white, size: 16)
-                  : null,
-            ),
-          ],
-        ),
+    return BimSelectableTile(
+      title: title,
+      subtitle: subtitle,
+      selected: selected,
+      onChanged: (_) => onTap(),
+      leading: _Avatar(
+        label: title,
+        imageUrl: avatarUrl,
+        size: 40,
+        color: _primaryColor,
       ),
     );
   }
@@ -658,61 +562,13 @@ class _MenuTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
+    return BimIconTile(
+      icon: icon,
+      iconColor: iconColor,
+      title: title,
+      subtitle: subtitle,
+      trailing: trailing,
       onTap: onTap,
-      child: Container(
-        constraints: const BoxConstraints(minHeight: BimDimensions.menuRow),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        decoration: const BoxDecoration(
-          color: _surfaceColor,
-          border: Border(bottom: BorderSide(color: _lightBorderColor)),
-        ),
-        child: Row(
-          children: [
-            Container(
-              width: 32,
-              height: 32,
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                color: iconColor.withValues(alpha: 0.12),
-                borderRadius: BorderRadius.circular(7),
-              ),
-              child: Icon(icon, color: iconColor, size: 20),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    style: const TextStyle(
-                      color: _textColor,
-                      fontSize: 15,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  if (subtitle.isNotEmpty)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 3),
-                      child: Text(
-                        subtitle,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: _mutedColor,
-                          fontSize: 12,
-                        ),
-                      ),
-                    ),
-                ],
-              ),
-            ),
-            if (trailing != null) ...[const SizedBox(width: 8), trailing!],
-            const Icon(Icons.chevron_right, color: _mutedColor, size: 20),
-          ],
-        ),
-      ),
     );
   }
 }

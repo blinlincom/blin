@@ -25,7 +25,7 @@ class _SearchPageState extends State<SearchPage> {
     super.initState();
     _friends = widget.controller.hasLoadedFriends
         ? widget.controller.cachedFriends(allowDisk: false)
-        : const [];
+        : widget.controller.cachedFriends(allowDisk: true);
     _refreshLocal(showLoading: _friends.isEmpty);
   }
 
@@ -83,10 +83,10 @@ class _SearchPageState extends State<SearchPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('搜索')),
+      appBar: const BimTopBar(title: '搜索'),
       body: SafeArea(
         child: _loading && _friends.isEmpty
-            ? const Center(child: CircularProgressIndicator())
+            ? const BimLoadingState(label: '正在加载联系人')
             : _loadError != null && _friends.isEmpty
             ? _ErrorState(text: _loadError!, onRetry: () => _refreshLocal())
             : _buildSearchList(),
@@ -121,15 +121,16 @@ class _SearchPageState extends State<SearchPage> {
           padding: const EdgeInsets.symmetric(horizontal: 16),
           child: _ButtonRow(
             children: [
-              FilledButton.icon(
+              BimButton(
+                label: '搜索账号',
                 onPressed: _acting ? null : _searchRemoteFriends,
-                icon: const Icon(Icons.person_search_outlined),
-                label: const Text('搜索账号'),
+                icon: Icons.person_search_outlined,
               ),
-              OutlinedButton.icon(
+              BimButton(
+                label: '刷新本地',
                 onPressed: () => _refreshLocal(showLoading: false),
-                icon: const Icon(Icons.refresh),
-                label: const Text('刷新本地'),
+                icon: Icons.refresh,
+                kind: BimButtonKind.secondary,
               ),
             ],
           ),
@@ -245,7 +246,7 @@ class _RemoteFriendSearchBlock extends StatelessWidget {
         if (snapshot.connectionState != ConnectionState.done) {
           return const Padding(
             padding: EdgeInsets.all(16),
-            child: Center(child: CircularProgressIndicator()),
+            child: BimLoadingState(compact: true),
           );
         }
         if (snapshot.hasError) {

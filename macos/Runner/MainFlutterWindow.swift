@@ -2,7 +2,7 @@ import Cocoa
 import FlutterMacOS
 
 class MainFlutterWindow: NSWindow {
-  private let cacheSecurityChannel = "bimotc.com/cache_security"
+  private let localVaultChannel = "bimotc.com/local_vault"
 
   override func awakeFromNib() {
     let flutterViewController = FlutterViewController()
@@ -11,20 +11,20 @@ class MainFlutterWindow: NSWindow {
     self.setFrame(windowFrame, display: true)
 
     RegisterGeneratedPlugins(registry: flutterViewController)
-    registerCacheSecurityChannel(messenger: flutterViewController.engine.binaryMessenger)
+    registerLocalVaultChannel(messenger: flutterViewController.engine.binaryMessenger)
 
     super.awakeFromNib()
   }
 
-  private func registerCacheSecurityChannel(messenger: FlutterBinaryMessenger) {
-    let channel = FlutterMethodChannel(name: cacheSecurityChannel, binaryMessenger: messenger)
+  private func registerLocalVaultChannel(messenger: FlutterBinaryMessenger) {
+    let channel = FlutterMethodChannel(name: localVaultChannel, binaryMessenger: messenger)
     channel.setMethodCallHandler { call, result in
       switch call.method {
       case "getCacheKey":
         do {
-          result(try SecureCacheKeyStore.getOrCreateCacheKey())
+          result(try LocalVaultKeyStore.getOrCreateCacheKey())
         } catch {
-          result(FlutterError(code: "CACHE_KEY_ERROR", message: "\(error)", details: nil))
+          result(FlutterError(code: "LOCAL_KEY_ERROR", message: "\(error)", details: nil))
         }
       default:
         result(FlutterMethodNotImplemented)

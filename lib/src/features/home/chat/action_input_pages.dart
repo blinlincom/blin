@@ -21,34 +21,10 @@ class ActionInputField {
 }
 
 void _showChatSnack(BuildContext context, String text, {bool error = false}) {
-  ScaffoldMessenger.of(context).showSnackBar(
-    SnackBar(
-      behavior: SnackBarBehavior.floating,
-      margin: const EdgeInsets.fromLTRB(16, 0, 16, 20),
-      elevation: 0,
-      backgroundColor: error ? _dangerColor : const Color(0xff1f2329),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-      content: Row(
-        children: [
-          Icon(
-            error ? Icons.error_outline : Icons.check_circle_outline,
-            size: 18,
-            color: Colors.white,
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              text,
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 14,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ),
-        ],
-      ),
-    ),
+  showBimSnackBar(
+    context,
+    text,
+    tone: error ? BimNoticeTone.error : BimNoticeTone.success,
   );
 }
 
@@ -85,24 +61,7 @@ class _ActionInputPageState extends State<ActionInputPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: _pageColor,
-      appBar: AppBar(
-        title: Text(widget.title),
-        centerTitle: true,
-        toolbarHeight: 50,
-        elevation: 0,
-        scrolledUnderElevation: 0,
-        backgroundColor: _surfaceColor,
-        foregroundColor: _textColor,
-        titleTextStyle: const TextStyle(
-          color: _textColor,
-          fontSize: 17,
-          fontWeight: FontWeight.w700,
-        ),
-        bottom: const PreferredSize(
-          preferredSize: Size.fromHeight(1),
-          child: Divider(height: 1, color: _lightBorderColor),
-        ),
-      ),
+      appBar: BimTopBar(title: widget.title),
       body: SafeArea(
         child: Column(
           children: [

@@ -1,17 +1,18 @@
 import 'dart:io';
 import 'dart:math';
 
-import 'app_logger.dart';
 import 'package:flutter/services.dart';
 import 'package:mmkv/mmkv.dart';
 import 'package:path_provider/path_provider.dart';
 
-class SecureCache {
-  SecureCache._();
+import 'app_logger.dart';
+
+class LocalVault {
+  LocalVault._();
 
   static const _storeName = 'bim_store_v1';
-  static const _channel = MethodChannel('bimotc.com/cache_security');
-  static const _fallbackKeyFile = '.bim_cache_key';
+  static const _channel = MethodChannel('bimotc.com/local_vault');
+  static const _fallbackKeyFile = '.bim_local_key';
   static const _keyAlphabet =
       '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
 
@@ -31,13 +32,13 @@ class SecureCache {
     try {
       final key = await _channel.invokeMethod<String>('getCacheKey');
       if (key == null || key.isEmpty) {
-        throw StateError('Secure cache key is empty.');
+        throw StateError('Local vault key is empty.');
       }
       return key;
     } on MissingPluginException {
       AppLogger.info(
         'cache',
-        'secure cache native key channel unavailable, using local key file',
+        'local vault native key channel unavailable, using local key file',
       );
     }
 

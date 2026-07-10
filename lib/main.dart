@@ -8,7 +8,7 @@ import 'src/app/bim_app.dart';
 import 'src/app/session_controller.dart';
 import 'src/core/api_client.dart';
 import 'src/core/app_logger.dart';
-import 'src/core/secure_cache.dart';
+import 'src/core/local_vault.dart';
 import 'src/core/session_store.dart';
 import 'src/features/moments/moments_cache_store.dart';
 import 'src/im/business_im_service.dart';
@@ -60,7 +60,7 @@ Future<void> _initializeAndRun() async {
   try {
     await AppLogger.initialize().timeout(const Duration(seconds: 2));
     AppLogger.info('bootstrap', 'initialize start');
-    final kv = await SecureCache.initialize().timeout(
+    final kv = await LocalVault.initialize().timeout(
       const Duration(seconds: 5),
     );
     final store = SessionStore(kv);

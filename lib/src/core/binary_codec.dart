@@ -2,8 +2,8 @@ import 'dart:typed_data';
 
 import 'package:pointycastle/export.dart';
 
-class CryptoHelpers {
-  const CryptoHelpers._();
+class BinaryCodec {
+  const BinaryCodec._();
 
   static Uint8List aesCbcPkcs7Encrypt({
     required List<int> key,

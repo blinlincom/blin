@@ -12,7 +12,7 @@ class ConnectionInfoPage extends StatelessWidget {
       builder: (context, _) {
         final session = controller.session;
         return Scaffold(
-          appBar: AppBar(title: const Text('消息连接')),
+          appBar: const BimTopBar(title: '消息连接'),
           body: SafeArea(
             child: ListView(
               children: [
@@ -121,16 +121,12 @@ class ConnectionInfoPage extends StatelessWidget {
       if (!context.mounted) {
         return;
       }
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('聊天记录已清空')));
+      showBimSnackBar(context, '聊天记录已清空', tone: BimNoticeTone.success);
     } catch (error) {
       if (!context.mounted) {
         return;
       }
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(error.toString())));
+      showBimSnackBar(context, error.toString(), tone: BimNoticeTone.error);
     }
   }
 }
@@ -161,17 +157,17 @@ class _BackgroundReceiveProtectionPageState
         final controller = widget.controller;
         final status = controller.backgroundReceiveStatus;
         return Scaffold(
-          appBar: AppBar(title: const Text('消息接收保护')),
+          appBar: const BimTopBar(title: '消息接收保护'),
           body: SafeArea(
             child: ListView(
               children: [
-                SwitchListTile.adaptive(
+                BimSettingsSwitchTile(
                   value: controller.backgroundReceiveProtectionEnabled,
                   onChanged: (value) => unawaited(
                     controller.setBackgroundReceiveProtectionEnabled(value),
                   ),
-                  title: const Text('后台接收保护'),
-                  subtitle: const Text('开启后，Android 会通过前台服务尽量保持消息连接'),
+                  title: '后台接收保护',
+                  subtitle: '开启后，Android 会通过前台服务尽量保持消息连接',
                 ),
                 const _GroupGap(),
                 _ProtectionStatusTile(
@@ -227,15 +223,12 @@ class _BackgroundReceiveProtectionPageState
                   ),
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 18, 16, 0),
-                  child: SizedBox(
-                    height: 44,
-                    child: OutlinedButton.icon(
-                      onPressed: () => unawaited(
-                        controller.refreshBackgroundReceiveStatus(),
-                      ),
-                      icon: const Icon(Icons.refresh),
-                      label: const Text('重新检测'),
-                    ),
+                  child: BimButton(
+                    label: '重新检测',
+                    onPressed: () =>
+                        unawaited(controller.refreshBackgroundReceiveStatus()),
+                    icon: Icons.refresh,
+                    kind: BimButtonKind.secondary,
                   ),
                 ),
               ],
@@ -285,8 +278,8 @@ class DiagnosticsLogPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('诊断日志'),
+      appBar: BimTopBar(
+        title: '诊断日志',
         actions: [
           IconButton(
             tooltip: '复制',
@@ -361,9 +354,7 @@ class DiagnosticsLogPage extends StatelessWidget {
     final text = await AppLogger.exportText();
     await Clipboard.setData(ClipboardData(text: text));
     if (context.mounted) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('日志已复制')));
+      showBimSnackBar(context, '日志已复制', tone: BimNoticeTone.success);
     }
   }
 }

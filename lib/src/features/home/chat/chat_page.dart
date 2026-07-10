@@ -4558,8 +4558,8 @@ class _GroupCallInvitePickerPageState
   Widget build(BuildContext context) {
     final title = widget.mediaType == 'video' ? '选择视频通话成员' : '选择语音通话成员';
     return Scaffold(
-      appBar: AppBar(
-        title: Text(title),
+      appBar: BimTopBar(
+        title: title,
         actions: [
           TextButton(
             onPressed: _selectedInviteIds.isEmpty
@@ -4577,7 +4577,7 @@ class _GroupCallInvitePickerPageState
         future: _future,
         builder: (context, snapshot) {
           if (snapshot.connectionState != ConnectionState.done) {
-            return const Center(child: CircularProgressIndicator());
+            return const BimLoadingState(label: '正在加载群成员');
           }
           if (snapshot.hasError) {
             return _ErrorState(text: snapshot.error.toString());
@@ -4593,27 +4593,17 @@ class _GroupCallInvitePickerPageState
               final member = members[index];
               final userId = _memberUserId(member);
               final selected = _selectedIds.contains(userId);
-              return ListTile(
+              return BimSelectableTile(
+                title: _memberTitle(member),
+                subtitle: _memberSubtitle(member),
+                selected: selected,
+                control: BimSelectableControl.checkbox,
+                onChanged: (_) => _toggle(userId),
                 leading: _Avatar(
                   label: _memberTitle(member),
                   imageUrl: _avatarUrlFromMap(member),
                   size: 38,
                 ),
-                title: Text(
-                  _memberTitle(member),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                subtitle: Text(
-                  _memberSubtitle(member),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                trailing: Checkbox(
-                  value: selected,
-                  onChanged: (_) => _toggle(userId),
-                ),
-                onTap: () => _toggle(userId),
               );
             },
           );

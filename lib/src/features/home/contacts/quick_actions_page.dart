@@ -30,7 +30,7 @@ class QuickActionsPage extends StatelessWidget {
       ),
     ];
     return Scaffold(
-      appBar: AppBar(title: const Text('快捷操作')),
+      appBar: const BimTopBar(title: '快捷操作'),
       body: SafeArea(
         child: Padding(
           padding: const EdgeInsets.fromLTRB(18, 8, 18, 24),
@@ -114,8 +114,8 @@ class _MeetingInvitePickerPageState extends State<_MeetingInvitePickerPage> {
     final title = widget.mediaType == 'video' ? '选择视频会议成员' : '选择语音会议成员';
     final selected = _selectedIds.toList(growable: false);
     return Scaffold(
-      appBar: AppBar(
-        title: Text(title),
+      appBar: BimTopBar(
+        title: title,
         actions: [
           TextButton(
             onPressed: selected.isEmpty
@@ -130,7 +130,7 @@ class _MeetingInvitePickerPageState extends State<_MeetingInvitePickerPage> {
           future: _future,
           builder: (context, snapshot) {
             if (snapshot.connectionState != ConnectionState.done) {
-              return const Center(child: CircularProgressIndicator());
+              return const BimLoadingState(label: '正在加载好友');
             }
             if (snapshot.hasError) {
               return _ErrorState(text: snapshot.error.toString());

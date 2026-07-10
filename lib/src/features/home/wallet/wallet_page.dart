@@ -40,13 +40,7 @@ class _WalletPageState extends State<WalletPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: _pageColor,
-      appBar: AppBar(
-        title: const Text('钱包'),
-        backgroundColor: _surfaceColor,
-        foregroundColor: _textColor,
-        elevation: 0,
-        surfaceTintColor: Colors.transparent,
-      ),
+      appBar: const BimTopBar(title: '钱包'),
       body: SafeArea(
         child: FutureBuilder<WalletBalance>(
           future: _request,
@@ -587,12 +581,8 @@ class _WalletPayReceivePageState extends State<WalletPayReceivePage> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: _pageColor,
-      appBar: AppBar(
-        title: const Text('收付款'),
-        backgroundColor: _surfaceColor,
-        foregroundColor: _textColor,
-        elevation: 0,
-        surfaceTintColor: Colors.transparent,
+      appBar: BimTopBar(
+        title: '收付款',
         actions: [
           IconButton(
             tooltip: '刷新',
@@ -746,12 +736,8 @@ class _WalletCollectCodePageState extends State<WalletCollectCodePage> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: _pageColor,
-      appBar: AppBar(
-        title: const Text('收款码'),
-        backgroundColor: _surfaceColor,
-        foregroundColor: _textColor,
-        elevation: 0,
-        surfaceTintColor: Colors.transparent,
+      appBar: BimTopBar(
+        title: '收款码',
         actions: [
           IconButton(
             tooltip: '刷新',
@@ -903,12 +889,8 @@ class _WalletPayCodePageState extends State<WalletPayCodePage> {
     final order = _order;
     return Scaffold(
       backgroundColor: _pageColor,
-      appBar: AppBar(
-        title: const Text('付款码'),
-        backgroundColor: _surfaceColor,
-        foregroundColor: _textColor,
-        elevation: 0,
-        surfaceTintColor: Colors.transparent,
+      appBar: BimTopBar(
+        title: '付款码',
         actions: [
           if (order != null)
             IconButton(
@@ -1033,13 +1015,7 @@ class _WalletPayConfirmPageState extends State<WalletPayConfirmPage> {
     final targetAvatar = isPayCode ? order.payerAvatar : order.payeeAvatar;
     return Scaffold(
       backgroundColor: _pageColor,
-      appBar: AppBar(
-        title: Text(isPayCode ? '发起收款' : '确认付款'),
-        backgroundColor: _surfaceColor,
-        foregroundColor: _textColor,
-        elevation: 0,
-        surfaceTintColor: Colors.transparent,
-      ),
+      appBar: BimTopBar(title: isPayCode ? '发起收款' : '确认付款'),
       body: SafeArea(
         child: ListView(
           padding: const EdgeInsets.fromLTRB(20, 24, 20, 32),
@@ -2173,13 +2149,7 @@ class _WalletBillsPageState extends State<WalletBillsPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: _pageColor,
-      appBar: AppBar(
-        title: const Text('账单'),
-        backgroundColor: _surfaceColor,
-        foregroundColor: _textColor,
-        elevation: 0,
-        surfaceTintColor: Colors.transparent,
-      ),
+      appBar: const BimTopBar(title: '账单'),
       body: SafeArea(
         child: Column(
           children: [
@@ -2191,15 +2161,10 @@ class _WalletBillsPageState extends State<WalletBillsPage> {
                   final list = snapshot.data ?? const <WalletBill>[];
                   if (snapshot.connectionState == ConnectionState.waiting &&
                       list.isEmpty) {
-                    return const Center(child: CircularProgressIndicator());
+                    return const BimLoadingState(label: '正在加载账单');
                   }
                   if (list.isEmpty) {
-                    return const Center(
-                      child: Text(
-                        '暂无账单',
-                        style: TextStyle(color: _mutedColor, fontSize: 14),
-                      ),
-                    );
+                    return const BimEmptyState(title: '暂无账单');
                   }
                   return ListView.separated(
                     itemCount: list.length,
@@ -2208,37 +2173,22 @@ class _WalletBillsPageState extends State<WalletBillsPage> {
                     itemBuilder: (context, index) {
                       final item = list[index];
                       final income = item.direction == 'income';
-                      return ListTile(
-                        tileColor: _surfaceColor,
+                      return BimListTile(
+                        minHeight: 64,
+                        showDivider: false,
                         leading: _WalletBillIcon(
                           income: income,
                           scene: item.scene,
                         ),
-                        title: Text(
-                          item.targetName.isNotEmpty
-                              ? item.targetName
-                              : (item.sceneName.isEmpty
-                                    ? '余额变动'
-                                    : item.sceneName),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            color: _textColor,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        subtitle: Text(
-                          [
-                            if (item.sceneName.isNotEmpty) item.sceneName,
-                            if (item.time.isNotEmpty) item.time,
-                          ].join('  '),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            color: _mutedColor,
-                            fontSize: 12,
-                          ),
-                        ),
+                        title: item.targetName.isNotEmpty
+                            ? item.targetName
+                            : (item.sceneName.isEmpty
+                                  ? '余额变动'
+                                  : item.sceneName),
+                        subtitle: [
+                          if (item.sceneName.isNotEmpty) item.sceneName,
+                          if (item.time.isNotEmpty) item.time,
+                        ].join('  '),
                         trailing: Text(
                           item.amountLabel,
                           style: TextStyle(
@@ -2297,13 +2247,7 @@ class _WalletBillDetailPageState extends State<WalletBillDetailPage> {
     final initial = widget.bill;
     return Scaffold(
       backgroundColor: _pageColor,
-      appBar: AppBar(
-        title: const Text('账单详情'),
-        backgroundColor: _surfaceColor,
-        foregroundColor: _textColor,
-        elevation: 0,
-        surfaceTintColor: Colors.transparent,
-      ),
+      appBar: const BimTopBar(title: '账单详情'),
       body: SafeArea(
         child: FutureBuilder<WalletBill>(
           future: _request,
@@ -2401,13 +2345,7 @@ class WalletWithdrawRecordsPage extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: _pageColor,
-      appBar: AppBar(
-        title: const Text('提现记录'),
-        backgroundColor: _surfaceColor,
-        foregroundColor: _textColor,
-        elevation: 0,
-        surfaceTintColor: Colors.transparent,
-      ),
+      appBar: const BimTopBar(title: '提现记录'),
       body: SafeArea(
         child: FutureBuilder<List<WalletWithdrawRecord>>(
           future: controller.loadWalletWithdrawRecords(limit: 50),
@@ -2415,15 +2353,10 @@ class WalletWithdrawRecordsPage extends StatelessWidget {
             final list = snapshot.data ?? const <WalletWithdrawRecord>[];
             if (snapshot.connectionState == ConnectionState.waiting &&
                 list.isEmpty) {
-              return const Center(child: CircularProgressIndicator());
+              return const BimLoadingState(label: '正在加载提现记录');
             }
             if (list.isEmpty) {
-              return const Center(
-                child: Text(
-                  '暂无提现记录',
-                  style: TextStyle(color: _mutedColor, fontSize: 14),
-                ),
-              );
+              return const BimEmptyState(title: '暂无提现记录');
             }
             return ListView.separated(
               itemCount: list.length,
@@ -2431,11 +2364,19 @@ class WalletWithdrawRecordsPage extends StatelessWidget {
                   const Divider(height: 1, color: _lightBorderColor),
               itemBuilder: (context, index) {
                 final item = list[index];
-                return ListTile(
-                  tileColor: _surfaceColor,
-                  title: Text('¥${item.amount}'),
-                  subtitle: Text(item.createTime),
-                  trailing: Text(item.statusName),
+                return BimListTile(
+                  minHeight: 60,
+                  showDivider: false,
+                  title: '¥${item.amount}',
+                  subtitle: item.createTime,
+                  trailing: Text(
+                    item.statusName,
+                    style: const TextStyle(
+                      color: BimColors.secondaryText,
+                      fontSize: BimTypography.meta,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
                 );
               },
             );
@@ -2456,13 +2397,7 @@ class _WalletFormScaffold extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: _pageColor,
-      appBar: AppBar(
-        title: Text(title),
-        backgroundColor: _surfaceColor,
-        foregroundColor: _textColor,
-        elevation: 0,
-        surfaceTintColor: Colors.transparent,
-      ),
+      appBar: BimTopBar(title: title),
       body: SafeArea(
         child: ListView(
           padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
@@ -2540,25 +2475,11 @@ class _WalletCodeSendField extends StatelessWidget {
           keyboardType: TextInputType.number,
         ),
         const SizedBox(height: 8),
-        SizedBox(
-          height: 48,
-          child: OutlinedButton.icon(
-            onPressed: onPressed,
-            icon: const Icon(Icons.verified_outlined, size: 18),
-            label: Text(buttonText),
-            style: OutlinedButton.styleFrom(
-              foregroundColor: _primaryColor,
-              disabledForegroundColor: _mutedColor,
-              side: const BorderSide(color: _primaryColor),
-              textStyle: const TextStyle(
-                fontSize: 15,
-                fontWeight: FontWeight.w700,
-              ),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(BimRadius.sm),
-              ),
-            ),
-          ),
+        BimButton(
+          label: buttonText,
+          onPressed: onPressed,
+          icon: Icons.verified_outlined,
+          kind: BimButtonKind.secondary,
         ),
       ],
     );
@@ -2944,35 +2865,20 @@ class _WalletSceneTabs extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     const tabs = [
-      ('all', '全部'),
-      ('income', '收入'),
-      ('expense', '支出'),
-      ('charge', '充值'),
-      ('withdraw', '提现'),
-      ('im', '红包转账'),
-      ('scan', '扫码'),
+      BimSegmentOption(value: 'all', label: '全部'),
+      BimSegmentOption(value: 'income', label: '收入'),
+      BimSegmentOption(value: 'expense', label: '支出'),
+      BimSegmentOption(value: 'charge', label: '充值'),
+      BimSegmentOption(value: 'withdraw', label: '提现'),
+      BimSegmentOption(value: 'im', label: '红包转账'),
+      BimSegmentOption(value: 'scan', label: '扫码'),
     ];
-    return ColoredBox(
-      color: _surfaceColor,
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        child: Row(
-          children: tabs
-              .map((tab) {
-                final selected = value == tab.$1;
-                return Padding(
-                  padding: const EdgeInsets.only(right: 8),
-                  child: ChoiceChip(
-                    label: Text(tab.$2),
-                    selected: selected,
-                    onSelected: (_) => onChanged(tab.$1),
-                  ),
-                );
-              })
-              .toList(growable: false),
-        ),
-      ),
+    return BimSegmentedControl<String>(
+      options: tabs,
+      selected: value,
+      onChanged: onChanged,
+      scrollable: true,
+      height: 38,
     );
   }
 }
@@ -3065,9 +2971,7 @@ Future<void> _showWalletFreezeDetails(
 
 void _showWalletMessage(BuildContext context, String text) {
   final message = text.replaceFirst('Exception: ', '');
-  ScaffoldMessenger.of(context)
-    ..hideCurrentSnackBar()
-    ..showSnackBar(SnackBar(content: Text(message)));
+  showBimSnackBar(context, message);
 }
 
 String _walletInlineError(Object error) {

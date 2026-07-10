@@ -67,24 +67,7 @@ class _ContactCardPickerPageState extends State<_ContactCardPickerPage> {
     final filteredFriends = _filteredFriends();
     return Scaffold(
       backgroundColor: _pageColor,
-      appBar: AppBar(
-        title: const Text('选择名片'),
-        centerTitle: true,
-        toolbarHeight: BimDimensions.appBar,
-        elevation: 0,
-        scrolledUnderElevation: 0,
-        backgroundColor: _surfaceColor,
-        foregroundColor: _textColor,
-        titleTextStyle: const TextStyle(
-          color: _textColor,
-          fontSize: 17,
-          fontWeight: FontWeight.w800,
-        ),
-        bottom: const PreferredSize(
-          preferredSize: Size.fromHeight(1),
-          child: Divider(height: 1, color: _lightBorderColor),
-        ),
-      ),
+      appBar: const BimTopBar(title: '选择名片'),
       body: SafeArea(
         child: RefreshIndicator(
           onRefresh: () => _loadFriends(showLoading: false),
@@ -128,10 +111,7 @@ class _ContactCardPickerPageState extends State<_ContactCardPickerPage> {
                 ),
               ),
               if (_loading && _friends.isEmpty)
-                const SizedBox(
-                  height: 180,
-                  child: Center(child: CircularProgressIndicator()),
-                )
+                const SizedBox(height: 180, child: BimLoadingState())
               else if (_error.isNotEmpty && _friends.isEmpty)
                 SizedBox(
                   height: 200,

@@ -1,9 +1,9 @@
 import Foundation
 import Security
 
-enum SecureCacheKeyStore {
-  private static let service = "bimotc.com.cache"
-  private static let account = "mmkv_crypt_key_v1"
+enum LocalVaultKeyStore {
+  private static let service = "bimotc.com.local"
+  private static let account = "local_vault_key_v1"
   private static let alphabet = Array("0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz")
 
   static func getOrCreateCacheKey() throws -> String {

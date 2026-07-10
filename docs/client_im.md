@@ -54,7 +54,7 @@ flutter run \
 
 ## 签名规则
 
-客户端新版 `im_*` 请求统一使用 `ApiSigner`：
+客户端新版 `im_*` 请求统一使用请求签章器：
 
 - 参数包含 `appid`、业务参数、`usertoken`、`device`、`device_flag`、`device_level`、`timestamp`、`nonce`。
 - 排除 `sign`、`callback`、`action` 和空值。

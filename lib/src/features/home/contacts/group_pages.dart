@@ -43,8 +43,8 @@ class _CreateGroupPageState extends State<CreateGroupPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: _pageColor,
-      appBar: AppBar(
-        title: const Text('发起群聊'),
+      appBar: BimTopBar(
+        title: '发起群聊',
         actions: [
           TextButton(
             onPressed: _loading ? null : _create,
@@ -105,7 +105,7 @@ class _CreateGroupPageState extends State<CreateGroupPage> {
                 if (snapshot.connectionState != ConnectionState.done) {
                   return const Padding(
                     padding: EdgeInsets.all(20),
-                    child: Center(child: CircularProgressIndicator()),
+                    child: BimLoadingState(compact: true),
                   );
                 }
                 if (snapshot.hasError) {
@@ -226,8 +226,8 @@ class _GroupDetailPageState extends State<GroupDetailPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: _pageColor,
-      appBar: AppBar(
-        title: Text('聊天信息${_groupCountTitleSuffix()}'),
+      appBar: BimTopBar(
+        title: '聊天信息${_groupCountTitleSuffix()}',
         actions: [
           IconButton(
             tooltip: '查找聊天记录',
@@ -524,7 +524,7 @@ class _GroupProfilePageState extends State<GroupProfilePage> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: _pageColor,
-      appBar: AppBar(title: const Text('群聊资料')),
+      appBar: const BimTopBar(title: '群聊资料'),
       body: SafeArea(
         child: ListView(
           padding: const EdgeInsets.only(bottom: 24),
@@ -649,14 +649,14 @@ class _GroupMemberListPageState extends State<GroupMemberListPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: _pageColor,
-      appBar: AppBar(title: const Text('群成员')),
+      appBar: const BimTopBar(title: '群成员'),
       body: SafeArea(
         child: FutureBuilder<Map<String, Object?>>(
           key: ValueKey(_version),
           future: widget.controller.groupMembers(widget.groupId),
           builder: (context, snapshot) {
             if (snapshot.connectionState != ConnectionState.done) {
-              return const Center(child: CircularProgressIndicator());
+              return const BimLoadingState(label: '正在加载群成员');
             }
             if (snapshot.hasError) {
               return _ErrorState(text: snapshot.error.toString());
@@ -887,34 +887,7 @@ class _GroupSettingsNavTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ColoredBox(
-      color: _surfaceColor,
-      child: InkWell(
-        onTap: onTap,
-        child: Container(
-          constraints: const BoxConstraints(minHeight: 62),
-          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 17),
-          decoration: const BoxDecoration(
-            border: Border(bottom: BorderSide(color: _lightBorderColor)),
-          ),
-          child: Row(
-            children: [
-              Expanded(
-                child: Text(
-                  title,
-                  style: const TextStyle(
-                    color: _textColor,
-                    fontSize: 17,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ),
-              const Icon(Icons.chevron_right, color: _mutedColor, size: 24),
-            ],
-          ),
-        ),
-      ),
-    );
+    return BimSettingsTile(title: title, onTap: onTap, minHeight: 62);
   }
 }
 
@@ -931,47 +904,12 @@ class _GroupSettingsInfoTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ColoredBox(
-      color: _surfaceColor,
-      child: InkWell(
-        onTap: onTap,
-        child: Container(
-          constraints: const BoxConstraints(minHeight: 62),
-          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 17),
-          decoration: const BoxDecoration(
-            border: Border(bottom: BorderSide(color: _lightBorderColor)),
-          ),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                title,
-                style: const TextStyle(
-                  color: _textColor,
-                  fontSize: 17,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Text(
-                  value,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  textAlign: TextAlign.right,
-                  style: const TextStyle(
-                    color: _secondaryTextColor,
-                    fontSize: 16,
-                    height: 1.35,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 4),
-              const Icon(Icons.chevron_right, color: _mutedColor, size: 24),
-            ],
-          ),
-        ),
-      ),
+    return BimSettingsTile(
+      title: title,
+      value: value,
+      onTap: onTap,
+      valueMaxLines: 2,
+      minHeight: 62,
     );
   }
 }
@@ -989,27 +927,10 @@ class _GroupSettingsSwitchTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ColoredBox(
-      color: _surfaceColor,
-      child: DecoratedBox(
-        decoration: const BoxDecoration(
-          border: Border(bottom: BorderSide(color: _lightBorderColor)),
-        ),
-        child: SwitchListTile.adaptive(
-          value: value,
-          onChanged: onChanged,
-          title: Text(
-            title,
-            style: const TextStyle(
-              color: _textColor,
-              fontSize: 17,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-          activeThumbColor: _primaryColor,
-          contentPadding: const EdgeInsets.symmetric(horizontal: 18),
-        ),
-      ),
+    return BimSettingsSwitchTile(
+      title: title,
+      value: value,
+      onChanged: onChanged,
     );
   }
 }
@@ -1022,27 +943,12 @@ class _GroupSettingsDangerTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ColoredBox(
-      color: _surfaceColor,
-      child: InkWell(
-        onTap: onTap,
-        child: Container(
-          constraints: const BoxConstraints(minHeight: 62),
-          alignment: Alignment.centerLeft,
-          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 17),
-          decoration: const BoxDecoration(
-            border: Border(bottom: BorderSide(color: _lightBorderColor)),
-          ),
-          child: Text(
-            title,
-            style: const TextStyle(
-              color: _dangerColor,
-              fontSize: 17,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-        ),
-      ),
+    return BimSettingsTile(
+      title: title,
+      onTap: onTap,
+      tone: BimSettingsTileTone.danger,
+      showChevron: false,
+      minHeight: 62,
     );
   }
 }
@@ -1121,10 +1027,10 @@ class _MyGroupsPageState extends State<MyGroupsPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('我的群聊')),
+      appBar: const BimTopBar(title: '我的群聊'),
       body: SafeArea(
         child: _loading && _groups.isEmpty
-            ? const Center(child: CircularProgressIndicator())
+            ? const BimLoadingState(label: '正在加载群聊')
             : _error != null && _groups.isEmpty
             ? _ErrorState(text: _error!, onRetry: () => _refresh())
             : RefreshIndicator(
@@ -1185,7 +1091,7 @@ class _GroupMemberActionPageState extends State<GroupMemberActionPage> {
   Widget build(BuildContext context) {
     final memberId = _memberUserId(widget.member);
     return Scaffold(
-      appBar: AppBar(title: Text(_memberTitle(widget.member))),
+      appBar: BimTopBar(title: _memberTitle(widget.member)),
       body: SafeArea(
         child: ListView(
           children: [

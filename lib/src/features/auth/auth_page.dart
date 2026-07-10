@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import '../../app/session_controller.dart';
 import '../../core/design_tokens.dart';
 import '../../core/models.dart';
+import '../../ui/bim_ui.dart';
 
 const _authBlue = BimColors.primary;
 const _authPage = BimColors.background;
@@ -753,9 +754,7 @@ class _AuthPageState extends State<AuthPage> {
     if (!mounted) {
       return;
     }
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(message)));
+    showBimSnackBar(context, message);
   }
 
   String _randomRegisterUsername() {
@@ -921,11 +920,11 @@ class _LoginModeTabs extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return _SegmentedTabs<_LoginMode>(
+    return BimSegmentedControl<_LoginMode>(
       selected: selected,
       options: const [
-        _SegmentOption(value: _LoginMode.password, label: '密码登录'),
-        _SegmentOption(value: _LoginMode.mobile, label: '验证码登录'),
+        BimSegmentOption(value: _LoginMode.password, label: '密码登录'),
+        BimSegmentOption(value: _LoginMode.mobile, label: '验证码登录'),
       ],
       onChanged: onChanged,
     );
@@ -945,11 +944,11 @@ class _RegisterModeTabs extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return _SegmentedTabs<_RegisterMode>(
+    return BimSegmentedControl<_RegisterMode>(
       selected: selected,
       options: [
         for (final mode in modes)
-          _SegmentOption(value: mode, label: _registerModeLabel(mode)),
+          BimSegmentOption(value: mode, label: _registerModeLabel(mode)),
       ],
       onChanged: onChanged,
     );
@@ -961,91 +960,6 @@ class _RegisterModeTabs extends StatelessWidget {
       _RegisterMode.mobile => '手机号注册',
       _RegisterMode.email => '邮箱注册',
     };
-  }
-}
-
-class _SegmentOption<T> {
-  const _SegmentOption({required this.value, required this.label});
-
-  final T value;
-  final String label;
-}
-
-class _SegmentedTabs<T> extends StatelessWidget {
-  const _SegmentedTabs({
-    required this.options,
-    required this.selected,
-    required this.onChanged,
-  });
-
-  final List<_SegmentOption<T>> options;
-  final T selected;
-  final ValueChanged<T> onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: BimColors.fill,
-        borderRadius: BorderRadius.circular(BimRadius.md),
-      ),
-      child: Row(
-        children: [
-          for (final option in options)
-            Expanded(
-              child: _SegmentButton<T>(
-                option: option,
-                selected: option.value == selected,
-                onChanged: onChanged,
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-}
-
-class _SegmentButton<T> extends StatelessWidget {
-  const _SegmentButton({
-    required this.option,
-    required this.selected,
-    required this.onChanged,
-  });
-
-  final _SegmentOption<T> option;
-  final bool selected;
-  final ValueChanged<T> onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    return Semantics(
-      button: true,
-      selected: selected,
-      child: InkWell(
-        onTap: () => onChanged(option.value),
-        borderRadius: BorderRadius.circular(BimRadius.md),
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 160),
-          height: BimDimensions.touchTarget,
-          alignment: Alignment.center,
-          margin: const EdgeInsets.all(3),
-          decoration: BoxDecoration(
-            color: selected ? _authSurface : Colors.transparent,
-            borderRadius: BorderRadius.circular(BimRadius.sm),
-          ),
-          child: Text(
-            option.label,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              color: selected ? _authBlue : _authMuted,
-              fontSize: 14,
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-        ),
-      ),
-    );
   }
 }
 
@@ -1413,16 +1327,7 @@ class _Notice extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(
-        color: const Color(0xfffff2f2),
-        border: Border.all(color: const Color(0xffffd6d6)),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Text(text, style: const TextStyle(color: _authDanger)),
-    );
+    return BimNoticeBanner(text: text, tone: BimNoticeTone.error);
   }
 }
 

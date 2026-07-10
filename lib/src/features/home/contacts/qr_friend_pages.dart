@@ -183,8 +183,8 @@ class _MyFriendQrPageState extends State<MyFriendQrPage> {
     final qrSize = min(MediaQuery.sizeOf(context).width - 96, 280.0);
     return Scaffold(
       backgroundColor: _pageColor,
-      appBar: AppBar(
-        title: const Text('我的二维码'),
+      appBar: BimTopBar(
+        title: '我的二维码',
         actions: [
           IconButton(
             tooltip: '换二维码',
@@ -622,13 +622,13 @@ class _FriendQrResultPageState extends State<FriendQrResultPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: _pageColor,
-      appBar: AppBar(title: const Text('添加好友')),
+      appBar: const BimTopBar(title: '添加好友'),
       body: SafeArea(
         child: FutureBuilder<Map<String, Object?>>(
           future: _future,
           builder: (context, snapshot) {
             if (snapshot.connectionState != ConnectionState.done) {
-              return const Center(child: CircularProgressIndicator());
+              return const BimLoadingState(label: '正在查找用户');
             }
             if (snapshot.hasError) {
               return _ErrorState(
@@ -797,7 +797,7 @@ class _UnknownQrResultPage extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: _pageColor,
-      appBar: AppBar(title: const Text('二维码内容')),
+      appBar: const BimTopBar(title: '二维码内容'),
       body: SafeArea(
         child: ListView(
           padding: const EdgeInsets.fromLTRB(18, 20, 18, 32),
@@ -839,13 +839,10 @@ class _UnknownQrResultPage extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 18),
-            SizedBox(
-              height: 48,
-              child: FilledButton.icon(
-                onPressed: () => _copy(context),
-                icon: const Icon(Icons.copy, size: 18),
-                label: const Text('复制内容'),
-              ),
+            BimButton(
+              label: '复制内容',
+              onPressed: () => _copy(context),
+              icon: Icons.copy,
             ),
           ],
         ),

@@ -2,11 +2,10 @@ import 'dart:async';
 
 import 'package:app_links/app_links.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import '../core/app_config.dart';
 import '../core/app_logger.dart';
-import '../core/design_tokens.dart';
+import '../design/theme.dart';
 import '../features/auth/auth_page.dart';
 import '../features/home/home_page.dart';
 import 'realtime_event_coordinator.dart';
@@ -76,7 +75,7 @@ class _BimAppState extends State<BimApp> with WidgetsBindingObserver {
           navigatorKey: _navigatorKey,
           title: AppConfig.appName,
           debugShowCheckedModeBanner: false,
-          theme: _theme(),
+          theme: BimTheme.light(),
           builder: (context, child) {
             return CallOverlayHost(
               key: _callOverlayKey,
@@ -164,112 +163,6 @@ class _BimAppState extends State<BimApp> with WidgetsBindingObserver {
       MaterialPageRoute<void>(
         builder: (_) =>
             FriendQrResultPage(controller: widget.controller, target: target),
-      ),
-    );
-  }
-
-  ThemeData _theme() {
-    const black = BimColors.textDark;
-    const blue = BimColors.primary;
-    const border = BimColors.border;
-    const fill = BimColors.fill;
-    return ThemeData(
-      useMaterial3: true,
-      colorScheme: ColorScheme.fromSeed(
-        seedColor: blue,
-        brightness: Brightness.light,
-        primary: blue,
-        surface: Colors.white,
-      ),
-      scaffoldBackgroundColor: BimColors.background,
-      visualDensity: VisualDensity.standard,
-      appBarTheme: const AppBarTheme(
-        elevation: 0,
-        scrolledUnderElevation: 0,
-        backgroundColor: Colors.white,
-        foregroundColor: black,
-        centerTitle: true,
-        systemOverlayStyle: SystemUiOverlayStyle(
-          statusBarColor: Colors.transparent,
-          statusBarIconBrightness: Brightness.dark,
-          statusBarBrightness: Brightness.light,
-          systemNavigationBarColor: BimColors.surface,
-          systemNavigationBarIconBrightness: Brightness.dark,
-        ),
-        titleTextStyle: TextStyle(
-          color: black,
-          fontSize: BimTypography.title,
-          fontWeight: FontWeight.w700,
-        ),
-      ),
-      inputDecorationTheme: const InputDecorationTheme(
-        filled: true,
-        fillColor: fill,
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.all(Radius.circular(BimRadius.sm)),
-          borderSide: BorderSide(color: border),
-        ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.all(Radius.circular(BimRadius.sm)),
-          borderSide: BorderSide(color: border),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.all(Radius.circular(BimRadius.sm)),
-          borderSide: BorderSide(color: blue, width: 1.4),
-        ),
-        errorBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.all(Radius.circular(BimRadius.sm)),
-          borderSide: BorderSide(color: BimColors.danger),
-        ),
-        contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 14),
-      ),
-      filledButtonTheme: FilledButtonThemeData(
-        style: FilledButton.styleFrom(
-          elevation: 0,
-          shape: const RoundedRectangleBorder(
-            borderRadius: BorderRadius.all(Radius.circular(BimRadius.sm)),
-          ),
-          minimumSize: const Size.fromHeight(48),
-          textStyle: const TextStyle(
-            fontSize: BimTypography.body,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-      ),
-      outlinedButtonTheme: OutlinedButtonThemeData(
-        style: OutlinedButton.styleFrom(
-          elevation: 0,
-          shape: const RoundedRectangleBorder(
-            borderRadius: BorderRadius.all(Radius.circular(BimRadius.sm)),
-          ),
-          minimumSize: const Size.fromHeight(BimDimensions.touchTarget),
-          side: const BorderSide(color: border),
-        ),
-      ),
-      textButtonTheme: TextButtonThemeData(
-        style: TextButton.styleFrom(
-          shape: const RoundedRectangleBorder(
-            borderRadius: BorderRadius.all(Radius.circular(BimRadius.sm)),
-          ),
-          foregroundColor: blue,
-        ),
-      ),
-      dividerTheme: const DividerThemeData(
-        color: border,
-        thickness: 1,
-        space: 1,
-      ),
-      bottomNavigationBarTheme: const BottomNavigationBarThemeData(
-        elevation: 0,
-        type: BottomNavigationBarType.fixed,
-        backgroundColor: Colors.white,
-        selectedItemColor: blue,
-        unselectedItemColor: BimColors.secondaryText,
-      ),
-      snackBarTheme: const SnackBarThemeData(
-        elevation: 0,
-        behavior: SnackBarBehavior.fixed,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.zero),
       ),
     );
   }

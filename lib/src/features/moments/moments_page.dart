@@ -12,6 +12,7 @@ import '../../core/app_config.dart';
 import '../../core/app_logger.dart';
 import '../../core/design_tokens.dart';
 import '../../core/models.dart';
+import '../../ui/bim_ui.dart';
 
 const _momentsPageColor = Color(0xfff5f6f8);
 const _momentsSurface = Color(0xffffffff);
@@ -681,13 +682,8 @@ class _MomentComposerPageState extends State<MomentComposerPage> {
       child: Scaffold(
         resizeToAvoidBottomInset: true,
         backgroundColor: _momentsSurface,
-        appBar: AppBar(
-          title: const Text('发表朋友圈'),
-          centerTitle: true,
-          elevation: 0,
-          scrolledUnderElevation: 0,
-          backgroundColor: _momentsSurface,
-          foregroundColor: _momentsText,
+        appBar: BimTopBar(
+          title: '发表朋友圈',
           actions: [
             TextButton(
               onPressed: _canPublish ? _publish : null,
@@ -1900,13 +1896,8 @@ class _MomentMediaPickerPageState extends State<_MomentMediaPickerPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: _momentsSurface,
-      appBar: AppBar(
-        title: Text(_isVideo ? '选择视频' : '选择图片'),
-        centerTitle: true,
-        elevation: 0,
-        scrolledUnderElevation: 0,
-        backgroundColor: _momentsSurface,
-        foregroundColor: _momentsText,
+      appBar: BimTopBar(
+        title: _isVideo ? '选择视频' : '选择图片',
         actions: [
           TextButton(
             onPressed: _selected == null || _selecting ? null : _confirm,
@@ -1922,7 +1913,7 @@ class _MomentMediaPickerPageState extends State<_MomentMediaPickerPage> {
       ),
       body: SafeArea(
         child: _loading
-            ? const Center(child: CircularProgressIndicator(strokeWidth: 2))
+            ? const BimLoadingState(label: '正在加载媒体')
             : _error.isNotEmpty
             ? _MomentErrorState(error: _error, onRetry: _load)
             : _assets.isEmpty
@@ -2228,22 +2219,12 @@ class _MomentErrorState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              error,
-              textAlign: TextAlign.center,
-              style: const TextStyle(color: _momentsSecondary, fontSize: 14),
-            ),
-            const SizedBox(height: 14),
-            OutlinedButton(onPressed: onRetry, child: const Text('重试')),
-          ],
-        ),
-      ),
+    return BimEmptyState(
+      title: '加载失败',
+      message: error,
+      icon: Icons.refresh,
+      actionLabel: '重试',
+      onAction: onRetry,
     );
   }
 }
@@ -2498,14 +2479,10 @@ void _showMomentMessage(
   String text, {
   bool error = false,
 }) {
-  final messenger = ScaffoldMessenger.of(context);
-  messenger.hideCurrentSnackBar();
-  messenger.showSnackBar(
-    SnackBar(
-      content: Text(text),
-      backgroundColor: error ? const Color(0xffb42318) : null,
-      duration: const Duration(seconds: 2),
-    ),
+  showBimSnackBar(
+    context,
+    text,
+    tone: error ? BimNoticeTone.error : BimNoticeTone.success,
   );
 }
 

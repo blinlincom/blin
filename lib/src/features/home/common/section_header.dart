@@ -18,26 +18,10 @@ class _ResultBlock extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (text.isEmpty) {
-      return const SizedBox.shrink();
-    }
-    return Container(
-      width: double.infinity,
-      margin: const EdgeInsets.only(top: 12),
-      padding: const EdgeInsets.all(12),
-      decoration: const BoxDecoration(
-        color: Color(0xffedf8f1),
-        border: Border(left: BorderSide(color: _chatAckColor, width: 3)),
-      ),
-      child: Text(
-        text,
-        style: const TextStyle(
-          color: Color(0xff1f7a3d),
-          fontSize: 13,
-          height: 1.35,
-          fontWeight: FontWeight.w600,
-        ),
-      ),
+    return BimNoticeBanner(
+      text: text,
+      tone: BimNoticeTone.success,
+      margin: const EdgeInsets.only(top: BimSpacing.x3),
     );
   }
 }
@@ -49,26 +33,10 @@ class _ErrorBlock extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (text.isEmpty) {
-      return const SizedBox.shrink();
-    }
-    return Container(
-      width: double.infinity,
-      margin: const EdgeInsets.only(top: 12),
-      padding: const EdgeInsets.all(12),
-      decoration: const BoxDecoration(
-        color: Color(0xffffeeee),
-        border: Border(left: BorderSide(color: _dangerColor, width: 3)),
-      ),
-      child: Text(
-        text,
-        style: const TextStyle(
-          color: _dangerColor,
-          fontSize: 13,
-          height: 1.35,
-          fontWeight: FontWeight.w600,
-        ),
-      ),
+    return BimNoticeBanner(
+      text: text,
+      tone: BimNoticeTone.error,
+      margin: const EdgeInsets.only(top: BimSpacing.x3),
     );
   }
 }
@@ -80,12 +48,7 @@ class _InfoBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(10),
-      color: const Color(0xffeef5ff),
-      child: Text(text, maxLines: 5, overflow: TextOverflow.ellipsis),
-    );
+    return BimNoticeBanner(text: text);
   }
 }
 
@@ -108,20 +71,7 @@ class _SectionHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      height: 28,
-      alignment: Alignment.centerLeft,
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      color: _pageColor,
-      child: Text(
-        text,
-        style: const TextStyle(
-          color: _secondaryTextColor,
-          fontSize: 12,
-          fontWeight: FontWeight.w500,
-        ),
-      ),
-    );
+    return BimSectionHeader(text: text);
   }
 }
 
@@ -198,14 +148,7 @@ class _EmptyRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 18),
-      decoration: const BoxDecoration(
-        border: Border(bottom: BorderSide(color: _lightBorderColor)),
-      ),
-      child: Text(text, style: const TextStyle(color: _mutedColor)),
-    );
+    return BimInlineEmptyRow(text: text);
   }
 }
 
@@ -216,16 +159,7 @@ class _EmptyState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 32),
-        child: Text(
-          text,
-          textAlign: TextAlign.center,
-          style: const TextStyle(color: _mutedColor, fontSize: 14),
-        ),
-      ),
-    );
+    return BimEmptyState(title: text);
   }
 }
 
@@ -250,10 +184,11 @@ class _ErrorState extends StatelessWidget {
             ),
             if (onRetry != null) ...[
               const SizedBox(height: 12),
-              OutlinedButton.icon(
+              BimButton(
+                kind: BimButtonKind.secondary,
+                label: '重试',
                 onPressed: onRetry,
-                icon: const Icon(Icons.refresh),
-                label: const Text('重试'),
+                icon: Icons.refresh,
               ),
             ],
           ],

@@ -1312,26 +1312,12 @@ class _PaymentServiceErrorState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 28),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              message.replaceFirst('Exception: ', ''),
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                color: _secondaryTextColor,
-                fontSize: 14,
-                height: 1.35,
-              ),
-            ),
-            const SizedBox(height: 16),
-            OutlinedButton(onPressed: onRetry, child: const Text('重试')),
-          ],
-        ),
-      ),
+    return BimEmptyState(
+      title: '加载失败',
+      message: message.replaceFirst('Exception: ', ''),
+      icon: Icons.refresh,
+      actionLabel: '重试',
+      onAction: onRetry,
     );
   }
 }
@@ -1551,7 +1537,7 @@ class _ServiceAccountSettingsPageState
     final subtitle = _serviceAccountSubtitle(_serviceAccount);
     return Scaffold(
       backgroundColor: _pageColor,
-      appBar: AppBar(title: const Text('服务号设置')),
+      appBar: const BimTopBar(title: '服务号设置'),
       body: SafeArea(
         child: ListView(
           physics: const ClampingScrollPhysics(),
@@ -1659,21 +1645,10 @@ class _ServiceAccountSwitchTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      color: _surfaceColor,
-      child: SwitchListTile.adaptive(
-        value: value,
-        onChanged: enabled ? onChanged : null,
-        title: Text(
-          title,
-          style: TextStyle(
-            color: enabled ? _textColor : _mutedColor,
-            fontSize: 15,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16),
-      ),
+    return BimSettingsSwitchTile(
+      title: title,
+      value: value,
+      onChanged: enabled ? onChanged : null,
     );
   }
 }

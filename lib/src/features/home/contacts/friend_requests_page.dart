@@ -44,7 +44,7 @@ class _FriendRequestsPageState extends State<FriendRequestsPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: _pageColor,
-      appBar: AppBar(title: const Text('好友申请')),
+      appBar: const BimTopBar(title: '好友申请'),
       body: SafeArea(
         child: Column(
           children: [
@@ -53,21 +53,16 @@ class _FriendRequestsPageState extends State<FriendRequestsPage> {
               child: Row(
                 children: [
                   Expanded(
-                    child: _SegmentButton(
-                      label: '收到',
-                      selected: _type == 'in',
-                      onTap: () => setState(() => _type = 'in'),
+                    child: BimSegmentedControl<String>(
+                      selected: _type,
+                      options: const [
+                        BimSegmentOption(value: 'in', label: '收到'),
+                        BimSegmentOption(value: 'out', label: '发出'),
+                      ],
+                      onChanged: (value) => setState(() => _type = value),
                     ),
                   ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: _SegmentButton(
-                      label: '发出',
-                      selected: _type == 'out',
-                      onTap: () => setState(() => _type = 'out'),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
+                  const SizedBox(width: BimSpacing.x2),
                   IconButton(
                     tooltip: '刷新',
                     onPressed: () => setState(() => _version++),
@@ -176,7 +171,7 @@ class _FriendRequestListState extends State<_FriendRequestList> {
             ? _listFromResult(snapshot.data ?? const {})
             : cached;
         if (snapshot.connectionState != ConnectionState.done && items.isEmpty) {
-          return const Center(child: CircularProgressIndicator());
+          return const BimLoadingState(label: '正在加载好友申请');
         }
         if (snapshot.hasError && items.isEmpty) {
           return _ErrorState(text: snapshot.error.toString(), onRetry: _reload);
@@ -217,44 +212,6 @@ class _FriendRequestListState extends State<_FriendRequestList> {
     setState(() {
       _future = widget.controller.friendApplyList(type: widget.type);
     });
-  }
-}
-
-class _SegmentButton extends StatelessWidget {
-  const _SegmentButton({
-    required this.label,
-    required this.selected,
-    required this.onTap,
-  });
-
-  final String label;
-  final bool selected;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      onTap: selected ? null : onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 160),
-        curve: Curves.easeOutCubic,
-        height: 38,
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          color: selected ? _surfaceColor : _fillColor,
-          border: Border.all(color: selected ? _primaryColor : _borderColor),
-          borderRadius: BorderRadius.circular(6),
-        ),
-        child: Text(
-          label,
-          style: TextStyle(
-            color: selected ? _primaryColor : _secondaryTextColor,
-            fontSize: 14,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-      ),
-    );
   }
 }
 

@@ -2,8 +2,8 @@ import 'dart:convert';
 
 import 'package:crypto/crypto.dart';
 
-class ApiSigner {
-  const ApiSigner(this.appKey);
+class RequestStamp {
+  const RequestStamp(this.appKey);
 
   final String appKey;
 

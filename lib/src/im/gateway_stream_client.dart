@@ -4,7 +4,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import '../core/app_logger.dart';
-import '../core/crypto_helpers.dart';
+import '../core/binary_codec.dart';
 
 class GatewayFrame {
   const GatewayFrame({
@@ -336,7 +336,7 @@ class GatewayStreamClient {
     }
     final nonce = base64Decode(map['nonce']?.toString() ?? '');
     final ciphertext = base64Decode(map['ciphertext']?.toString() ?? '');
-    final plain = CryptoHelpers.aesGcmDecrypt(
+    final plain = BinaryCodec.aesGcmDecrypt(
       key: keyBytes,
       nonce: nonce,
       cipherText: ciphertext,

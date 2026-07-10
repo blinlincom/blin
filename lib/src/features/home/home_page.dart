@@ -24,9 +24,11 @@ import '../../core/app_config.dart';
 import '../../core/design_tokens.dart';
 import '../../core/app_logger.dart';
 import '../../core/models.dart';
+import '../../design/motion.dart';
 import '../moments/moments_page.dart';
 import '../../im/business_im_service.dart';
 import '../../im/im_message_types.dart';
+import '../../ui/bim_ui.dart';
 
 part 'tabs/messages_tab.dart';
 part 'tabs/contacts_tab.dart';
@@ -282,28 +284,14 @@ class _HomePageState extends State<HomePage> {
     return Scaffold(
       appBar: _index == 3
           ? null
-          : AppBar(
-              title: Text(_title),
-              centerTitle: true,
-              toolbarHeight: BimDimensions.appBar,
-              elevation: 0,
-              scrolledUnderElevation: 0,
-              backgroundColor: _surfaceColor,
-              foregroundColor: _textColor,
-              titleTextStyle: const TextStyle(
-                color: _textColor,
-                fontSize: BimTypography.title,
-                fontWeight: FontWeight.w700,
-              ),
-              actions: _actions(showInitialSyncOverlay),
-            ),
+          : BimTopBar(title: _title, actions: _actions(showInitialSyncOverlay)),
       backgroundColor: _pageColor,
       body: SafeArea(
         child: Stack(
           children: [
             AbsorbPointer(
               absorbing: showInitialSyncOverlay,
-              child: pages[_index],
+              child: _HomeTabStack(index: _index, children: pages),
             ),
             if (showInitialSyncOverlay)
               Positioned.fill(
@@ -324,7 +312,12 @@ class _HomePageState extends State<HomePage> {
           currentIndex: _index,
           onTap: showInitialSyncOverlay
               ? (_) => _showInitialSyncLockedTip()
-              : (value) => setState(() => _index = value),
+              : (value) {
+                  if (value == _index) {
+                    return;
+                  }
+                  setState(() => _index = value);
+                },
           type: BottomNavigationBarType.fixed,
           elevation: 0,
           backgroundColor: _surfaceColor,
@@ -396,7 +389,9 @@ class _HomePageState extends State<HomePage> {
       context: context,
       color: const Color(0xff2f3338),
       elevation: 0,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(BimRadius.sm),
+      ),
       position: RelativeRect.fromLTRB(
         left,
         bottomRight.dy + 6,
@@ -458,18 +453,11 @@ class _HomePageState extends State<HomePage> {
   }
 
   void _showInitialSyncLockedTip() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('聊天数据同步完成后可操作'),
-        duration: Duration(seconds: 2),
-      ),
-    );
+    showBimSnackBar(context, '聊天数据同步完成后可操作');
   }
 
   Future<void> _open(Widget page) async {
-    await Navigator.of(
-      context,
-    ).push(MaterialPageRoute<void>(builder: (_) => page));
+    await _push(context, page);
     if (mounted) {
       setState(() {});
     }
@@ -505,6 +493,43 @@ class _HomePageState extends State<HomePage> {
       return status.isEmpty ? '连接异常' : status;
     }
     return '消息';
+  }
+}
+
+class _HomeTabStack extends StatefulWidget {
+  const _HomeTabStack({required this.index, required this.children});
+
+  final int index;
+  final List<Widget> children;
+
+  @override
+  State<_HomeTabStack> createState() => _HomeTabStackState();
+}
+
+class _HomeTabStackState extends State<_HomeTabStack> {
+  late final Set<int> _visited = {widget.index};
+
+  @override
+  void didUpdateWidget(_HomeTabStack oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _visited.add(widget.index);
+    if (oldWidget.children.length != widget.children.length) {
+      _visited.removeWhere((index) => index >= widget.children.length);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return IndexedStack(
+      index: widget.index,
+      children: [
+        for (var index = 0; index < widget.children.length; index++)
+          if (_visited.contains(index))
+            widget.children[index]
+          else
+            const SizedBox.shrink(),
+      ],
+    );
   }
 }
 

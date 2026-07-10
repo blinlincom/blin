@@ -42,11 +42,15 @@ PageRoute<void> _chatPageRoute(Widget page) {
     transitionsBuilder: (_, animation, __, ___) {
       return ColoredBox(
         color: background,
-        child: FadeTransition(opacity: animation, child: page),
+        child: BimMotion.fadeSlideTransition(
+          animation: animation,
+          begin: const Offset(0.02, 0),
+          child: page,
+        ),
       );
     },
-    transitionDuration: const Duration(milliseconds: 160),
-    reverseTransitionDuration: const Duration(milliseconds: 140),
+    transitionDuration: BimMotion.normal,
+    reverseTransitionDuration: BimMotion.reverseNormal,
   );
 }
 
@@ -56,8 +60,14 @@ PageRoute<int> _callPageRoute(LiveKitCallPage page) {
     barrierColor: Colors.transparent,
     pageBuilder: (_, __, ___) => page,
     transitionsBuilder: (_, animation, __, child) {
-      return FadeTransition(opacity: animation, child: child);
+      return BimMotion.fadeSlideTransition(
+        animation: animation,
+        begin: const Offset(0, 0.02),
+        child: child,
+      );
     },
+    transitionDuration: BimMotion.normal,
+    reverseTransitionDuration: BimMotion.reverseNormal,
   );
 }
 

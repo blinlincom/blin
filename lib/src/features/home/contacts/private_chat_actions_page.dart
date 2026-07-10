@@ -56,7 +56,7 @@ class _PrivateChatActionsPageState extends State<PrivateChatActionsPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: _pageColor,
-      appBar: AppBar(title: const Text('聊天信息')),
+      appBar: const BimTopBar(title: '聊天信息'),
       body: SafeArea(
         child: ListView(
           padding: const EdgeInsets.only(bottom: 28),
@@ -381,7 +381,7 @@ class _ChatMessageSearchPageState extends State<ChatMessageSearchPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: _pageColor,
-      appBar: AppBar(title: const Text('查找聊天记录')),
+      appBar: const BimTopBar(title: '查找聊天记录'),
       body: SafeArea(
         child: Column(
           children: [
@@ -417,7 +417,7 @@ class _ChatMessageSearchPageState extends State<ChatMessageSearchPage> {
                 future: _messagesFuture,
                 builder: (context, snapshot) {
                   if (snapshot.connectionState != ConnectionState.done) {
-                    return const Center(child: CircularProgressIndicator());
+                    return const BimLoadingState(label: '正在查找聊天记录');
                   }
                   if (snapshot.hasError) {
                     return _EmptyState(text: snapshot.error.toString());
@@ -443,26 +443,12 @@ class _ChatMessageSearchPageState extends State<ChatMessageSearchPage> {
                       final item = messages[index];
                       final payload = _asObjectMap(item['payload']);
                       final content = _messageSearchText(item, payload);
-                      return ListTile(
-                        tileColor: _surfaceColor,
-                        title: Text(
-                          content,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            color: _textColor,
-                            fontSize: 15,
-                            height: 1.35,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        subtitle: Text(
-                          _messageTimeLabel(item),
-                          style: const TextStyle(
-                            color: _mutedColor,
-                            fontSize: 12,
-                          ),
-                        ),
+                      return BimListTile(
+                        title: content,
+                        titleMaxLines: 2,
+                        subtitle: _messageTimeLabel(item),
+                        showDivider: false,
+                        minHeight: 62,
                       );
                     },
                   );
@@ -520,7 +506,7 @@ class _FriendProfilePageState extends State<FriendProfilePage> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: _pageColor,
-      appBar: AppBar(title: const Text('个人名片')),
+      appBar: const BimTopBar(title: '个人名片'),
       body: SafeArea(
         child: ListView(
           padding: const EdgeInsets.only(bottom: 32),
@@ -650,13 +636,13 @@ class _FriendMomentsPageState extends State<FriendMomentsPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: _pageColor,
-      appBar: AppBar(title: const Text('朋友圈')),
+      appBar: const BimTopBar(title: '朋友圈'),
       body: SafeArea(
         child: FutureBuilder<Map<String, Object?>>(
           future: _future,
           builder: (context, snapshot) {
             if (snapshot.connectionState != ConnectionState.done) {
-              return const Center(child: CircularProgressIndicator());
+              return const BimLoadingState(label: '正在加载动态');
             }
             if (snapshot.hasError) {
               return _EmptyState(text: snapshot.error.toString());
@@ -893,34 +879,7 @@ class _SettingsNavTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ColoredBox(
-      color: _surfaceColor,
-      child: InkWell(
-        onTap: onTap,
-        child: Container(
-          constraints: const BoxConstraints(minHeight: 58),
-          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
-          decoration: const BoxDecoration(
-            border: Border(bottom: BorderSide(color: _lightBorderColor)),
-          ),
-          child: Row(
-            children: [
-              Expanded(
-                child: Text(
-                  title,
-                  style: const TextStyle(
-                    color: _textColor,
-                    fontSize: 16,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ),
-              const Icon(Icons.chevron_right, color: _mutedColor, size: 22),
-            ],
-          ),
-        ),
-      ),
-    );
+    return BimSettingsTile(title: title, onTap: onTap);
   }
 }
 
@@ -937,46 +896,7 @@ class _SettingsValueNavTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ColoredBox(
-      color: _surfaceColor,
-      child: InkWell(
-        onTap: onTap,
-        child: Container(
-          constraints: const BoxConstraints(minHeight: 58),
-          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
-          decoration: const BoxDecoration(
-            border: Border(bottom: BorderSide(color: _lightBorderColor)),
-          ),
-          child: Row(
-            children: [
-              Expanded(
-                child: Text(
-                  title,
-                  style: const TextStyle(
-                    color: _textColor,
-                    fontSize: 16,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ),
-              Flexible(
-                child: Text(
-                  value,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  textAlign: TextAlign.right,
-                  style: const TextStyle(color: _mutedColor, fontSize: 14),
-                ),
-              ),
-              if (onTap != null) ...[
-                const SizedBox(width: 4),
-                const Icon(Icons.chevron_right, color: _mutedColor, size: 22),
-              ],
-            ],
-          ),
-        ),
-      ),
-    );
+    return BimSettingsTile(title: title, value: value, onTap: onTap);
   }
 }
 
@@ -988,27 +908,11 @@ class _SettingsDangerTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ColoredBox(
-      color: _surfaceColor,
-      child: InkWell(
-        onTap: onTap,
-        child: Container(
-          constraints: const BoxConstraints(minHeight: 58),
-          alignment: Alignment.centerLeft,
-          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
-          decoration: const BoxDecoration(
-            border: Border(bottom: BorderSide(color: _lightBorderColor)),
-          ),
-          child: Text(
-            title,
-            style: const TextStyle(
-              color: _dangerColor,
-              fontSize: 16,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-        ),
-      ),
+    return BimSettingsTile(
+      title: title,
+      onTap: onTap,
+      tone: BimSettingsTileTone.danger,
+      showChevron: false,
     );
   }
 }
@@ -1021,40 +925,11 @@ class _SettingsInfoTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ColoredBox(
-      color: _surfaceColor,
-      child: Container(
-        constraints: const BoxConstraints(minHeight: 58),
-        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
-        decoration: const BoxDecoration(
-          border: Border(bottom: BorderSide(color: _lightBorderColor)),
-        ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              title,
-              style: const TextStyle(
-                color: _textColor,
-                fontSize: 16,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-            const SizedBox(width: 16),
-            Expanded(
-              child: Text(
-                value,
-                textAlign: TextAlign.right,
-                style: const TextStyle(
-                  color: _secondaryTextColor,
-                  fontSize: 15,
-                  height: 1.35,
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
+    return BimSettingsTile(
+      title: title,
+      value: value,
+      showChevron: false,
+      valueMaxLines: 4,
     );
   }
 }
@@ -1483,35 +1358,11 @@ class _SettingsSwitchTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ColoredBox(
-      color: _surfaceColor,
-      child: DecoratedBox(
-        decoration: const BoxDecoration(
-          border: Border(bottom: BorderSide(color: _lightBorderColor)),
-        ),
-        child: SwitchListTile(
-          value: value,
-          onChanged: onChanged,
-          title: Text(
-            title,
-            style: const TextStyle(
-              color: _textColor,
-              fontSize: BimTypography.body,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-          subtitle: subtitle.isEmpty
-              ? null
-              : Text(
-                  subtitle,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(color: _mutedColor, fontSize: 12),
-                ),
-          activeThumbColor: _primaryColor,
-          contentPadding: const EdgeInsets.symmetric(horizontal: 16),
-        ),
-      ),
+    return BimSettingsSwitchTile(
+      title: title,
+      subtitle: subtitle,
+      value: value,
+      onChanged: onChanged,
     );
   }
 }

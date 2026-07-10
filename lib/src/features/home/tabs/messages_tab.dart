@@ -19,19 +19,18 @@ class _MessagesHeader extends StatelessWidget {
     return ColoredBox(
       color: _surfaceColor,
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(14, 8, 14, 10),
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 10),
         child: Row(
           children: [
             Expanded(
-              child: InkWell(
+              child: BimPressable(
                 onTap: () => _push(context, SearchPage(controller: controller)),
-                borderRadius: BorderRadius.circular(6),
                 child: Container(
-                  height: 36,
+                  height: 40,
                   padding: const EdgeInsets.symmetric(horizontal: 12),
                   decoration: BoxDecoration(
                     color: _fillColor,
-                    borderRadius: BorderRadius.circular(6),
+                    borderRadius: BorderRadius.circular(BimRadius.sm),
                   ),
                   child: const Row(
                     mainAxisAlignment: MainAxisAlignment.center,
@@ -55,23 +54,21 @@ class _MessagesHeader extends StatelessWidget {
             Semantics(
               button: true,
               label: '扫一扫',
-              child: Material(
-                color: _fillColor,
-                borderRadius: BorderRadius.circular(6),
-                child: InkWell(
-                  onTap: () => _push(
-                    context,
-                    FriendQrScannerPage(controller: controller),
+              child: BimPressable(
+                onTap: () =>
+                    _push(context, FriendQrScannerPage(controller: controller)),
+                child: Container(
+                  width: 44,
+                  height: 40,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: _fillColor,
+                    borderRadius: BorderRadius.circular(BimRadius.sm),
                   ),
-                  borderRadius: BorderRadius.circular(6),
-                  child: const SizedBox(
-                    width: 44,
-                    height: 44,
-                    child: Icon(
-                      Icons.qr_code_scanner,
-                      color: _textColor,
-                      size: 22,
-                    ),
+                  child: const Icon(
+                    Icons.qr_code_scanner,
+                    color: _textColor,
+                    size: 22,
                   ),
                 ),
               ),
@@ -294,32 +291,21 @@ class _MessagesTabState extends State<MessagesTab> {
 
   Future<void> _showConversationActions(Map<String, Object?> item) async {
     final pinned = _conversationPinned(item);
-    final action = await showModalBottomSheet<String>(
+    final action = await BimActionSheet.show<String>(
       context: context,
-      backgroundColor: _surfaceColor,
-      builder: (context) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: Icon(
-                pinned ? Icons.push_pin_outlined : Icons.push_pin,
-                color: _textColor,
-              ),
-              title: Text(pinned ? '取消置顶' : '置顶'),
-              onTap: () => Navigator.of(context).pop('pin'),
-            ),
-            ListTile(
-              leading: const Icon(
-                Icons.delete_outline,
-                color: BimColors.danger,
-              ),
-              title: const Text('删除会话'),
-              onTap: () => Navigator.of(context).pop('delete'),
-            ),
-          ],
+      children: [
+        BimActionSheetItem(
+          icon: pinned ? Icons.push_pin_outlined : Icons.push_pin,
+          label: pinned ? '取消置顶' : '置顶',
+          onTap: () => Navigator.of(context).pop('pin'),
         ),
-      ),
+        BimActionSheetItem(
+          icon: Icons.delete_outline,
+          label: '删除会话',
+          danger: true,
+          onTap: () => Navigator.of(context).pop('delete'),
+        ),
+      ],
     );
     if (!mounted) {
       return;
@@ -359,7 +345,7 @@ class _MessagesTabState extends State<MessagesTab> {
 
   Widget _emptyBody() {
     if (_loading) {
-      return const Center(child: CircularProgressIndicator());
+      return const BimLoadingState(label: '正在同步会话');
     }
     if (_error != null) {
       return _ErrorState(

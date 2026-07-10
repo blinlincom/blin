@@ -5,8 +5,8 @@ import 'dart:math';
 import 'package:dio/dio.dart';
 
 import 'app_logger.dart';
-import 'api_payload_crypto.dart';
-import 'api_signer.dart';
+import 'wire_codec.dart';
+import 'request_stamp.dart';
 import 'app_config.dart';
 import 'models.dart';
 
@@ -27,12 +27,12 @@ class ApiClient {
                responseType: ResponseType.json,
              ),
            ),
-       _signer = ApiSigner(appKey);
+       _signer = RequestStamp(appKey);
 
   final Dio _dio;
   final String baseUrl;
   final String appId;
-  final ApiSigner _signer;
+  final RequestStamp _signer;
   final Random _nonceRandom = Random.secure();
 
   Future<AppInfo> getAppInfo() async {
@@ -1447,7 +1447,7 @@ class ApiClient {
       if (secureResponse) 'secure_response': '1',
     };
     payload.addAll(
-      ApiPayloadCrypto.encrypt(
+      WireCodec.pack(
         payload: secureParams,
         appId: appId,
         appKey: _signer.appKey,
@@ -1458,9 +1458,9 @@ class ApiClient {
         nonce: nonce,
       ),
     );
-    EncryptedApiFile? encryptedFile;
+    PackedWireFile? wireFile;
     if (filePath.isNotEmpty) {
-      encryptedFile = await ApiPayloadCrypto.encryptFile(
+      wireFile = await WireCodec.packFile(
         filePath: filePath,
         device: device,
         clientMsgNo: clientMsgNo,
@@ -1470,9 +1470,9 @@ class ApiClient {
       payload.addAll({
         'secure_file_alg': 'AES-128-CBC',
         'secure_file_version': '1',
-        'secure_file_name': encryptedFile.originalName,
-        'secure_file_size': encryptedFile.originalSize.toString(),
-        'secure_file_sha256': encryptedFile.cipherSha256,
+        'secure_file_name': wireFile.originalName,
+        'secure_file_size': wireFile.originalSize.toString(),
+        'secure_file_sha256': wireFile.packedSha256,
       });
     }
     try {
@@ -1480,8 +1480,8 @@ class ApiClient {
       final result = await post<Map<String, Object?>>(
         action,
         payload,
-        filePath: encryptedFile?.path ?? '',
-        fileFieldName: encryptedFile == null ? 'file' : 'secure_file',
+        filePath: wireFile?.path ?? '',
+        fileFieldName: wireFile == null ? 'file' : 'secure_file',
         onUploadProgress: onUploadProgress,
         secureResponse: secureResponse
             ? _SecureResponseContext(
@@ -1497,7 +1497,7 @@ class ApiClient {
       }
       return result.data;
     } finally {
-      final tempPath = encryptedFile?.path ?? '';
+      final tempPath = wireFile?.path ?? '';
       if (tempPath.isNotEmpty) {
         await File(tempPath).delete().catchError((Object _) => File(tempPath));
       }
@@ -1527,7 +1527,7 @@ class ApiClient {
       if (secureResponse) 'secure_response': '1',
     };
     payload.addAll(
-      ApiPayloadCrypto.encrypt(
+      WireCodec.pack(
         payload: params,
         appId: appId,
         appKey: _signer.appKey,
@@ -1576,7 +1576,7 @@ class ApiClient {
       if (expectSecureResponse) 'secure_response': '1',
     };
     payload.addAll(
-      ApiPayloadCrypto.encrypt(
+      WireCodec.pack(
         payload: params,
         appId: appId,
         appKey: _signer.appKey,
@@ -1872,7 +1872,7 @@ class ApiClient {
       if ((rawData['secure_payload']?.toString() ?? '').isEmpty) {
         throw ApiException('接口未返回密文数据');
       }
-      normalizedData = ApiPayloadCrypto.decryptResponse(
+      normalizedData = WireCodec.unpackResponse(
         payload: rawData,
         appId: appId,
         appKey: _signer.appKey,

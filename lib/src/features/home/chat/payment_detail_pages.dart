@@ -62,19 +62,12 @@ class _RedPacketDetailPageState extends State<_RedPacketDetailPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: _pageColor,
-      appBar: AppBar(
-        backgroundColor: _pageColor,
-        elevation: 0,
-        foregroundColor: _textColor,
-        title: const Text('红包详情'),
-      ),
+      appBar: const BimTopBar(title: '红包详情'),
       body: FutureBuilder<Map<String, Object?>>(
         future: _request,
         builder: (context, snapshot) {
           if (snapshot.connectionState != ConnectionState.done) {
-            return const Center(
-              child: CircularProgressIndicator(strokeWidth: 2),
-            );
+            return const BimLoadingState(label: '正在加载红包详情');
           }
           if (snapshot.hasError) {
             return _PaymentErrorView(
@@ -155,19 +148,12 @@ class _TransferDetailPageState extends State<_TransferDetailPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: _pageColor,
-      appBar: AppBar(
-        backgroundColor: _pageColor,
-        elevation: 0,
-        foregroundColor: _textColor,
-        title: const Text('转账详情'),
-      ),
+      appBar: const BimTopBar(title: '转账详情'),
       body: FutureBuilder<Map<String, Object?>>(
         future: _request,
         builder: (context, snapshot) {
           if (snapshot.connectionState != ConnectionState.done) {
-            return const Center(
-              child: CircularProgressIndicator(strokeWidth: 2),
-            );
+            return const BimLoadingState(label: '正在加载转账详情');
           }
           if (snapshot.hasError) {
             return _PaymentErrorView(
@@ -618,22 +604,12 @@ class _PaymentErrorView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              text,
-              textAlign: TextAlign.center,
-              style: const TextStyle(color: _secondaryTextColor, fontSize: 14),
-            ),
-            const SizedBox(height: 14),
-            TextButton(onPressed: onRetry, child: const Text('重试')),
-          ],
-        ),
-      ),
+    return BimEmptyState(
+      title: '加载失败',
+      message: text,
+      icon: Icons.refresh,
+      actionLabel: '重试',
+      onAction: onRetry,
     );
   }
 }
