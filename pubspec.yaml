@@ -47,6 +47,7 @@ dependencies:
   app_links: ^7.2.0
   barcode_widget: ^2.0.4
   connectivity_plus: ^7.2.0
+  lottie: ^3.5.1
 
 dev_dependencies:
   flutter_test:
@@ -69,6 +70,7 @@ flutter:
     - assets/sounds/
     - assets/emoji/
     - assets/emoji/default/
+    - assets/lottie/
 
   # To add assets to your application, add an assets section, like this:
   # assets:

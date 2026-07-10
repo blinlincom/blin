@@ -5,6 +5,7 @@ import 'dart:io';
 import 'dart:math';
 
 import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 
 import '../calls/livekit_call_models.dart';
@@ -91,6 +92,7 @@ class BusinessImService extends ChangeNotifier {
   bool _realtimeValidated = false;
   int _reconnectAttempt = 0;
   int _connectOperationEpoch = 0;
+  CancelToken? _gatewayConnectCancelToken;
   String _networkSignature = '';
   DateTime? _realtimeValidatedAt;
   int _conversationVersion = 0;
@@ -315,6 +317,8 @@ class BusinessImService extends ChangeNotifier {
     _connectionStableTimer?.cancel();
     _connectionStableTimer = null;
     _connectOperationEpoch++;
+    _gatewayConnectCancelToken?.cancel('realtime stopped');
+    _gatewayConnectCancelToken = null;
     _realtimeValidated = false;
     _realtimeValidatedAt = null;
     final gatewayStream = _gatewayStream;
@@ -544,6 +548,8 @@ class BusinessImService extends ChangeNotifier {
   }) async {
     final operationEpoch = ++_connectOperationEpoch;
     _connecting = false;
+    _gatewayConnectCancelToken?.cancel('realtime discarded: ');
+    _gatewayConnectCancelToken = null;
     _realtimeValidated = false;
     _realtimeValidatedAt = null;
     _connectionStableTimer?.cancel();
@@ -2812,6 +2818,9 @@ class BusinessImService extends ChangeNotifier {
     }
     final operationEpoch = ++_connectOperationEpoch;
     _connecting = true;
+    _gatewayConnectCancelToken?.cancel('superseded connection request');
+    final connectCancelToken = CancelToken();
+    _gatewayConnectCancelToken = connectCancelToken;
     _realtimeValidated = false;
     _realtimeValidatedAt = null;
     _connectionStableTimer?.cancel();
@@ -2821,7 +2830,9 @@ class BusinessImService extends ChangeNotifier {
     _reconnectTimer = null;
     await _closeRealtimeOnly();
     try {
-      final chat = await _gatewayChatForConnect();
+      final chat = await _gatewayChatForConnect(
+        cancelToken: connectCancelToken,
+      );
       final stream = chat.stream;
       final openUrl = _gatewayOpenUrl(chat);
       if (stream == null || stream.ticket.isEmpty || openUrl.isEmpty) {
@@ -2907,7 +2918,8 @@ class BusinessImService extends ChangeNotifier {
         },
       );
     } catch (error, stackTrace) {
-      if (operationEpoch != _connectOperationEpoch) {
+      if (operationEpoch != _connectOperationEpoch ||
+          (error is DioException && CancelToken.isCancel(error))) {
         return;
       }
       _connecting = false;
@@ -3066,16 +3078,23 @@ class BusinessImService extends ChangeNotifier {
     }
   }
 
-  Future<ChatSession> _refreshGatewayChat({required bool forOpen}) async {
+  Future<ChatSession> _refreshGatewayChat({
+    required bool forOpen,
+    CancelToken? cancelToken,
+  }) async {
     final session = _requireSession();
-    final chat = await _api.connectIm(session: session, device: _device);
+    final chat = await _api.connectIm(
+      session: session,
+      device: _device,
+      cancelToken: cancelToken,
+    );
     _session = session.copyWith(chat: chat);
     _gatewayChatIssuedAt = forOpen ? DateTime.now() : null;
     _gatewayOpenTicketAvailable = forOpen;
     return chat;
   }
 
-  Future<ChatSession> _gatewayChatForConnect() async {
+  Future<ChatSession> _gatewayChatForConnect({CancelToken? cancelToken}) async {
     final cached = _validCachedGatewayChat();
     if (cached != null) {
       AppLogger.info(
@@ -3089,7 +3108,7 @@ class BusinessImService extends ChangeNotifier {
       );
       return cached;
     }
-    return _refreshGatewayChat(forOpen: true);
+    return _refreshGatewayChat(forOpen: true, cancelToken: cancelToken);
   }
 
   void _consumeGatewayOpenTicket() {
@@ -3161,6 +3180,8 @@ class BusinessImService extends ChangeNotifier {
       final reason = frame.reason.trim();
       if (reason == 'device_replaced' || reason == 'session_revoked') {
         _authInvalid = true;
+        _gatewayConnectCancelToken?.cancel('authentication invalid');
+        _gatewayConnectCancelToken = null;
         _started = false;
         _manualStop = true;
         _connecting = false;

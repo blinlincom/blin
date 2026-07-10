@@ -1726,7 +1726,15 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                                   isGroup: _isGroup,
                                 )
                               : _messages.isEmpty
-                              ? const _EmptyState(text: '暂无消息')
+                              ? _ChatEmptyState(
+                                  scene: _isGroup
+                                      ? _ChatEmptyScene.groupChat
+                                      : _ChatEmptyScene.privateChat,
+                                  peerName: _isGroup ? '' : _chatHeaderTitle(),
+                                  onAction: composerEnabled
+                                      ? () => _inputFocusNode.requestFocus()
+                                      : null,
+                                )
                               : ListView.builder(
                                   controller: _scrollController,
                                   reverse: true,

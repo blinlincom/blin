@@ -1265,6 +1265,18 @@ class SessionController extends ChangeNotifier {
     final list = _mergePendingPresenceIntoFriendList(
       _hydrateFriendList(rawList),
     );
+    if (list.isEmpty && _friendCache.isNotEmpty) {
+      _friendCacheAt = DateTime.now();
+      AppLogger.warn(
+        'session',
+        'ignore non-authoritative empty friend snapshot',
+        data: {
+          'cached_count': _friendCache.length,
+          'force_refresh': forceRefresh,
+        },
+      );
+      return _copyList(_friendCache);
+    }
     _friendCache = list;
     _friendCacheAt = DateTime.now();
     _writeFriendCache(list);

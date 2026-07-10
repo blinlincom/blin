@@ -649,6 +649,7 @@ class ApiClient {
   Future<ChatSession> connectIm({
     required UserSession session,
     required String device,
+    CancelToken? cancelToken,
   }) async {
     final result = await secureSignedImPost<Map<String, Object?>>(
       'im_connect',
@@ -656,6 +657,7 @@ class ApiClient {
       device: device,
       params: const {},
       secureResponse: true,
+      cancelToken: cancelToken,
     );
     if (!result.isSuccess) {
       throw ApiException(result.message, code: result.code);
@@ -1522,6 +1524,7 @@ class ApiClient {
     String filePath = '',
     bool secureResponse = true,
     void Function(double progress)? onUploadProgress,
+    CancelToken? cancelToken,
   }) {
     final clientMsgNo = _nonce();
     final timestamp = _timestamp();
@@ -1563,6 +1566,7 @@ class ApiClient {
               nonce: nonce,
             )
           : null,
+      cancelToken: cancelToken,
     );
   }
 
@@ -1638,6 +1642,7 @@ class ApiClient {
     void Function(double progress)? onUploadProgress,
     _SecureResponseContext? secureResponse,
     bool logDioErrorAsWarn = false,
+    CancelToken? cancelToken,
   }) async {
     final stopwatch = Stopwatch()..start();
     final requestId = AppLogger.traceId('api');
@@ -1672,6 +1677,7 @@ class ApiClient {
                 }
                 onUploadProgress((sent / total).clamp(0, 1).toDouble());
               },
+        cancelToken: cancelToken,
       );
       AppLogger.info(
         'api',

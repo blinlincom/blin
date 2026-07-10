@@ -350,7 +350,10 @@ class _MessagesTabState extends State<MessagesTab> {
         onRetry: () => _loadConversations(showLoading: true),
       );
     }
-    return const _EmptyState(text: '暂无会话');
+    return _ChatEmptyState(
+      scene: _ChatEmptyScene.conversations,
+      onAction: () => _push(context, SearchPage(controller: widget.controller)),
+    );
   }
 
   Widget _conversationTile(BuildContext context, Map<String, Object?> item) {

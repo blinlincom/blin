@@ -120,7 +120,7 @@ class GatewayStreamClient {
   DateTime? get lastFrameAt => _lastFrameAt;
   bool get hasValidatedFrame => _lastFrameAt != null;
 
-  bool isHealthy({Duration staleAfter = const Duration(seconds: 40)}) {
+  bool isHealthy({Duration staleAfter = const Duration(seconds: 65)}) {
     final lastFrameAt = _lastFrameAt;
     return !_closed &&
         lastFrameAt != null &&
