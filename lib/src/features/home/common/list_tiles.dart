@@ -73,18 +73,14 @@ class _PlainListTile extends StatelessWidget {
     required this.subtitle,
     required this.trailing,
     this.icon,
-    this.avatarUrl = '',
     this.onTap,
-    this.onLongPress,
   });
 
   final IconData? icon;
-  final String avatarUrl;
   final String title;
   final String subtitle;
   final String trailing;
   final VoidCallback? onTap;
-  final VoidCallback? onLongPress;
 
   @override
   Widget build(BuildContext context) {
@@ -92,11 +88,7 @@ class _PlainListTile extends StatelessWidget {
       title: title,
       subtitle: subtitle,
       minHeight: BimDimensions.contactRow,
-      leading: avatarUrl.isNotEmpty
-          ? _Avatar(label: title, imageUrl: avatarUrl, size: 38, icon: icon)
-          : icon == null
-          ? null
-          : Icon(icon, color: _mutedColor),
+      leading: icon == null ? null : Icon(icon, color: _mutedColor),
       trailing: trailing.isEmpty
           ? null
           : Text(
@@ -110,7 +102,6 @@ class _PlainListTile extends StatelessWidget {
               ),
             ),
       onTap: onTap,
-      onLongPress: onLongPress,
     );
   }
 }

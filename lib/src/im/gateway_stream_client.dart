@@ -90,9 +90,10 @@ Map<String, Object?> _tryJsonMap(String text) {
 }
 
 class GatewayStreamException implements Exception {
-  const GatewayStreamException(this.message);
+  const GatewayStreamException(this.message, {this.statusCode});
 
   final String message;
+  final int? statusCode;
 
   @override
   String toString() => message;
@@ -107,13 +108,24 @@ class GatewayStreamClient {
   StreamSubscription<List<int>>? _subscription;
   Timer? _watchdog;
   Uint8List _buffer = Uint8List(0);
-  DateTime _lastFrameAt = DateTime.now();
+  DateTime? _lastFrameAt;
+  DateTime? _connectedAt;
   bool _closed = false;
   bool _closedNotified = false;
   String _streamId = '';
   int _chunkSeq = 0;
   int _frameSeq = 0;
   void Function(String reason, Object? error)? _onClosed;
+
+  DateTime? get lastFrameAt => _lastFrameAt;
+  bool get hasValidatedFrame => _lastFrameAt != null;
+
+  bool isHealthy({Duration staleAfter = const Duration(seconds: 40)}) {
+    final lastFrameAt = _lastFrameAt;
+    return !_closed &&
+        lastFrameAt != null &&
+        DateTime.now().difference(lastFrameAt) <= staleAfter;
+  }
 
   Future<void> connect({
     required Uri uri,
@@ -136,7 +148,8 @@ class GatewayStreamClient {
     _chunkSeq = 0;
     _frameSeq = 0;
     _buffer = Uint8List(0);
-    _lastFrameAt = DateTime.now();
+    _lastFrameAt = null;
+    _connectedAt = null;
     AppLogger.info(
       'im',
       'gateway stream connect start',
@@ -174,8 +187,10 @@ class GatewayStreamClient {
       );
       throw GatewayStreamException(
         'Gateway 打开失败(${response.statusCode}) $text',
+        statusCode: response.statusCode,
       );
     }
+    _connectedAt = DateTime.now();
     AppLogger.info(
       'im',
       'gateway stream connected',
@@ -185,9 +200,13 @@ class GatewayStreamClient {
         'content_type': response.headers.contentType?.toString() ?? '',
       },
     );
-    _watchdog = Timer.periodic(const Duration(seconds: 15), (_) {
-      final silentSeconds = DateTime.now().difference(_lastFrameAt).inSeconds;
-      if (silentSeconds > 75) {
+    _watchdog = Timer.periodic(const Duration(seconds: 10), (_) {
+      final reference = _lastFrameAt ?? _connectedAt;
+      if (reference == null) {
+        return;
+      }
+      final silentSeconds = DateTime.now().difference(reference).inSeconds;
+      if (silentSeconds > 60) {
         AppLogger.warn(
           'im',
           'gateway heartbeat timeout',
@@ -199,19 +218,20 @@ class GatewayStreamClient {
     });
     _subscription = response.listen(
       (chunk) {
-        _lastFrameAt = DateTime.now();
         try {
           _chunkSeq++;
-          AppLogger.info(
-            'im',
-            'gateway chunk received',
-            data: {
-              'stream_id': _streamId,
-              'chunk_no': _chunkSeq,
-              'chunk_bytes': chunk.length,
-              'buffer_before': _buffer.length,
-            },
-          );
+          if (_chunkSeq == 1 || _chunkSeq % 100 == 0) {
+            AppLogger.info(
+              'im',
+              'gateway chunk sampled',
+              data: {
+                'stream_id': _streamId,
+                'chunk_no': _chunkSeq,
+                'chunk_bytes': chunk.length,
+                'buffer_before': _buffer.length,
+              },
+            );
+          }
           _appendAndDecode(Uint8List.fromList(chunk), frameKey, onFrame);
         } catch (error) {
           if (_closed) {
@@ -293,29 +313,29 @@ class GatewayStreamClient {
       final frame = GatewayFrame.fromJson(
         rawFrame.map((key, value) => MapEntry(key.toString(), value)),
       );
-      AppLogger.info(
-        'im',
-        'gateway frame received',
-        data: {
-          'stream_id': _streamId,
-          'frame_no': frameNo,
-          'frame_bytes': length,
-          'buffer_remaining': _buffer.length,
-          'encrypted_keys': map.keys.toList(growable: false),
-          'type': frame.type,
-          'has_cursor': frame.cursor.isNotEmpty,
-          'cursor_len': frame.cursor.length,
-          'cursor': frame.cursor,
-          'channel_id': frame.channelId,
-          'channel_type': frame.channelType,
-          'client_msg_no': frame.clientMsgNo,
-          'message_id': frame.messageId,
-          'message_seq': frame.messageSeq,
-          'timestamp': frame.timestamp,
-          'payload_summary': _payloadSummary(frame.payload),
-          'payload': frame.payload,
-        },
-      );
+      _lastFrameAt = DateTime.now();
+      if (!frame.isHeartbeat || frameNo == 1 || frameNo % 12 == 0) {
+        AppLogger.info(
+          'im',
+          'gateway frame received',
+          data: {
+            'stream_id': _streamId,
+            'frame_no': frameNo,
+            'frame_bytes': length,
+            'buffer_remaining': _buffer.length,
+            'type': frame.type,
+            'has_cursor': frame.cursor.isNotEmpty,
+            'cursor_len': frame.cursor.length,
+            'channel_id': frame.channelId,
+            'channel_type': frame.channelType,
+            'client_msg_no': frame.clientMsgNo,
+            'message_id': frame.messageId,
+            'message_seq': frame.messageSeq,
+            'timestamp': frame.timestamp,
+            'payload_summary': _payloadSummary(frame.payload),
+          },
+        );
+      }
       onFrame(frame);
     }
   }
@@ -366,6 +386,13 @@ class GatewayStreamClient {
         'chunk_count': _chunkSeq,
         'frame_count': _frameSeq,
         'buffer_bytes': _buffer.length,
+        'validated': hasValidatedFrame,
+        'connected_ms': _connectedAt == null
+            ? 0
+            : DateTime.now().difference(_connectedAt!).inMilliseconds,
+        'last_frame_age_ms': _lastFrameAt == null
+            ? -1
+            : DateTime.now().difference(_lastFrameAt!).inMilliseconds,
       },
     );
     _onClosed?.call(reason, error);

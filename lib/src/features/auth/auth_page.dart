@@ -43,7 +43,7 @@ class _AuthPageState extends State<AuthPage> {
   var _showConfirmPassword = false;
   var _loginCaptchaRevision = 0;
   var _registerCaptchaRevision = 0;
-  var _authConfigLoading = true;
+  var _authConfigLoading = false;
   var _authConfigError = '';
 
   final _loginFormKey = GlobalKey<FormState>();
@@ -64,14 +64,27 @@ class _AuthPageState extends State<AuthPage> {
   @override
   void initState() {
     super.initState();
-    unawaited(_loadAuthConfig());
+    _authConfigLoading = !widget.controller.appInfoResolved;
+    if (_authConfigLoading) {
+      unawaited(_loadAuthConfig());
+    } else {
+      unawaited(widget.controller.refreshAppInfoForAuth());
+    }
   }
 
   @override
   void didUpdateWidget(covariant AuthPage oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.controller != widget.controller) {
-      unawaited(_loadAuthConfig());
+      if (widget.controller.appInfoResolved) {
+        setState(() {
+          _authConfigLoading = false;
+          _authConfigError = '';
+        });
+        unawaited(widget.controller.refreshAppInfoForAuth());
+      } else {
+        unawaited(_loadAuthConfig());
+      }
     }
   }
 
@@ -104,14 +117,14 @@ class _AuthPageState extends State<AuthPage> {
             child: Center(
               child: ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 520),
-                child: AnimatedSwitcher(
-                  duration: const Duration(milliseconds: 180),
-                  child: _authConfigLoading || _authConfigError.isNotEmpty
-                      ? _authConfigGate(key: const ValueKey('auth-config'))
-                      : _isLogin
-                      ? _loginView(key: const ValueKey('login'))
-                      : _registerView(key: const ValueKey('register')),
-                ),
+                child: _authConfigLoading || _authConfigError.isNotEmpty
+                    ? _authConfigGate(key: const ValueKey('auth-config'))
+                    : AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 180),
+                        child: _isLogin
+                            ? _loginView(key: const ValueKey('login'))
+                            : _registerView(key: const ValueKey('register')),
+                      ),
               ),
             ),
           ),

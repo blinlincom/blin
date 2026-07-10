@@ -963,6 +963,7 @@ class MyGroupsPage extends StatefulWidget {
 }
 
 class _MyGroupsPageState extends State<MyGroupsPage> {
+  final _search = TextEditingController();
   List<Map<String, Object?>> _groups = const [];
   bool _loading = false;
   String? _error;
@@ -974,12 +975,25 @@ class _MyGroupsPageState extends State<MyGroupsPage> {
     _groups = widget.controller.cachedGroups();
     _precacheContactAvatars(context, const [], _groups);
     _refresh(showLoading: _groups.isEmpty);
+    _search.addListener(_onSearchChanged);
   }
 
   @override
   void dispose() {
+    _search
+      ..removeListener(_onSearchChanged)
+      ..dispose();
     widget.controller.removeListener(_onControllerChanged);
     super.dispose();
+  }
+
+  void _onSearchChanged() => setState(() {});
+
+  Future<void> _openCreateGroup() async {
+    await _push(context, CreateGroupPage(controller: widget.controller));
+    if (mounted) {
+      await _refresh(showLoading: false);
+    }
   }
 
   void _onControllerChanged() {
@@ -1026,43 +1040,159 @@ class _MyGroupsPageState extends State<MyGroupsPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: const BimTopBar(title: '我的群聊'),
-      body: SafeArea(
-        child: _loading && _groups.isEmpty
-            ? const BimLoadingState(label: '正在加载群聊')
-            : _error != null && _groups.isEmpty
-            ? _ErrorState(text: _error!, onRetry: () => _refresh())
-            : RefreshIndicator(
-                onRefresh: () => _refresh(showLoading: false),
-                child: ListView(
-                  children: [
-                    if (_groups.isEmpty) const _EmptyRow(text: '暂无群聊'),
-                    for (final item in _groups)
-                      _PlainListTile(
-                        icon: Icons.groups_outlined,
-                        title: _groupTitle(item),
-                        subtitle: _value(item, ['notice', 'description']),
-                        trailing:
-                            '${_intValue(item, ['member_count', 'members'])}人',
-                        avatarUrl: _groupAvatarUrl(item),
-                        onTap: () =>
-                            _openGroupChat(context, widget.controller, item),
-                        onLongPress: () => _push(
-                          context,
-                          GroupDetailPage(
-                            controller: widget.controller,
-                            title: _groupTitle(item),
-                            groupId: _groupIdFromItem(item),
-                            channelId: _groupChannelId(item),
+    final keyword = _search.text.trim().toLowerCase();
+    final visibleGroups = keyword.isEmpty
+        ? _groups
+        : _groups
+              .where((item) {
+                final title = _groupTitle(item).toLowerCase();
+                final notice = _value(item, [
+                  'notice',
+                  'description',
+                ]).toLowerCase();
+                return title.contains(keyword) || notice.contains(keyword);
+              })
+              .toList(growable: false);
+    return BimScaffold(
+      topBar: BimTopBar(
+        title: '我的群聊',
+        actions: [
+          IconButton(
+            tooltip: '发起群聊',
+            onPressed: _openCreateGroup,
+            icon: const Icon(Icons.add),
+          ),
+        ],
+      ),
+      body: _loading && _groups.isEmpty
+          ? const BimLoadingState(label: '正在加载群聊')
+          : _error != null && _groups.isEmpty
+          ? _ErrorState(text: _error!, onRetry: () => _refresh())
+          : RefreshIndicator(
+              onRefresh: () => _refresh(showLoading: false),
+              child: ListView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                padding: const EdgeInsets.only(bottom: BimSpacing.x6),
+                children: [
+                  Padding(
+                    padding: EdgeInsets.fromLTRB(
+                      BimBreakpoints.horizontalPadding(context),
+                      BimSpacing.x3,
+                      BimBreakpoints.horizontalPadding(context),
+                      BimSpacing.x2,
+                    ),
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 680),
+                      child: TextField(
+                        controller: _search,
+                        textInputAction: TextInputAction.search,
+                        decoration: InputDecoration(
+                          hintText: '搜索群聊名称或公告',
+                          prefixIcon: const Icon(Icons.search, size: 20),
+                          suffixIcon: keyword.isEmpty
+                              ? null
+                              : IconButton(
+                                  tooltip: '清空搜索',
+                                  onPressed: _search.clear,
+                                  icon: const Icon(Icons.close, size: 19),
+                                ),
+                        ),
+                      ),
+                    ),
+                  ),
+                  Padding(
+                    padding: EdgeInsets.symmetric(
+                      horizontal: BimBreakpoints.horizontalPadding(context),
+                    ),
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 680),
+                      child: BimSectionHeader(
+                        text: keyword.isEmpty
+                            ? '共 ${_groups.length} 个群聊'
+                            : '找到 ${visibleGroups.length} 个群聊',
+                      ),
+                    ),
+                  ),
+                  if (visibleGroups.isEmpty)
+                    BimEmptyState(
+                      title: keyword.isEmpty ? '还没有群聊' : '没有找到相关群聊',
+                      message: keyword.isEmpty
+                          ? '可以从联系人中选择好友发起群聊'
+                          : '请尝试其他群聊名称或公告关键词',
+                      icon: Icons.groups_outlined,
+                      actionLabel: keyword.isEmpty ? '发起群聊' : '清空搜索',
+                      onAction: keyword.isEmpty
+                          ? _openCreateGroup
+                          : _search.clear,
+                    )
+                  else
+                    Align(
+                      alignment: Alignment.topCenter,
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 680),
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(BimRadius.sm),
+                          child: Column(
+                            children: [
+                              for (
+                                var index = 0;
+                                index < visibleGroups.length;
+                                index++
+                              )
+                                BimListTile(
+                                  title: _groupTitle(visibleGroups[index]),
+                                  subtitle: _value(visibleGroups[index], [
+                                    'notice',
+                                    'description',
+                                  ]),
+                                  subtitleMaxLines: 2,
+                                  leading: _Avatar(
+                                    label: _groupTitle(visibleGroups[index]),
+                                    imageUrl: _groupAvatarUrl(
+                                      visibleGroups[index],
+                                    ),
+                                    size: 46,
+                                    color: BimColors.primary,
+                                    icon: Icons.groups_outlined,
+                                  ),
+                                  trailing: Text(
+                                    '${_intValue(visibleGroups[index], ['member_count', 'members'])}人',
+                                    style: const TextStyle(
+                                      color: BimColors.mutedText,
+                                      fontSize: BimTypography.caption,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                  showDivider:
+                                      index != visibleGroups.length - 1,
+                                  onTap: () => _openGroupChat(
+                                    context,
+                                    widget.controller,
+                                    visibleGroups[index],
+                                  ),
+                                  onLongPress: () => _push(
+                                    context,
+                                    GroupDetailPage(
+                                      controller: widget.controller,
+                                      title: _groupTitle(visibleGroups[index]),
+                                      groupId: _groupIdFromItem(
+                                        visibleGroups[index],
+                                      ),
+                                      channelId: _groupChannelId(
+                                        visibleGroups[index],
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                            ],
                           ),
                         ),
                       ),
-                    if (_error != null) _InfoBar(text: '群聊刷新失败：$_error'),
-                  ],
-                ),
+                    ),
+                  if (_error != null) BimNoticeBanner(text: '群聊刷新失败：$_error'),
+                ],
               ),
-      ),
+            ),
     );
   }
 }

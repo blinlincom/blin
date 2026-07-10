@@ -582,6 +582,7 @@ class _FriendProfilePageState extends State<FriendProfilePage> {
         controller: widget.controller,
         title: widget.title,
         userId: userId,
+        avatarUrl: widget.avatarUrl,
       ),
     );
   }
@@ -609,12 +610,14 @@ class FriendMomentsPage extends StatefulWidget {
     required this.controller,
     required this.title,
     required this.userId,
+    this.avatarUrl = '',
     super.key,
   });
 
   final SessionController controller;
   final String title;
   final int userId;
+  final String avatarUrl;
 
   @override
   State<FriendMomentsPage> createState() => _FriendMomentsPageState();
@@ -626,45 +629,178 @@ class _FriendMomentsPageState extends State<FriendMomentsPage> {
   @override
   void initState() {
     super.initState();
-    _future = widget.controller.loadUserMoments(
-      userId: widget.userId,
-      limit: 30,
-    );
+    _future = _load();
+  }
+
+  Future<Map<String, Object?>> _load() {
+    return widget.controller.loadUserMoments(userId: widget.userId, limit: 30);
+  }
+
+  Future<void> _refresh() async {
+    final future = _load();
+    setState(() => _future = future);
+    await future;
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: _pageColor,
-      appBar: const BimTopBar(title: '朋友圈'),
-      body: SafeArea(
-        child: FutureBuilder<Map<String, Object?>>(
-          future: _future,
-          builder: (context, snapshot) {
-            if (snapshot.connectionState != ConnectionState.done) {
-              return const BimLoadingState(label: '正在加载动态');
-            }
-            if (snapshot.hasError) {
-              return _EmptyState(text: snapshot.error.toString());
-            }
-            final posts = _listFromResult(snapshot.data ?? const {});
-            if (posts.isEmpty) {
-              return const _EmptyState(text: '暂无动态');
-            }
-            return ListView.separated(
-              padding: const EdgeInsets.only(bottom: 24),
-              itemCount: posts.length,
-              separatorBuilder: (_, __) => const _GroupGap(),
-              itemBuilder: (context, index) {
-                return _FriendMomentTile(
-                  title: widget.title,
-                  post: posts[index],
-                );
-              },
+    return BimScaffold(
+      topBar: BimTopBar(title: '${widget.title}的朋友圈'),
+      body: FutureBuilder<Map<String, Object?>>(
+        future: _future,
+        builder: (context, snapshot) {
+          if (snapshot.connectionState != ConnectionState.done) {
+            return const _FriendMomentsLoading();
+          }
+          if (snapshot.hasError) {
+            return BimEmptyState(
+              title: '朋友圈加载失败',
+              message: snapshot.error.toString(),
+              icon: Icons.error_outline,
+              actionLabel: '重新加载',
+              onAction: _refresh,
             );
-          },
-        ),
+          }
+          final posts = _listFromResult(snapshot.data ?? const {});
+          return RefreshIndicator(
+            onRefresh: _refresh,
+            child: ListView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              padding: EdgeInsets.fromLTRB(
+                BimBreakpoints.horizontalPadding(context),
+                BimSpacing.x3,
+                BimBreakpoints.horizontalPadding(context),
+                BimSpacing.x8,
+              ),
+              children: [
+                Align(
+                  alignment: Alignment.topCenter,
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 680),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        _FriendMomentsIdentity(
+                          title: widget.title,
+                          avatarUrl: widget.avatarUrl,
+                          count: posts.length,
+                        ),
+                        const BimSectionHeader(text: '动态'),
+                        if (posts.isEmpty)
+                          const BimEmptyState(
+                            title: '暂无朋友圈动态',
+                            message: '对方发布的新动态会显示在这里',
+                            icon: Icons.photo_library_outlined,
+                          )
+                        else
+                          Container(
+                            decoration: BoxDecoration(
+                              color: BimColors.surface,
+                              border: Border.all(color: BimColors.borderLight),
+                              borderRadius: BorderRadius.circular(BimRadius.sm),
+                            ),
+                            clipBehavior: Clip.antiAlias,
+                            child: Column(
+                              children: [
+                                for (
+                                  var index = 0;
+                                  index < posts.length;
+                                  index++
+                                )
+                                  _FriendMomentTile(
+                                    post: posts[index],
+                                    showDivider: index != posts.length - 1,
+                                  ),
+                              ],
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
       ),
+    );
+  }
+}
+
+class _FriendMomentsIdentity extends StatelessWidget {
+  const _FriendMomentsIdentity({
+    required this.title,
+    required this.avatarUrl,
+    required this.count,
+  });
+
+  final String title;
+  final String avatarUrl;
+  final int count;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(BimSpacing.x4),
+      decoration: BoxDecoration(
+        color: BimColors.surface,
+        border: Border.all(color: BimColors.borderLight),
+        borderRadius: BorderRadius.circular(BimRadius.sm),
+      ),
+      child: Row(
+        children: [
+          _Avatar(
+            label: title,
+            imageUrl: avatarUrl,
+            size: 58,
+            color: BimColors.primary,
+            icon: Icons.person_outline,
+          ),
+          const SizedBox(width: BimSpacing.x3),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: BimColors.textDark,
+                    fontSize: BimTypography.profile,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 5),
+                Text(
+                  count == 0 ? '暂无动态' : '共 $count 条动态',
+                  style: const TextStyle(
+                    color: BimColors.secondaryText,
+                    fontSize: BimTypography.meta,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _FriendMomentsLoading extends StatelessWidget {
+  const _FriendMomentsLoading();
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      physics: const AlwaysScrollableScrollPhysics(),
+      padding: const EdgeInsets.all(BimSpacing.x4),
+      children: const [
+        SizedBox(height: 120),
+        BimLoadingState(label: '正在加载朋友圈'),
+      ],
     );
   }
 }
@@ -1130,54 +1266,85 @@ class _MomentPreviewThumb extends StatelessWidget {
 }
 
 class _FriendMomentTile extends StatelessWidget {
-  const _FriendMomentTile({required this.title, required this.post});
+  const _FriendMomentTile({required this.post, required this.showDivider});
 
-  final String title;
   final Map<String, Object?> post;
+  final bool showDivider;
 
   @override
   Widget build(BuildContext context) {
     final content = _momentContent(post);
     final media = _momentMediaFromPost(post);
-    return ColoredBox(
-      color: _surfaceColor,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(18, 16, 18, 16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              title.isEmpty ? '好友动态' : title,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                color: _textColor,
-                fontSize: 16,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-            if (content.isNotEmpty) ...[
-              const SizedBox(height: 8),
-              Text(
-                content,
-                style: const TextStyle(
-                  color: _textColor,
-                  fontSize: 15,
-                  height: 1.45,
+    final date = _momentTimelineDate(post);
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+      decoration: BoxDecoration(
+        color: BimColors.surface,
+        border: showDivider
+            ? const Border(bottom: BorderSide(color: BimColors.borderLight))
+            : null,
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 54,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  date.$1,
+                  style: const TextStyle(
+                    color: BimColors.textDark,
+                    fontSize: 22,
+                    fontWeight: FontWeight.w800,
+                    height: 1,
+                  ),
                 ),
-              ),
-            ],
-            if (media.isNotEmpty) ...[
-              const SizedBox(height: 10),
-              _FriendMomentMediaGrid(media: media),
-            ],
-            const SizedBox(height: 10),
-            Text(
-              _momentTimeText(post),
-              style: const TextStyle(color: _mutedColor, fontSize: 12),
+                const SizedBox(height: 3),
+                Text(
+                  date.$2,
+                  style: const TextStyle(
+                    color: BimColors.secondaryText,
+                    fontSize: BimTypography.caption,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
             ),
-          ],
-        ),
+          ),
+          const SizedBox(width: BimSpacing.x3),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (content.isNotEmpty)
+                  Text(
+                    content,
+                    maxLines: 6,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: _textColor,
+                      fontSize: 15,
+                      height: 1.45,
+                    ),
+                  ),
+                if (media.isNotEmpty) ...[
+                  if (content.isNotEmpty) const SizedBox(height: 10),
+                  _FriendMomentMediaGrid(media: media),
+                ],
+                if (content.isEmpty && media.isEmpty)
+                  const Text(
+                    '分享了一条动态',
+                    style: TextStyle(
+                      color: BimColors.secondaryText,
+                      fontSize: BimTypography.meta,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -1190,19 +1357,43 @@ class _FriendMomentMediaGrid extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final count = min(media.length, 9);
-    final columns = count == 1 ? 1 : 3;
-    final width = MediaQuery.sizeOf(context).width;
-    final tileSize = columns == 1 ? min(width - 72, 220.0) : 92.0;
-    return Wrap(
-      spacing: 6,
-      runSpacing: 6,
-      children: [
-        for (final item in media.take(9))
-          _FriendMomentMediaThumb(item: item, size: tileSize),
-      ],
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final count = min(media.length, 9);
+        final tileSize = count == 1
+            ? min(constraints.maxWidth, 260.0)
+            : (constraints.maxWidth - 12) / 3;
+        return Wrap(
+          spacing: 6,
+          runSpacing: 6,
+          children: [
+            for (final item in media.take(9))
+              _FriendMomentMediaThumb(item: item, size: tileSize),
+          ],
+        );
+      },
     );
   }
+}
+
+(String, String) _momentTimelineDate(Map<String, Object?> post) {
+  final time = _parseUiTime(
+    _value(post, ['created_at', 'create_time', 'publish_time', 'timestamp']),
+  );
+  if (time == null) {
+    return ('--', '');
+  }
+  final now = DateTime.now();
+  if (time.year == now.year && time.month == now.month && time.day == now.day) {
+    return (
+      '今天',
+      '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}',
+    );
+  }
+  return (
+    time.day.toString().padLeft(2, '0'),
+    time.year == now.year ? '${time.month}月' : '${time.year}.${time.month}',
+  );
 }
 
 class _FriendMomentMediaThumb extends StatelessWidget {
@@ -1279,24 +1470,6 @@ List<String> _momentPreviewUrls(Map<String, Object?> data) {
 
 String _momentContent(Map<String, Object?> post) {
   return _value(post, ['content', 'text', 'body', 'desc', 'description']);
-}
-
-String _momentTimeText(Map<String, Object?> post) {
-  final time = _parseUiTime(
-    _value(post, ['created_at', 'create_time', 'publish_time', 'timestamp']),
-  );
-  if (time == null) {
-    return '';
-  }
-  final now = DateTime.now();
-  String two(int value) => value.toString().padLeft(2, '0');
-  if (time.year == now.year && time.month == now.month && time.day == now.day) {
-    return '${two(time.hour)}:${two(time.minute)}';
-  }
-  if (time.year == now.year) {
-    return '${time.month}月${time.day}日';
-  }
-  return '${time.year}年${time.month}月${time.day}日';
 }
 
 String _momentMediaUrl(Map<String, Object?> item) {

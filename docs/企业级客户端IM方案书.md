@@ -239,9 +239,12 @@ nextDelay = delay + jitter
 等待 nextDelay
 调用 im_connect 获取新 ticket 和 last_cursor
 打开 /api/sync/open
-连接成功后 attempt 清零
+首个加密帧解密成功后进入 connected
+连续稳定 30 秒后 attempt 清零
 按 ACK cursor 补偿消息
 ```
+
+补充规则：网络类型发生变化时立即销毁旧 stream 和旧 ticket，防抖后换票重连；Gateway open/ACK 的 401/403 属于传输票据错误，不得直接清除用户登录态。只有业务端 `im_connect` 明确返回账号认证失效时，才停止自动重连。
 
 ## 8. Gateway 离线队列与 ACK
 
@@ -728,8 +731,10 @@ offline: 消息
 
 - 冷启动 2 秒内显示本地会话缓存。
 - Gateway 正常时 5 秒内进入 connected。
-- 断网后 75 秒内识别失活。
-- 恢复网络后按指数退避重连成功。
+- 前台连接 40 秒无有效帧时，前后台切换可立即识别并换票重连。
+- 连续 60 秒无有效帧时，看门狗必须关闭半开连接。
+- 网络恢复或 Wi-Fi/蜂窝网络切换后，客户端应在 3 秒内启动新连接。
+- Gateway ticket 过期不得触发“未登录”或清除本地登录态。
 
 ### 消息
 

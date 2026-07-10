@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/foundation.dart';
 
 import '../calls/livekit_call_models.dart';
@@ -75,6 +76,9 @@ class BusinessImService extends ChangeNotifier {
   bool _gatewayOpenTicketAvailable = false;
   final Queue<GatewayFrame> _gatewayAckQueue = Queue<GatewayFrame>();
   Timer? _reconnectTimer;
+  Timer? _networkReconnectTimer;
+  Timer? _connectionStableTimer;
+  StreamSubscription<List<ConnectivityResult>>? _connectivitySubscription;
   bool _started = false;
   bool _manualStop = false;
   bool _connecting = false;
@@ -82,7 +86,12 @@ class BusinessImService extends ChangeNotifier {
   bool _backgroundKeepAliveEnabled = true;
   bool _authInvalid = false;
   bool _gatewayAckDraining = false;
+  bool _networkAvailable = true;
+  bool _realtimeValidated = false;
   int _reconnectAttempt = 0;
+  int _connectOperationEpoch = 0;
+  String _networkSignature = '';
+  DateTime? _realtimeValidatedAt;
   int _conversationVersion = 0;
   String _statusText = '未连接';
   String? _lastError;
@@ -271,6 +280,7 @@ class BusinessImService extends ChangeNotifier {
       conversations: _latestConversations,
     );
     _bumpConversations('cache_loaded', notify: false);
+    await _startConnectivityMonitoring();
     AppLogger.info(
       'im',
       'business im start',
@@ -297,6 +307,13 @@ class BusinessImService extends ChangeNotifier {
     _authInvalid = false;
     _reconnectTimer?.cancel();
     _reconnectTimer = null;
+    _networkReconnectTimer?.cancel();
+    _networkReconnectTimer = null;
+    _connectionStableTimer?.cancel();
+    _connectionStableTimer = null;
+    _connectOperationEpoch++;
+    _realtimeValidated = false;
+    _realtimeValidatedAt = null;
     final gatewayStream = _gatewayStream;
     _gatewayStream = null;
     _gatewayTicket = '';
@@ -349,6 +366,14 @@ class BusinessImService extends ChangeNotifier {
     if (!_backgroundKeepAliveEnabled) {
       _reconnectTimer?.cancel();
       _reconnectTimer = null;
+      _networkReconnectTimer?.cancel();
+      _networkReconnectTimer = null;
+      unawaited(
+        _discardRealtimeConnection(
+          source: 'background_keep_alive_disabled',
+          reconnect: false,
+        ),
+      );
     }
     AppLogger.info(
       'im',
@@ -376,8 +401,26 @@ class BusinessImService extends ChangeNotifier {
       return;
     }
     _foreground = true;
-    if (_gatewayStream == null && !_connecting) {
-      unawaited(_connectRealtime());
+    final stream = _gatewayStream;
+    final healthy = stream?.isHealthy() ?? false;
+    AppLogger.info(
+      'im',
+      'resume realtime health checked',
+      data: {
+        'gateway_active': stream != null,
+        'validated': _realtimeValidated,
+        'healthy': healthy,
+        'last_frame_at': stream?.lastFrameAt?.toIso8601String() ?? '',
+      },
+    );
+    if (stream == null || !_realtimeValidated || !healthy) {
+      unawaited(
+        _discardRealtimeConnection(
+          source: 'foreground_health_check',
+          reconnect: true,
+          delay: const Duration(milliseconds: 300),
+        ),
+      );
     }
   }
 
@@ -394,10 +437,141 @@ class BusinessImService extends ChangeNotifier {
     if (!enabled && !_foreground) {
       _reconnectTimer?.cancel();
       _reconnectTimer = null;
+      unawaited(
+        _discardRealtimeConnection(
+          source: 'background_policy_changed',
+          reconnect: false,
+        ),
+      );
     } else if (enabled && _started && _gatewayStream == null && !_connecting) {
       unawaited(_connectRealtime());
     }
     notifyListeners();
+  }
+
+  Future<void> _startConnectivityMonitoring() async {
+    final connectivity = Connectivity();
+    try {
+      final current = await connectivity.checkConnectivity();
+      _networkSignature = _connectivitySignature(current);
+      _networkAvailable = !_isNetworkUnavailable(current);
+    } catch (error) {
+      AppLogger.warn(
+        'im',
+        'initial connectivity check failed',
+        data: {'error': error.toString()},
+      );
+    }
+    if (_connectivitySubscription != null) {
+      return;
+    }
+    _connectivitySubscription = connectivity.onConnectivityChanged.listen(
+      _handleConnectivityChanged,
+      onError: (Object error) {
+        AppLogger.warn(
+          'im',
+          'connectivity listener failed',
+          data: {'error': error.toString()},
+        );
+      },
+    );
+  }
+
+  void _handleConnectivityChanged(List<ConnectivityResult> results) {
+    final signature = _connectivitySignature(results);
+    final wasAvailable = _networkAvailable;
+    final previousSignature = _networkSignature;
+    _networkSignature = signature;
+    _networkAvailable = !_isNetworkUnavailable(results);
+    AppLogger.info(
+      'im',
+      'network connectivity changed',
+      data: {
+        'previous': previousSignature,
+        'current': signature,
+        'available': _networkAvailable,
+        'started': _started,
+      },
+    );
+    if (!_started || _manualStop) {
+      return;
+    }
+    if (!_networkAvailable) {
+      _reconnectTimer?.cancel();
+      _reconnectTimer = null;
+      _networkReconnectTimer?.cancel();
+      _networkReconnectTimer = null;
+      unawaited(
+        _discardRealtimeConnection(
+          source: 'network_unavailable',
+          reconnect: false,
+        ),
+      );
+      _setStatus('重连中');
+      return;
+    }
+    final networkChanged =
+        !wasAvailable ||
+        (previousSignature.isNotEmpty && previousSignature != signature);
+    if (networkChanged) {
+      unawaited(
+        _discardRealtimeConnection(
+          source: wasAvailable ? 'network_switched' : 'network_restored',
+          reconnect: true,
+          delay: const Duration(milliseconds: 500),
+        ),
+      );
+    }
+  }
+
+  bool _isNetworkUnavailable(List<ConnectivityResult> results) {
+    return results.isEmpty ||
+        results.every((item) => item == ConnectivityResult.none);
+  }
+
+  String _connectivitySignature(List<ConnectivityResult> results) {
+    final names = results.map((item) => item.name).toSet().toList()..sort();
+    return names.join(',');
+  }
+
+  Future<void> _discardRealtimeConnection({
+    required String source,
+    required bool reconnect,
+    Duration delay = Duration.zero,
+  }) async {
+    final operationEpoch = ++_connectOperationEpoch;
+    _connecting = false;
+    _realtimeValidated = false;
+    _realtimeValidatedAt = null;
+    _connectionStableTimer?.cancel();
+    _connectionStableTimer = null;
+    _reconnectTimer?.cancel();
+    _reconnectTimer = null;
+    _networkReconnectTimer?.cancel();
+    _networkReconnectTimer = null;
+    await _closeRealtimeOnly();
+    if (operationEpoch != _connectOperationEpoch) {
+      return;
+    }
+    AppLogger.info(
+      'im',
+      'realtime connection discarded',
+      data: {
+        'source': source,
+        'reconnect': reconnect,
+        'delay_ms': delay.inMilliseconds,
+      },
+    );
+    if (!reconnect ||
+        !_started ||
+        _manualStop ||
+        _authInvalid ||
+        !_networkAvailable ||
+        (!_foreground && !_backgroundKeepAliveEnabled)) {
+      return;
+    }
+    _setStatus('重连中');
+    _networkReconnectTimer = Timer(delay, _connectRealtime);
   }
 
   Future<List<Map<String, Object?>>> refreshLocalConversations({
@@ -2592,10 +2766,16 @@ class BusinessImService extends ChangeNotifier {
   Future<void> _connectRealtime() async {
     if (_manualStop ||
         _connecting ||
+        !_networkAvailable ||
         (!_foreground && !_backgroundKeepAliveEnabled)) {
       return;
     }
+    final operationEpoch = ++_connectOperationEpoch;
     _connecting = true;
+    _realtimeValidated = false;
+    _realtimeValidatedAt = null;
+    _connectionStableTimer?.cancel();
+    _connectionStableTimer = null;
     _setStatus(_reconnectAttempt > 0 ? '重连中' : '连接中');
     _reconnectTimer?.cancel();
     _reconnectTimer = null;
@@ -2647,6 +2827,14 @@ class BusinessImService extends ChangeNotifier {
           if (epoch != _gatewayEpoch) {
             return;
           }
+          if (!frame.isKick && !frame.isError && !_realtimeValidated) {
+            _markRealtimeValidated(
+              epoch: epoch,
+              recoveryReason: recoveryReason,
+              cursor: lastCursor,
+              openUrl: openUrl,
+            );
+          }
           _handleGatewayFrame(frame);
         },
         onClosed: (reason, error) {
@@ -2656,6 +2844,10 @@ class BusinessImService extends ChangeNotifier {
           _handleRealtimeClosed(reason, error?.toString());
         },
       );
+      if (operationEpoch != _connectOperationEpoch) {
+        await client.close().catchError((Object _) => null);
+        return;
+      }
       if (_manualStop || (!_foreground && !_backgroundKeepAliveEnabled)) {
         await client.close().catchError((Object _) => null);
         _connecting = false;
@@ -2664,21 +2856,9 @@ class BusinessImService extends ChangeNotifier {
         }
         return;
       }
-      _connecting = false;
-      _reconnectAttempt = 0;
-      _lastError = null;
-      _hasRealtimeConnectedOnce = true;
-      _suppressCatchupSoundOnNextConnect = false;
-      _setStatus('已连接');
-      unawaited(
-        _recoverOfflineMessagesAfterRealtimeConnected(
-          reason: recoveryReason,
-          cursor: lastCursor,
-        ),
-      );
       AppLogger.info(
         'im',
-        'gateway stream connected',
+        'gateway stream opened, awaiting validated frame',
         data: {
           'addr': openUrl,
           'cursor_len': lastCursor.length,
@@ -2687,6 +2867,9 @@ class BusinessImService extends ChangeNotifier {
         },
       );
     } catch (error, stackTrace) {
+      if (operationEpoch != _connectOperationEpoch) {
+        return;
+      }
       _connecting = false;
       await _closeRealtimeOnly();
       AppLogger.error(
@@ -2700,10 +2883,77 @@ class BusinessImService extends ChangeNotifier {
         _markRealtimeAuthInvalid(error, 'connect_failed');
         return;
       }
+      if (error is GatewayStreamException &&
+          (error.statusCode == 401 || error.statusCode == 403)) {
+        _invalidateGatewayTransportTicket();
+        _lastError = '实时连接票据已更新';
+        _setStatus('重连中');
+        _scheduleReconnect('gateway_open_ticket_rejected', immediate: true);
+        return;
+      }
       _lastError = error.toString();
       _setStatus('连接失败');
       _scheduleReconnect('connect_failed');
     }
+  }
+
+  void _markRealtimeValidated({
+    required int epoch,
+    required String recoveryReason,
+    required String cursor,
+    required String openUrl,
+  }) {
+    if (epoch != _gatewayEpoch || _realtimeValidated) {
+      return;
+    }
+    _connecting = false;
+    _realtimeValidated = true;
+    _realtimeValidatedAt = DateTime.now();
+    _lastError = null;
+    _hasRealtimeConnectedOnce = true;
+    _suppressCatchupSoundOnNextConnect = false;
+    _setStatus('已连接');
+    _connectionStableTimer?.cancel();
+    _connectionStableTimer = Timer(const Duration(seconds: 30), () {
+      if (epoch != _gatewayEpoch ||
+          !_realtimeValidated ||
+          !(_gatewayStream?.isHealthy() ?? false)) {
+        return;
+      }
+      _reconnectAttempt = 0;
+      AppLogger.info(
+        'im',
+        'gateway connection reached stable state',
+        data: {
+          'epoch': epoch,
+          'validated_at': _realtimeValidatedAt?.toIso8601String() ?? '',
+        },
+      );
+    });
+    unawaited(
+      _recoverOfflineMessagesAfterRealtimeConnected(
+        reason: recoveryReason,
+        cursor: cursor,
+      ),
+    );
+    AppLogger.info(
+      'im',
+      'gateway stream validated',
+      data: {
+        'addr': openUrl,
+        'cursor_len': cursor.length,
+        'foreground': _foreground,
+        'background_keep_alive_enabled': _backgroundKeepAliveEnabled,
+      },
+    );
+  }
+
+  void _invalidateGatewayTransportTicket() {
+    _gatewayTicket = '';
+    _gatewayAckUrl = '';
+    _gatewayTicketExpiresAt = null;
+    _gatewayChatIssuedAt = null;
+    _gatewayOpenTicketAvailable = false;
   }
 
   Future<void> _recoverOfflineMessagesAfterRealtimeConnected({
@@ -3438,8 +3688,28 @@ class BusinessImService extends ChangeNotifier {
         if (error.code != 401 && error.code != 403) {
           rethrow;
         }
-        _markRealtimeAuthInvalid(error, 'gateway_ack');
-        return false;
+        AppLogger.warn(
+          'im',
+          'gateway ack ticket rejected, refreshing transport ticket',
+          data: {'code': error.code, 'frame_count': frames.length},
+        );
+        try {
+          ticket = await _ensureGatewayAckTicket(force: true);
+        } on ApiException catch (refreshError) {
+          if (refreshError.code == 401 || refreshError.code == 403) {
+            _markRealtimeAuthInvalid(
+              refreshError,
+              'gateway_ack_ticket_refresh',
+            );
+          }
+          rethrow;
+        }
+        await _api.ackGatewayCursor(
+          ackUrl: _gatewayAckUrl,
+          ticket: ticket,
+          lastCursor: frame.cursor,
+          clientMsgNos: clientMsgNos,
+        );
       }
       _cache.writeGatewayCursor(
         uid: chat.uid,
@@ -3516,6 +3786,11 @@ class BusinessImService extends ChangeNotifier {
   }
 
   void _handleRealtimeClosed(String source, String? reason) {
+    _connecting = false;
+    _realtimeValidated = false;
+    _realtimeValidatedAt = null;
+    _connectionStableTimer?.cancel();
+    _connectionStableTimer = null;
     if (_manualStop) {
       return;
     }
@@ -3535,7 +3810,7 @@ class BusinessImService extends ChangeNotifier {
     _scheduleReconnect(source);
   }
 
-  void _scheduleReconnect(String source) {
+  void _scheduleReconnect(String source, {bool immediate = false}) {
     if (!_started ||
         _manualStop ||
         _authInvalid ||
@@ -3556,8 +3831,10 @@ class BusinessImService extends ChangeNotifier {
     }
     _reconnectTimer?.cancel();
     final exponent = min(_reconnectAttempt, 6);
-    final baseMs = min<int>(60000, 1000 * (1 << exponent));
-    final jitterMs = _random.nextInt(max(1, (baseMs * 0.3).round()));
+    final baseMs = immediate ? 250 : min<int>(60000, 1000 * (1 << exponent));
+    final jitterMs = immediate
+        ? _random.nextInt(150)
+        : _random.nextInt(max(1, (baseMs * 0.3).round()));
     final delayMs = baseMs + jitterMs;
     _reconnectAttempt++;
     AppLogger.warn(
@@ -3580,6 +3857,8 @@ class BusinessImService extends ChangeNotifier {
     _gatewayTicketExpiresAt = null;
     _gatewayAckQueue.clear();
     _gatewayAckDraining = false;
+    _realtimeValidated = false;
+    _realtimeValidatedAt = null;
     _gatewayEpoch++;
     await gatewayStream?.close().catchError((Object _) => null);
   }
@@ -7879,6 +8158,10 @@ class BusinessImService extends ChangeNotifier {
 
   @override
   void dispose() {
+    _networkReconnectTimer?.cancel();
+    _connectionStableTimer?.cancel();
+    unawaited(_connectivitySubscription?.cancel());
+    _connectivitySubscription = null;
     unawaited(stop());
     unawaited(_messageSound.dispose());
     unawaited(_messageEvents.close());

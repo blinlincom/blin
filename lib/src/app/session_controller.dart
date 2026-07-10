@@ -58,6 +58,8 @@ class SessionController extends ChangeNotifier {
   int _lastSessionVerifiedAt = 0;
   DateTime? _lastHotRefreshAt;
   String _lastImStatusText = '';
+  bool _appInfoResolved = false;
+  Future<bool>? _appInfoRequest;
   Future<void>? _presenceRefreshRequest;
   Future<void>? _refreshRequest;
   Future<void>? _cachedImStartRequest;
@@ -90,6 +92,7 @@ class SessionController extends ChangeNotifier {
 
   UserSession? get session => _session;
   AppInfo? get appInfo => _appInfo;
+  bool get appInfoResolved => _appInfoResolved;
   AppAuthConfig get authConfig => _appInfo?.auth ?? AppAuthConfig.defaults;
   String get device => _device;
   bool get booting => _booting;
@@ -150,7 +153,9 @@ class SessionController extends ChangeNotifier {
   void _hydrateCachedLaunchState() {
     _device = _store.ensureDeviceId();
     _session = _store.readSession();
-    _appInfo = _store.readAppInfo() ?? const AppInfo(name: AppConfig.appName);
+    final cachedAppInfo = _store.readAppInfo();
+    _appInfoResolved = cachedAppInfo != null;
+    _appInfo = cachedAppInfo ?? const AppInfo(name: AppConfig.appName);
     _backgroundReceiveProtectionEnabled = _store
         .readBackgroundReceiveProtectionEnabled();
     _lastSessionVerifiedAt = _store.readSessionVerifiedAt();
@@ -273,15 +278,23 @@ class SessionController extends ChangeNotifier {
     _lastSessionVerifiedAt = _store.readSessionVerifiedAt();
     _session = _store.readSession();
     final cachedAppInfo = _store.readAppInfo();
+    _appInfoResolved = cachedAppInfo != null;
     _appInfo = cachedAppInfo ?? const AppInfo(name: AppConfig.appName);
-    _refreshAppInfoInBackground(
-      source: 'cold_start',
-      hasCachedAppInfo: cachedAppInfo != null,
-    );
 
     try {
       if (_session != null) {
+        _refreshAppInfoInBackground(
+          source: 'cold_start_logged_in',
+          hasCachedAppInfo: cachedAppInfo != null,
+        );
         await _refreshLoggedInSession();
+      } else if (cachedAppInfo != null) {
+        _refreshAppInfoInBackground(
+          source: 'cold_start_auth_cached',
+          hasCachedAppInfo: true,
+        );
+      } else {
+        await _requestAppInfo(source: 'cold_start_auth');
       }
       AppLogger.info(
         'session',
@@ -391,20 +404,48 @@ class SessionController extends ChangeNotifier {
       'app info refresh scheduled',
       data: {'source': source, 'has_cached_app_info': hasCachedAppInfo},
     );
-    unawaited(_refreshAppInfo(source: source));
+    unawaited(_requestAppInfo(source: source));
   }
 
-  Future<void> _refreshAppInfo({required String source}) async {
+  Future<bool> _requestAppInfo({required String source}) {
+    final existing = _appInfoRequest;
+    if (existing != null) {
+      AppLogger.info(
+        'session',
+        'reuse app info request',
+        data: {'source': source},
+      );
+      return existing;
+    }
+    final request = _loadAppInfo(source: source);
+    _appInfoRequest = request;
+    request.whenComplete(() {
+      if (identical(_appInfoRequest, request)) {
+        _appInfoRequest = null;
+      }
+    });
+    return request;
+  }
+
+  Future<bool> _loadAppInfo({required String source}) async {
     try {
       final appInfo = await _api.getAppInfo();
+      final previous = _appInfo;
+      final changed =
+          previous == null ||
+          jsonEncode(previous.toJson()) != jsonEncode(appInfo.toJson());
       _appInfo = appInfo;
+      _appInfoResolved = true;
       _store.writeAppInfo(appInfo);
       AppLogger.info(
         'session',
         'app info refreshed',
         data: {'source': source, 'app_name': appInfo.name},
       );
-      notifyListeners();
+      if (changed) {
+        notifyListeners();
+      }
+      return true;
     } catch (error, stackTrace) {
       AppLogger.warn(
         'session',
@@ -415,38 +456,20 @@ class SessionController extends ChangeNotifier {
           'stack': stackTrace.toString(),
         },
       );
+      return false;
     }
   }
 
   Future<bool> refreshAppInfoForAuth({String source = 'auth_page'}) async {
-    try {
-      final appInfo = await _api.getAppInfo();
-      _appInfo = appInfo;
-      _store.writeAppInfo(appInfo);
-      AppLogger.info(
-        'session',
-        'auth app info refreshed',
-        data: {
-          'source': source,
-          'app_name': appInfo.name,
-          'login_captcha_enabled': appInfo.auth.loginCaptchaEnabled,
-          'register_captcha_enabled': appInfo.auth.registerCaptchaEnabled,
-        },
-      );
-      notifyListeners();
-      return true;
-    } catch (error, stackTrace) {
-      AppLogger.warn(
-        'session',
-        'auth app info refresh failed',
-        data: {
-          'source': source,
-          'error': error.toString(),
-          'stack': stackTrace.toString(),
-        },
-      );
-      return false;
+    if (_booting && !_appInfoResolved) {
+      final refreshed = await _requestAppInfo(source: source);
+      return refreshed || _appInfoResolved;
     }
+    if (_appInfoResolved) {
+      _refreshAppInfoInBackground(source: source, hasCachedAppInfo: true);
+      return true;
+    }
+    return _requestAppInfo(source: source);
   }
 
   void _handleSessionRefreshApiError(

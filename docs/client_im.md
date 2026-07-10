@@ -36,7 +36,7 @@ flutter run \
 - 本地落库成功后调用 `POST /api/sync/ack` 推进 Gateway ACK cursor；ACK ticket 过期前自动重新 `im_connect` 刷新。
 - 发送消息仍必须调用业务端 `im_person_send` / `im_group_send`，由业务端执行权限、好友、红包、转账、@、引用、阅后即焚等规则。
 
-客户端没有消息轮询。实时活性只看 Gateway frame/heartbeat，超过 75 秒无任何帧会关闭连接并按指数退避重连。新版 IM 文档已经废弃旧 `user_heartbeat`，客户端不再调用该接口。
+客户端没有消息轮询。实时活性只看成功解密后的 Gateway frame/heartbeat，收到 HTTP 200 响应头并不代表已经在线。超过 40 秒未收到有效帧视为连接可疑，前台恢复会立即换票重连；连续 60 秒无有效帧由看门狗关闭连接并按指数退避重连。新版 IM 文档已经废弃旧 `user_heartbeat`，客户端不再调用该接口。
 
 ## 启动流程
 
@@ -46,7 +46,19 @@ flutter run \
 4. 已登录时调用 `im_connect`，请求携带 `device`、`device_flag=0`、`device_level=1`、`timestamp`、`nonce`、`sign`。
 5. `BusinessImService.start()` 读取本地 MMKV 会话缓存，并调用 `im_connect` 获取新的 Gateway ticket。
 6. 使用本地 ACK cursor 或 `stream.last_cursor` 打开 `/api/sync/open`。
-7. Gateway stream 打开成功后状态变为“已连接”，聊天页依靠实时长连接收包刷新。
+7. Gateway stream 打开后保持“连接中”；收到首个成功解密的 heartbeat/message 才变为“已连接”，然后执行离线补偿同步。
+
+网络和生命周期恢复规则：
+
+- 监听 Wi-Fi、蜂窝网络、VPN、以太网等网络类型变化；切网时废弃旧 `HttpClient`、旧 stream 和旧 ticket，防止半开连接继续占位。
+- 网络恢复后防抖 500ms 获取新 ticket 重连，不等待旧连接 60 秒超时。
+- App 回到前台时检查最近有效帧时间；stream 对象存在但超过 40 秒无有效帧时仍会强制重连。
+- 后台保活关闭时进入后台会主动关闭 stream，回前台后使用新 ticket 建立连接。
+- Gateway open/ACK 返回 401/403 只视为实时传输票据失效，先刷新 ticket；只有业务端 `im_connect` 明确返回账号认证失效时才停止重连并进入未登录状态。
+- 指数退避次数不会在 HTTP 200 时清零，连接连续稳定 30 秒且心跳健康后才清零，避免短连接循环造成重连风暴。
+- Gateway 在流打开后立即发送一次加密 heartbeat，后续按 25 秒周期发送；因此客户端无需等待首个周期心跳即可确认连接。
+
+线上 Nginx 的 `/api/sync/` 必须保留以下流式代理要求：关闭响应缓冲、请求缓冲、缓存和 gzip，清空上游 `Connection` 头，开启 `proxy_socket_keepalive`，并将读写超时设置为明显大于心跳周期的值。否则代理层可能聚合帧或提前关闭长响应。
 
 用户端页面不展示全局用户 ID、IM UID、`app...user...` 等内部标识；列表、聊天页、群成员页只显示昵称或用户名。内部 ID 只作为接口参数留在代码层，后台管理可另行展示。
 

@@ -322,6 +322,19 @@ String _requestStatus(Map<String, Object?> item) {
   };
 }
 
+String _requestAvatarUrl(Map<String, Object?> item, String type) {
+  final nested = _asObjectMap(item[type == 'in' ? 'from_user' : 'to_user']);
+  return _avatarUrlFromMap(
+    nested,
+    fallback: _value(
+      item,
+      type == 'in'
+          ? const ['from_avatar', 'from_usertx', 'avatar', 'usertx']
+          : const ['to_avatar', 'to_usertx', 'avatar', 'usertx'],
+    ),
+  );
+}
+
 bool _requestPending(Map<String, Object?> item) {
   final status = _value(item, ['status']);
   return status.isEmpty || status == '0' || status == 'pending';
