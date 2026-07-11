@@ -374,6 +374,10 @@ class RealtimeEventCoordinator {
         channelType: event.channelType,
         clientMsgNo: clientMsgNo,
         title: title,
+        contentType: _messageContentType(
+          event.message,
+          _asObjectMap(event.message['payload']),
+        ),
         text: text,
       ),
     );
@@ -452,14 +456,22 @@ class RealtimeEventCoordinator {
     }
     navigator.push(
       MaterialPageRoute<void>(
-        builder: (_) => ChatPage(
-          controller: _controller,
-          title: title,
-          channelId: payload.channelId,
-          groupId: groupId,
-          channelType: payload.channelType,
-          initialClientMsgNo: payload.clientMsgNo,
-        ),
+        builder: (_) => payload.contentType == ChatContentTypes.walletNotice
+            ? PaymentServicePage(
+                controller: _controller,
+                title: title,
+                channelId: payload.channelId,
+                channelType: payload.channelType,
+                initialClientMsgNo: payload.clientMsgNo,
+              )
+            : ChatPage(
+                controller: _controller,
+                title: title,
+                channelId: payload.channelId,
+                groupId: groupId,
+                channelType: payload.channelType,
+                initialClientMsgNo: payload.clientMsgNo,
+              ),
       ),
     );
     unawaited(

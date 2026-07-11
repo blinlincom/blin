@@ -12,6 +12,7 @@ class RealtimeNotificationPayload {
     this.channelId = '',
     this.channelType = 0,
     this.clientMsgNo = '',
+    this.contentType = '',
   });
 
   final String type;
@@ -19,6 +20,7 @@ class RealtimeNotificationPayload {
   final String channelId;
   final int channelType;
   final String clientMsgNo;
+  final String contentType;
 
   bool get isCall => type == 'call';
   bool get isMessage => type == 'message';
@@ -31,6 +33,7 @@ class RealtimeNotificationPayload {
       channelId: map['channel_id']?.toString() ?? '',
       channelType: int.tryParse(map['channel_type']?.toString() ?? '') ?? 0,
       clientMsgNo: map['client_msg_no']?.toString() ?? '',
+      contentType: map['content_type']?.toString() ?? '',
     );
   }
 }
@@ -70,6 +73,7 @@ class RealtimeNotificationBridge {
           'channel_id': payload.channelId,
           'channel_type': payload.channelType,
           'client_msg_no': payload.clientMsgNo,
+          'content_type': payload.contentType,
         },
       );
       _taps.add(payload);
@@ -153,6 +157,7 @@ class RealtimeNotificationBridge {
     required int channelType,
     required String clientMsgNo,
     required String title,
+    String contentType = '',
     required String text,
   }) async {
     if (!Platform.isAndroid || channelId.isEmpty || clientMsgNo.isEmpty) {
@@ -162,6 +167,7 @@ class RealtimeNotificationBridge {
       'channel_id': channelId,
       'channel_type': channelType,
       'client_msg_no': clientMsgNo,
+      if (contentType.isNotEmpty) 'content_type': contentType,
       'title': title,
       'text': text,
     });

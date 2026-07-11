@@ -548,7 +548,7 @@ class BusinessImService extends ChangeNotifier {
   }) async {
     final operationEpoch = ++_connectOperationEpoch;
     _connecting = false;
-    _gatewayConnectCancelToken?.cancel('realtime discarded: ');
+    _gatewayConnectCancelToken?.cancel('realtime discarded: $source');
     _gatewayConnectCancelToken = null;
     _realtimeValidated = false;
     _realtimeValidatedAt = null;
@@ -7157,12 +7157,34 @@ class BusinessImService extends ChangeNotifier {
     return const <String, Object?>{};
   }
 
+  bool _isWalletNoticeMessage(Map<String, Object?> message) {
+    final payload = _asMap(message['payload']);
+    return _value(message, ['content_type']) == ChatContentTypes.walletNotice ||
+        _value(payload, ['content_type']) == ChatContentTypes.walletNotice ||
+        _asMap(payload['wallet_notice']).isNotEmpty;
+  }
+
+  int _messageTimestampMs(Map<String, Object?> message) {
+    return _objectTimestampMs(message, const [
+      'timestamp',
+      'send_time',
+      'create_time',
+      'client_timestamp',
+    ]);
+  }
+
   List<Map<String, Object?>> _sortAndLimit(
     List<Map<String, Object?>> messages,
     int limit,
   ) {
     final sorted = messages.toList()
       ..sort((a, b) {
+        if (_isWalletNoticeMessage(a) || _isWalletNoticeMessage(b)) {
+          final timeCompare = _messageTimestampMs(
+            a,
+          ).compareTo(_messageTimestampMs(b));
+          if (timeCompare != 0) return timeCompare;
+        }
         final seqA = _intValue(a, ['message_seq']);
         final seqB = _intValue(b, ['message_seq']);
         if (seqA != seqB && seqA > 0 && seqB > 0) {

@@ -101,6 +101,15 @@ class _WalletPageState extends State<WalletPage> {
                       _WalletToolStrip(
                         actions: [
                           _WalletAction(
+                            icon: Icons.currency_exchange_outlined,
+                            label: '买卖币',
+                            color: BimColors.primary,
+                            onTap: () => _push(
+                              context,
+                              OtcHomePage(controller: widget.controller),
+                            ),
+                          ),
+                          _WalletAction(
                             icon: Icons.add_card_outlined,
                             label: '充值',
                             color: BimColors.primary,
@@ -253,7 +262,8 @@ class _WalletAssetStage extends StatelessWidget {
         BimSpacing.x4,
       ),
       decoration: BoxDecoration(
-        color: BimColors.textDark,
+        color: BimColors.surface,
+        border: Border.all(color: BimColors.border),
         borderRadius: BorderRadius.circular(BimRadius.lg),
       ),
       child: Column(
@@ -265,7 +275,7 @@ class _WalletAssetStage extends StatelessWidget {
                 child: Text(
                   '可用资产',
                   style: TextStyle(
-                    color: BimColors.inverseSecondaryText,
+                    color: BimColors.secondaryText,
                     fontSize: BimTypography.meta,
                     fontWeight: FontWeight.w600,
                   ),
@@ -286,7 +296,7 @@ class _WalletAssetStage extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
-                    color: BimColors.inverseText,
+                    color: BimColors.textDark,
                     fontSize: 38,
                     fontWeight: FontWeight.w800,
                     height: 1.05,
@@ -306,7 +316,7 @@ class _WalletAssetStage extends StatelessWidget {
                   value: '¥${balance.balanceLabel}',
                 ),
               ),
-              Container(width: 1, height: 30, color: const Color(0x26ffffff)),
+              Container(width: 1, height: 30, color: BimColors.borderLight),
               Expanded(
                 child: Padding(
                   padding: const EdgeInsets.only(left: BimSpacing.x4),
@@ -332,7 +342,8 @@ class _WalletAssetStage extends StatelessWidget {
                   vertical: BimSpacing.x2,
                 ),
                 decoration: BoxDecoration(
-                  color: BimColors.warning.withValues(alpha: 0.14),
+                  color: BimColors.warningSurface,
+                  border: Border.all(color: BimColors.warningBorder),
                   borderRadius: BorderRadius.circular(BimRadius.sm),
                 ),
                 child: Row(
@@ -351,7 +362,7 @@ class _WalletAssetStage extends StatelessWidget {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
-                          color: BimColors.inverseText,
+                          color: BimColors.warningText,
                           fontSize: BimTypography.caption,
                           fontWeight: FontWeight.w600,
                         ),
@@ -359,7 +370,7 @@ class _WalletAssetStage extends StatelessWidget {
                     ),
                     const Icon(
                       Icons.chevron_right,
-                      color: BimColors.inverseSecondaryText,
+                      color: BimColors.warningText,
                       size: 18,
                     ),
                   ],
@@ -440,8 +451,8 @@ class _WalletStatusPill extends StatelessWidget {
           const SizedBox(width: BimSpacing.x1),
           Text(
             label,
-            style: const TextStyle(
-              color: BimColors.inverseText,
+            style: TextStyle(
+              color: danger ? BimColors.warningText : BimColors.successText,
               fontSize: BimTypography.caption,
               fontWeight: FontWeight.w700,
             ),
@@ -466,7 +477,7 @@ class _WalletInlineMetric extends StatelessWidget {
         Text(
           label,
           style: const TextStyle(
-            color: BimColors.inverseSecondaryText,
+            color: BimColors.secondaryText,
             fontSize: BimTypography.caption,
             fontWeight: FontWeight.w500,
           ),
@@ -477,7 +488,7 @@ class _WalletInlineMetric extends StatelessWidget {
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           style: const TextStyle(
-            color: BimColors.inverseText,
+            color: BimColors.text,
             fontSize: BimTypography.body,
             fontWeight: FontWeight.w700,
           ),
@@ -509,25 +520,23 @@ class _WalletStageAction extends StatelessWidget {
         constraints: const BoxConstraints(minHeight: 48),
         padding: const EdgeInsets.symmetric(horizontal: BimSpacing.x3),
         decoration: BoxDecoration(
-          color: primary
-              ? BimColors.primary
-              : BimColors.inverseText.withValues(alpha: 0.1),
-          border: primary
-              ? null
-              : Border.all(
-                  color: BimColors.inverseText.withValues(alpha: 0.12),
-                ),
+          color: primary ? BimColors.primary : BimColors.fill,
+          border: primary ? null : Border.all(color: BimColors.border),
           borderRadius: BorderRadius.circular(BimRadius.sm),
         ),
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(icon, color: BimColors.inverseText, size: 20),
+            Icon(
+              icon,
+              color: primary ? BimColors.inverseText : BimColors.primary,
+              size: 20,
+            ),
             const SizedBox(width: BimSpacing.x2),
             Text(
               label,
-              style: const TextStyle(
-                color: BimColors.inverseText,
+              style: TextStyle(
+                color: primary ? BimColors.inverseText : BimColors.text,
                 fontSize: BimTypography.body,
                 fontWeight: FontWeight.w700,
               ),

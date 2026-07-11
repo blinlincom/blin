@@ -14,6 +14,7 @@ class PaymentServicePage extends StatefulWidget {
     required this.channelId,
     required this.channelType,
     this.serviceAccount = const {},
+    this.initialClientMsgNo = '',
     super.key,
   });
 
@@ -22,6 +23,7 @@ class PaymentServicePage extends StatefulWidget {
   final String channelId;
   final int channelType;
   final Map<String, Object?> serviceAccount;
+  final String initialClientMsgNo;
 
   @override
   State<PaymentServicePage> createState() => _PaymentServicePageState();
@@ -31,6 +33,7 @@ class _PaymentServicePageState extends State<PaymentServicePage>
     with WidgetsBindingObserver {
   final ScrollController _scrollController = ScrollController();
   final TextEditingController _searchController = TextEditingController();
+  final Map<String, GlobalKey> _messageKeys = <String, GlobalKey>{};
   StreamSubscription<BusinessImMessageEvent>? _messageSub;
   Future<List<Map<String, Object?>>>? _runningLoad;
 
@@ -42,6 +45,7 @@ class _PaymentServicePageState extends State<PaymentServicePage>
   int _messageRevision = 0;
   Map<String, Object?> _serviceAccount = const {};
   bool _serviceConfigLoading = false;
+  bool _initialTargetHandled = false;
 
   @override
   void initState() {
@@ -86,6 +90,7 @@ class _PaymentServicePageState extends State<PaymentServicePage>
       _serviceAccount = Map<String, Object?>.from(widget.serviceAccount);
       _serviceConfigLoading = false;
       _hydrateCachedMessages();
+      _initialTargetHandled = false;
       unawaited(
         widget.controller.openConversation(
           channelId: widget.channelId,
@@ -95,6 +100,9 @@ class _PaymentServicePageState extends State<PaymentServicePage>
       unawaited(_markVisibleRead('payment_service_updated'));
       unawaited(_loadMessagesIntoState(showLoading: _messages.isEmpty));
       unawaited(_loadServiceAccountConfig());
+    } else if (oldWidget.initialClientMsgNo != widget.initialClientMsgNo) {
+      _initialTargetHandled = false;
+      _revealInitialTargetOrLatest();
     } else if (jsonEncode(oldWidget.serviceAccount) !=
         jsonEncode(widget.serviceAccount)) {
       setState(() {
@@ -136,7 +144,7 @@ class _PaymentServicePageState extends State<PaymentServicePage>
     _loading = cached.isEmpty;
     _error = '';
     if (cached.isNotEmpty) {
-      WidgetsBinding.instance.addPostFrameCallback((_) => _jumpToLatest());
+      _revealInitialTargetOrLatest();
     }
   }
 
@@ -224,7 +232,7 @@ class _PaymentServicePageState extends State<PaymentServicePage>
         _loading = false;
         _error = '';
       });
-      _scrollToLatest();
+      _revealInitialTargetOrLatest();
       unawaited(_markVisibleRead('payment_service_loaded'));
     } catch (error, stackTrace) {
       if (!mounted || !identical(_runningLoad, future)) {
@@ -265,6 +273,29 @@ class _PaymentServicePageState extends State<PaymentServicePage>
       merged = _paymentServiceMergeMessages(merged, item, limit: 300);
     }
     return merged;
+  }
+
+  void _revealInitialTargetOrLatest() {
+    final target = widget.initialClientMsgNo.trim();
+    if (_initialTargetHandled || target.isEmpty) {
+      _scrollToLatest();
+      return;
+    }
+    _initialTargetHandled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final context = _messageKeys['client:$target']?.currentContext;
+      if (context == null) {
+        _scrollToLatest();
+        return;
+      }
+      Scrollable.ensureVisible(
+        context,
+        duration: const Duration(milliseconds: 220),
+        curve: Curves.easeOutCubic,
+        alignment: 0.5,
+      );
+    });
   }
 
   Future<void> _markVisibleRead(String source) async {
@@ -376,13 +407,6 @@ class _PaymentServicePageState extends State<PaymentServicePage>
           })
           .toList(growable: false),
     );
-  }
-
-  void _jumpToLatest() {
-    if (!mounted || !_scrollController.hasClients) {
-      return;
-    }
-    _scrollController.jumpTo(_scrollController.position.maxScrollExtent);
   }
 
   void _scrollToLatest() {
@@ -578,7 +602,11 @@ class _PaymentServicePageState extends State<PaymentServicePage>
         itemCount: messages.length,
         itemBuilder: (context, index) {
           final item = messages[index];
+          final messageKey = _paymentServiceMessageKey(item);
           return Column(
+            key: messageKey.isEmpty
+                ? null
+                : _messageKeys.putIfAbsent(messageKey, GlobalKey.new),
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               if (_shouldShowPaymentTimeDivider(messages, index))

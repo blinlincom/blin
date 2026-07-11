@@ -28,6 +28,20 @@ class ApiException implements Exception {
   String toString() => message;
 }
 
+class FriendSnapshot {
+  const FriendSnapshot({
+    required this.items,
+    required this.complete,
+    required this.version,
+    required this.generatedAt,
+  });
+
+  final List<Map<String, Object?>> items;
+  final bool complete;
+  final String version;
+  final int generatedAt;
+}
+
 class ImRoute {
   const ImRoute({this.apiUrl = '', this.httpsStreamAddr = ''});
 
@@ -1169,3 +1183,160 @@ String _decimalLabel(Object? value) {
   final cent = parts.length > 1 ? parts[1] : '';
   return '${negative ? '-' : ''}${yuan.isEmpty ? '0' : yuan}.${cent.padRight(2, '0').substring(0, 2)}';
 }
+
+class OtcNetwork {
+  const OtcNetwork({required this.id, required this.code, required this.name});
+  final int id;
+  final String code;
+  final String name;
+  factory OtcNetwork.fromJson(Object? value) {
+    final map = _objectMap(value);
+    return OtcNetwork(
+      id: _intFrom(map['id']),
+      code: '${map['code'] ?? ''}',
+      name: '${map['name'] ?? ''}',
+    );
+  }
+}
+
+class OtcAsset {
+  const OtcAsset({
+    required this.id,
+    required this.symbol,
+    required this.name,
+    required this.networks,
+  });
+  final int id;
+  final String symbol;
+  final String name;
+  final List<OtcNetwork> networks;
+  factory OtcAsset.fromJson(Object? value) {
+    final map = _objectMap(value);
+    final raw = map['networks'];
+    return OtcAsset(
+      id: _intFrom(map['id']),
+      symbol: '${map['symbol'] ?? ''}',
+      name: '${map['name'] ?? ''}',
+      networks: raw is List
+          ? raw.map(OtcNetwork.fromJson).toList(growable: false)
+          : const [],
+    );
+  }
+}
+
+class OtcConfig {
+  const OtcConfig({
+    required this.enabled,
+    required this.manualEscrow,
+    required this.merchantDeposit,
+    required this.assets,
+    required this.merchant,
+  });
+  final bool enabled;
+  final bool manualEscrow;
+  final String merchantDeposit;
+  final List<OtcAsset> assets;
+  final Map<String, Object?> merchant;
+  factory OtcConfig.fromJson(Object? value) {
+    final map = _objectMap(value);
+    final raw = map['assets'];
+    return OtcConfig(
+      enabled: _enabled(map['enabled']),
+      manualEscrow: _enabled(map['manual_escrow'], defaultValue: true),
+      merchantDeposit: _decimalLabel(map['merchant_deposit']),
+      assets: raw is List
+          ? raw.map(OtcAsset.fromJson).toList(growable: false)
+          : const [],
+      merchant: _objectMap(map['merchant']),
+    );
+  }
+}
+
+class OtcAd {
+  const OtcAd({
+    required this.id,
+    required this.side,
+    required this.symbol,
+    required this.networkCode,
+    required this.price,
+    required this.minFiat,
+    required this.maxFiat,
+    required this.availableAsset,
+    required this.paymentMethods,
+    required this.merchant,
+  });
+  final int id;
+  final String side;
+  final String symbol;
+  final String networkCode;
+  final String price;
+  final String minFiat;
+  final String maxFiat;
+  final String availableAsset;
+  final List<String> paymentMethods;
+  final Map<String, Object?> merchant;
+  factory OtcAd.fromJson(Object? value) {
+    final map = _objectMap(value);
+    final methods = map['payment_methods'];
+    return OtcAd(
+      id: _intFrom(map['id']),
+      side: '${map['side'] ?? ''}',
+      symbol: '${map['symbol'] ?? ''}',
+      networkCode: '${map['network_code'] ?? ''}',
+      price: '${map['price'] ?? '0'}',
+      minFiat: _decimalLabel(map['min_fiat']),
+      maxFiat: _decimalLabel(map['max_fiat']),
+      availableAsset: '${map['available_asset'] ?? '0'}',
+      paymentMethods: methods is List
+          ? methods.map((e) => '$e').toList(growable: false)
+          : const [],
+      merchant: _objectMap(map['merchant']),
+    );
+  }
+}
+
+class OtcOrder {
+  const OtcOrder({
+    required this.orderNo,
+    required this.side,
+    required this.assetAmount,
+    required this.price,
+    required this.fiatAmount,
+    required this.status,
+    required this.statusName,
+    required this.version,
+    required this.expireTime,
+    required this.buyerId,
+    required this.sellerId,
+  });
+  final String orderNo;
+  final String side;
+  final String assetAmount;
+  final String price;
+  final String fiatAmount;
+  final String status;
+  final String statusName;
+  final int version;
+  final String expireTime;
+  final int buyerId;
+  final int sellerId;
+  factory OtcOrder.fromJson(Object? value) {
+    final map = _objectMap(value);
+    return OtcOrder(
+      orderNo: '${map['order_no'] ?? ''}',
+      side: '${map['side'] ?? ''}',
+      assetAmount: '${map['asset_amount'] ?? '0'}',
+      price: '${map['price'] ?? '0'}',
+      fiatAmount: _decimalLabel(map['fiat_amount']),
+      status: '${map['status'] ?? ''}',
+      statusName: '${map['status_name'] ?? ''}',
+      version: _intFrom(map['version']),
+      expireTime: '${map['expire_time'] ?? ''}',
+      buyerId: _intFrom(map['buyer_id']),
+      sellerId: _intFrom(map['seller_id']),
+    );
+  }
+}
+
+int _intFrom(Object? value) =>
+    value is int ? value : int.tryParse('$value') ?? 0;

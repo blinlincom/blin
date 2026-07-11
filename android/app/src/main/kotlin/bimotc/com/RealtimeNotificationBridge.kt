@@ -46,6 +46,7 @@ class RealtimeNotificationBridge(private val activity: Activity) {
                         channelId = call.argument<String>("channel_id").orEmpty(),
                         channelType = call.argument<Int>("channel_type") ?: 0,
                         clientMsgNo = call.argument<String>("client_msg_no").orEmpty(),
+                        contentType = call.argument<String>("content_type").orEmpty(),
                         title = call.argument<String>("title").orEmpty(),
                         text = call.argument<String>("text").orEmpty()
                     )
@@ -148,6 +149,7 @@ class RealtimeNotificationBridge(private val activity: Activity) {
         channelType: Int,
         clientMsgNo: String,
         title: String,
+        contentType: String,
         text: String
     ) {
         if (channelId.isBlank() || clientMsgNo.isBlank() || !notificationsEnabled()) {
@@ -160,12 +162,13 @@ class RealtimeNotificationBridge(private val activity: Activity) {
             callId = 0,
             channelId = channelId,
             channelType = channelType,
-            clientMsgNo = clientMsgNo
+            clientMsgNo = clientMsgNo,
+            contentType = contentType
         )
         val notificationId = messageNotificationId(channelId, channelType)
         val pendingIntent = PendingIntent.getActivity(
             activity,
-            MESSAGE_REQUEST_BASE + abs(notificationId),
+            messageRequestCode(channelId, channelType, clientMsgNo),
             intent,
             pendingIntentFlags()
         )
@@ -233,7 +236,8 @@ class RealtimeNotificationBridge(private val activity: Activity) {
         callId: Int,
         channelId: String,
         channelType: Int,
-        clientMsgNo: String
+        clientMsgNo: String,
+        contentType: String = ""
     ): Intent {
         return Intent(activity, MainActivity::class.java)
             .setAction(ACTION_NOTIFICATION_TAP)
@@ -243,6 +247,7 @@ class RealtimeNotificationBridge(private val activity: Activity) {
             .putExtra(EXTRA_CHANNEL_ID, channelId)
             .putExtra(EXTRA_CHANNEL_TYPE, channelType)
             .putExtra(EXTRA_CLIENT_MSG_NO, clientMsgNo)
+            .putExtra(EXTRA_CONTENT_TYPE, contentType)
     }
 
     private fun consumePayload(intent: Intent?): Map<String, Any>? {
@@ -254,7 +259,8 @@ class RealtimeNotificationBridge(private val activity: Activity) {
             "call_id" to intent.getIntExtra(EXTRA_CALL_ID, 0),
             "channel_id" to intent.getStringExtra(EXTRA_CHANNEL_ID).orEmpty(),
             "channel_type" to intent.getIntExtra(EXTRA_CHANNEL_TYPE, 0),
-            "client_msg_no" to intent.getStringExtra(EXTRA_CLIENT_MSG_NO).orEmpty()
+            "client_msg_no" to intent.getStringExtra(EXTRA_CLIENT_MSG_NO).orEmpty(),
+            "content_type" to intent.getStringExtra(EXTRA_CONTENT_TYPE).orEmpty()
         )
         intent.action = Intent.ACTION_MAIN
         intent.removeExtra(EXTRA_TYPE)
@@ -262,6 +268,7 @@ class RealtimeNotificationBridge(private val activity: Activity) {
         intent.removeExtra(EXTRA_CHANNEL_ID)
         intent.removeExtra(EXTRA_CHANNEL_TYPE)
         intent.removeExtra(EXTRA_CLIENT_MSG_NO)
+        intent.removeExtra(EXTRA_CONTENT_TYPE)
         return payload
     }
 
@@ -338,6 +345,13 @@ class RealtimeNotificationBridge(private val activity: Activity) {
         return MESSAGE_NOTIFICATION_BASE + abs("$channelType:$channelId".hashCode() % 100000)
     }
 
+    private fun messageRequestCode(
+        channelId: String,
+        channelType: Int,
+        clientMsgNo: String
+    ): Int = MESSAGE_REQUEST_BASE +
+        abs("$channelType:$channelId:$clientMsgNo".hashCode() % 100000)
+
     private fun friendRequestNotificationId(applyId: String): Int {
         return FRIEND_REQUEST_NOTIFICATION_BASE + abs(applyId.hashCode() % 100000)
     }
@@ -355,6 +369,7 @@ class RealtimeNotificationBridge(private val activity: Activity) {
         private const val EXTRA_CHANNEL_ID = "channel_id"
         private const val EXTRA_CHANNEL_TYPE = "channel_type"
         private const val EXTRA_CLIENT_MSG_NO = "client_msg_no"
+        private const val EXTRA_CONTENT_TYPE = "content_type"
         private const val CALL_NOTIFICATION_BASE = 910000
         private const val MESSAGE_NOTIFICATION_BASE = 920000
         private const val FRIEND_REQUEST_NOTIFICATION_BASE = 925000

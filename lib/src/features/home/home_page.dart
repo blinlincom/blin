@@ -58,6 +58,7 @@ part 'wallet/payment_code_widgets.dart';
 part 'wallet/payment_service_page.dart';
 part 'wallet/payment_service_widgets.dart';
 part 'wallet/service_account_settings_page.dart';
+part 'wallet/otc_pages.dart';
 part 'chat/chat_page.dart';
 part 'chat/action_input_pages.dart';
 part 'chat/media_picker_pages.dart';
@@ -386,9 +387,10 @@ class _HomePageState extends State<HomePage> {
     final left = max(8.0, bottomRight.dx - 184);
     final selected = await showMenu<String>(
       context: context,
-      color: const Color(0xff2f3338),
+      color: BimColors.surface,
       elevation: 0,
       shape: RoundedRectangleBorder(
+        side: const BorderSide(color: BimColors.border),
         borderRadius: BorderRadius.circular(BimRadius.sm),
       ),
       position: RelativeRect.fromLTRB(
@@ -544,14 +546,14 @@ class _HomeQuickMenuRow extends StatelessWidget {
       width: 152,
       child: Row(
         children: [
-          Icon(icon, color: Colors.white, size: 22),
+          Icon(icon, color: BimColors.primary, size: 21),
           const SizedBox(width: 12),
           Expanded(
             child: Text(
               label,
               style: const TextStyle(
-                color: Colors.white,
-                fontSize: 16,
+                color: BimColors.text,
+                fontSize: BimTypography.body,
                 fontWeight: FontWeight.w500,
               ),
             ),

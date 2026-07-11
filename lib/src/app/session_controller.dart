@@ -71,7 +71,7 @@ class SessionController extends ChangeNotifier {
   DateTime? _friendCacheAt;
   DateTime? _groupCacheAt;
   DateTime? _serviceAccountCacheAt;
-  Future<List<Map<String, Object?>>>? _friendRequest;
+  Future<FriendSnapshot>? _friendRequest;
   Future<List<Map<String, Object?>>>? _groupRequest;
   Future<List<Map<String, Object?>>>? _serviceAccountRequest;
   List<Map<String, Object?>> _friendApplyInCache = const [];
@@ -913,6 +913,102 @@ class SessionController extends ChangeNotifier {
     return request;
   }
 
+  Future<OtcConfig> loadOtcConfig() {
+    final current = _requireSession();
+    return _api.otcConfig(session: current, device: _device);
+  }
+
+  Future<List<OtcAd>> loadOtcAds(String side) {
+    final current = _requireSession();
+    return _api.otcAds(session: current, device: _device, side: side);
+  }
+
+  Future<List<OtcOrder>> loadOtcOrders() {
+    final current = _requireSession();
+    return _api.otcOrders(session: current, device: _device);
+  }
+
+  Future<OtcOrder> createOtcOrder({
+    required int adId,
+    required String side,
+    required String fiatAmount,
+    required int addressId,
+    required int paymentMethodId,
+  }) {
+    final current = _requireSession();
+    return _api.otcCreateOrder(
+      session: current,
+      device: _device,
+      adId: adId,
+      side: side,
+      fiatAmount: fiatAmount,
+      addressId: addressId,
+      paymentMethodId: paymentMethodId,
+    );
+  }
+
+  Future<List<Map<String, Object?>>> loadOtcAddresses() {
+    final current = _requireSession();
+    return _api.otcAddresses(session: current, device: _device);
+  }
+
+  Future<Map<String, Object?>> saveOtcAddress({
+    required int assetId,
+    required int networkId,
+    required String label,
+    required String address,
+  }) {
+    final current = _requireSession();
+    return _api.otcSaveAddress(
+      session: current,
+      device: _device,
+      assetId: assetId,
+      networkId: networkId,
+      label: label,
+      address: address,
+    );
+  }
+
+  Future<List<Map<String, Object?>>> loadOtcPaymentMethods() {
+    final current = _requireSession();
+    return _api.otcPaymentMethods(session: current, device: _device);
+  }
+
+  Future<Map<String, Object?>> saveOtcPaymentMethod({
+    required String type,
+    required String name,
+    required String account,
+    String bankName = '',
+  }) {
+    final current = _requireSession();
+    return _api.otcSavePaymentMethod(
+      session: current,
+      device: _device,
+      type: type,
+      name: name,
+      account: account,
+      bankName: bankName,
+    );
+  }
+
+  Future<Map<String, Object?>> applyOtcMerchant({String remark = ''}) {
+    final current = _requireSession();
+    return _api.otcApplyMerchant(
+      session: current,
+      device: _device,
+      remark: remark,
+    );
+  }
+
+  Future<Map<String, Object?>> payOtcMerchantDeposit(String payPassword) {
+    final current = _requireSession();
+    return _api.otcPayMerchantDeposit(
+      session: current,
+      device: _device,
+      payPassword: payPassword,
+    );
+  }
+
   Future<List<WalletBill>> loadWalletBills({
     String scene = 'all',
     int page = 1,
@@ -1251,32 +1347,27 @@ class SessionController extends ChangeNotifier {
       );
       return _copyList(_friendCache);
     }
-    if (_friendRequest != null) {
+    var request = _friendRequest;
+    if (request == null) {
+      AppLogger.info('session', 'load friends start');
+      request = _api
+          .friends(session: current, device: _device)
+          .timeout(const Duration(seconds: 15));
+      _friendRequest = request;
+    } else {
       AppLogger.info('session', 'reuse friends request');
-      return _friendRequest!;
     }
-    AppLogger.info('session', 'load friends start');
-    _friendRequest = _api
-        .friends(session: current, device: _device)
-        .timeout(const Duration(seconds: 15));
-    final rawList = await _friendRequest!.whenComplete(
-      () => _friendRequest = null,
-    );
+    final snapshot = await request.whenComplete(() {
+      if (identical(_friendRequest, request)) {
+        _friendRequest = null;
+      }
+    });
+    if (!snapshot.complete || snapshot.version.isEmpty) {
+      throw ApiException('好友数据同步未完成');
+    }
     final list = _mergePendingPresenceIntoFriendList(
-      _hydrateFriendList(rawList),
+      _hydrateFriendList(snapshot.items),
     );
-    if (list.isEmpty && _friendCache.isNotEmpty) {
-      _friendCacheAt = DateTime.now();
-      AppLogger.warn(
-        'session',
-        'ignore non-authoritative empty friend snapshot',
-        data: {
-          'cached_count': _friendCache.length,
-          'force_refresh': forceRefresh,
-        },
-      );
-      return _copyList(_friendCache);
-    }
     _friendCache = list;
     _friendCacheAt = DateTime.now();
     _writeFriendCache(list);

@@ -54,23 +54,6 @@ class _MessagesHeader extends StatelessWidget {
               ),
             ),
           ),
-          const SizedBox(width: BimSpacing.x2),
-          BimPressable(
-            onTap: () =>
-                _push(context, FriendQrScannerPage(controller: controller)),
-            semanticLabel: '扫一扫',
-            child: Container(
-              width: BimDimensions.touchTarget,
-              height: BimDimensions.touchTarget,
-              alignment: Alignment.center,
-              color: BimColors.fill,
-              child: const Icon(
-                Icons.qr_code_scanner,
-                color: BimColors.text,
-                size: 21,
-              ),
-            ),
-          ),
         ],
       ),
     );

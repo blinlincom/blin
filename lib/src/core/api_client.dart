@@ -317,6 +317,210 @@ class ApiClient {
     return list.map(WalletBill.fromJson).toList(growable: false);
   }
 
+  Future<OtcConfig> otcConfig({
+    required UserSession session,
+    required String device,
+  }) async {
+    final result = await secureSignedImPost<Map<String, Object?>>(
+      'otc_config',
+      session: session,
+      device: device,
+      params: const {},
+      secureResponse: true,
+    );
+    if (!result.isSuccess)
+      throw ApiException(result.message, code: result.code);
+    return OtcConfig.fromJson(result.data);
+  }
+
+  Future<List<OtcAd>> otcAds({
+    required UserSession session,
+    required String device,
+    required String side,
+  }) async {
+    final result = await secureSignedImPost<Map<String, Object?>>(
+      'otc_ad_list',
+      session: session,
+      device: device,
+      params: {'side': side},
+      secureResponse: true,
+    );
+    if (!result.isSuccess)
+      throw ApiException(result.message, code: result.code);
+    final list = result.data['list'];
+    return list is List
+        ? list.map(OtcAd.fromJson).toList(growable: false)
+        : const [];
+  }
+
+  Future<List<OtcOrder>> otcOrders({
+    required UserSession session,
+    required String device,
+  }) async {
+    final result = await secureSignedImPost<Map<String, Object?>>(
+      'otc_order_list',
+      session: session,
+      device: device,
+      params: const {},
+      secureResponse: true,
+    );
+    if (!result.isSuccess)
+      throw ApiException(result.message, code: result.code);
+    final list = result.data['list'];
+    return list is List
+        ? list.map(OtcOrder.fromJson).toList(growable: false)
+        : const [];
+  }
+
+  Future<OtcOrder> otcCreateOrder({
+    required UserSession session,
+    required String device,
+    required int adId,
+    required String side,
+    required String fiatAmount,
+    required int addressId,
+    required int paymentMethodId,
+  }) async {
+    final result = await secureSignedImPost<Map<String, Object?>>(
+      side == 'buy' ? 'otc_order_buy_create' : 'otc_order_sell_create',
+      session: session,
+      device: device,
+      params: {
+        'request_id': _nonce(),
+        'ad_id': adId,
+        'fiat_amount': fiatAmount,
+        'address_id': addressId,
+        'payment_method_id': paymentMethodId,
+      },
+      secureResponse: true,
+    );
+    if (!result.isSuccess)
+      throw ApiException(result.message, code: result.code);
+    return OtcOrder.fromJson(result.data);
+  }
+
+  Future<List<Map<String, Object?>>> otcAddresses({
+    required UserSession session,
+    required String device,
+  }) async {
+    final result = await secureSignedImPost<Map<String, Object?>>(
+      'wallet_asset_address_list',
+      session: session,
+      device: device,
+      params: const {},
+      secureResponse: true,
+    );
+    if (!result.isSuccess)
+      throw ApiException(result.message, code: result.code);
+    final list = result.data['list'];
+    return list is List
+        ? list.map(_objectResult).toList(growable: false)
+        : const [];
+  }
+
+  Future<Map<String, Object?>> otcSaveAddress({
+    required UserSession session,
+    required String device,
+    required int assetId,
+    required int networkId,
+    required String label,
+    required String address,
+  }) async {
+    final result = await secureSignedImPost<Map<String, Object?>>(
+      'wallet_asset_address_add',
+      session: session,
+      device: device,
+      params: {
+        'asset_id': assetId,
+        'network_id': networkId,
+        'label': label,
+        'address': address,
+      },
+      secureResponse: true,
+    );
+    if (!result.isSuccess)
+      throw ApiException(result.message, code: result.code);
+    return result.data;
+  }
+
+  Future<List<Map<String, Object?>>> otcPaymentMethods({
+    required UserSession session,
+    required String device,
+  }) async {
+    final result = await secureSignedImPost<Map<String, Object?>>(
+      'otc_payment_method_list',
+      session: session,
+      device: device,
+      params: const {},
+      secureResponse: true,
+    );
+    if (!result.isSuccess)
+      throw ApiException(result.message, code: result.code);
+    final list = result.data['list'];
+    return list is List
+        ? list.map(_objectResult).toList(growable: false)
+        : const [];
+  }
+
+  Future<Map<String, Object?>> otcSavePaymentMethod({
+    required UserSession session,
+    required String device,
+    required String type,
+    required String name,
+    required String account,
+    String bankName = '',
+  }) async {
+    final result = await secureSignedImPost<Map<String, Object?>>(
+      'otc_payment_method_save',
+      session: session,
+      device: device,
+      params: {
+        'method_type': type,
+        'account_name': name,
+        'account_no': account,
+        'bank_name': bankName,
+      },
+      secureResponse: true,
+    );
+    if (!result.isSuccess)
+      throw ApiException(result.message, code: result.code);
+    return result.data;
+  }
+
+  Future<Map<String, Object?>> otcApplyMerchant({
+    required UserSession session,
+    required String device,
+    String remark = '',
+  }) async {
+    final result = await secureSignedImPost<Map<String, Object?>>(
+      'otc_merchant_apply',
+      session: session,
+      device: device,
+      params: {'remark': remark},
+      secureResponse: true,
+    );
+    if (!result.isSuccess)
+      throw ApiException(result.message, code: result.code);
+    return result.data;
+  }
+
+  Future<Map<String, Object?>> otcPayMerchantDeposit({
+    required UserSession session,
+    required String device,
+    required String payPassword,
+  }) async {
+    final result = await secureSignedImPost<Map<String, Object?>>(
+      'otc_merchant_deposit_pay',
+      session: session,
+      device: device,
+      params: {'request_id': _nonce(), 'pay_password': payPassword},
+      secureResponse: true,
+    );
+    if (!result.isSuccess)
+      throw ApiException(result.message, code: result.code);
+    return result.data;
+  }
+
   Future<void> walletSetPayPassword({
     required UserSession session,
     required String device,
@@ -1047,30 +1251,53 @@ class ApiClient {
     );
   }
 
-  Future<List<Map<String, Object?>>> friends({
+  Future<FriendSnapshot> friends({
     required UserSession session,
     required String device,
     int page = 1,
     int limit = 50,
   }) async {
-    final result = await secureSignedImPost<Map<String, Object?>>(
-      'im_friend_list',
-      session: session,
-      device: device,
-      params: {'page': page.toString(), 'limit': limit.toString()},
-      secureResponse: true,
-    );
-    if (!result.isSuccess) {
-      throw ApiException(result.message, code: result.code);
+    final items = <Map<String, Object?>>[];
+    var currentPage = page;
+    var version = '';
+    var generatedAt = 0;
+    for (var requestCount = 0; requestCount < 20; requestCount++) {
+      final result = await secureSignedImPost<Map<String, Object?>>(
+        'im_friend_list',
+        session: session,
+        device: device,
+        params: {'page': currentPage.toString(), 'limit': limit.toString()},
+        secureResponse: true,
+      );
+      if (!result.isSuccess) {
+        throw ApiException(result.message, code: result.code);
+      }
+      final pageVersion = result.data['snapshot_version']?.toString() ?? '';
+      if (pageVersion.isEmpty ||
+          (version.isNotEmpty && version != pageVersion)) {
+        throw ApiException('好友数据同步版本发生变化，请重试');
+      }
+      version = pageVersion;
+      generatedAt =
+          int.tryParse(result.data['generated_at']?.toString() ?? '') ??
+          generatedAt;
+      final list = result.data['list'];
+      if (list is List) {
+        items.addAll(
+          list.whereType<Map>().map((item) => item.cast<String, Object?>()),
+        );
+      }
+      if (result.data['snapshot_complete']?.toString() == '1') {
+        return FriendSnapshot(
+          items: items,
+          complete: true,
+          version: version,
+          generatedAt: generatedAt,
+        );
+      }
+      currentPage++;
     }
-    final list = result.data['list'];
-    if (list is List) {
-      return list
-          .whereType<Map>()
-          .map((item) => item.cast<String, Object?>())
-          .toList();
-    }
-    return [];
+    throw ApiException('好友数量超过同步上限');
   }
 
   Future<List<Map<String, Object?>>> groups({
@@ -2049,4 +2276,11 @@ String? _stringFromKeys(Map<String, Object?> map, List<String> keys) {
     }
   }
   return null;
+}
+
+Map<String, Object?> _objectResult(Object? value) {
+  if (value is Map) {
+    return value.map((key, item) => MapEntry('$key', item));
+  }
+  return const {};
 }
