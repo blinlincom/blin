@@ -254,6 +254,9 @@ class _WalletAssetStage extends StatelessWidget {
         : (balance.walletStatus == 1 ? '状态正常' : '当前受限');
     final hasFrozen = _walletAmountPositive(balance.frozenBalance);
     final hasRisk = hasFrozen || balance.walletStatus != 1;
+    final hasOtcDeposit =
+        balance.otcMerchantStatus >= 0 ||
+        _walletAmountPositive(balance.otcMerchantDeposit);
     return Container(
       padding: const EdgeInsets.fromLTRB(
         BimSpacing.x5,
@@ -328,6 +331,82 @@ class _WalletAssetStage extends StatelessWidget {
               ),
             ],
           ),
+          if (hasOtcDeposit) ...[
+            const SizedBox(height: BimSpacing.x4),
+            BimPressable(
+              onTap: () => _showOtcDepositDetails(context, balance),
+              semanticLabel: '查看OTC商家保证金',
+              child: Container(
+                constraints: const BoxConstraints(
+                  minHeight: BimDimensions.touchTarget,
+                ),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: BimSpacing.x3,
+                  vertical: BimSpacing.x3,
+                ),
+                decoration: BoxDecoration(
+                  color: BimColors.fill,
+                  border: Border.all(color: BimColors.borderLight),
+                  borderRadius: BorderRadius.circular(BimRadius.sm),
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 36,
+                      height: 36,
+                      alignment: Alignment.center,
+                      color: BimColors.primary.withValues(alpha: 0.1),
+                      child: const Icon(
+                        Icons.shield_outlined,
+                        size: 20,
+                        color: BimColors.primary,
+                      ),
+                    ),
+                    const SizedBox(width: BimSpacing.x3),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'OTC 商家保证金',
+                            style: TextStyle(
+                              color: BimColors.textDark,
+                              fontSize: BimTypography.body,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          const SizedBox(height: 3),
+                          Text(
+                            '广告占用 ¥${balance.otcAdDepositReserved}  ·  可用 ¥${balance.otcDepositAvailable}',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: BimColors.secondaryText,
+                              fontSize: BimTypography.caption,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: BimSpacing.x2),
+                    Text(
+                      '¥${balance.otcMerchantDeposit}',
+                      style: const TextStyle(
+                        color: BimColors.textDark,
+                        fontSize: BimTypography.body,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const Icon(
+                      Icons.chevron_right,
+                      color: BimColors.mutedText,
+                      size: 20,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
           if (hasRisk) ...[
             const SizedBox(height: BimSpacing.x4),
             BimPressable(
@@ -403,6 +482,75 @@ class _WalletAssetStage extends StatelessWidget {
       ),
     );
   }
+}
+
+String _otcMerchantStatusLabel(int status) {
+  return switch (status) {
+    0 => '审核中',
+    1 => '正常',
+    2 => '审核未通过',
+    3 => '已冻结',
+    4 => '退出处理中',
+    _ => '未申请',
+  };
+}
+
+Future<void> _showOtcDepositDetails(
+  BuildContext context,
+  WalletBalance balance,
+) {
+  return showModalBottomSheet<void>(
+    context: context,
+    useSafeArea: true,
+    backgroundColor: BimColors.surface,
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+    ),
+    builder: (context) => Padding(
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 26),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const Text(
+            'OTC 商家保证金',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: BimColors.textDark,
+              fontSize: 17,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 18),
+          _WalletInfoRow(
+            label: '商家状态',
+            value: _otcMerchantStatusLabel(balance.otcMerchantStatus),
+          ),
+          _WalletInfoRow(
+            label: '保证金总额',
+            value: '¥${balance.otcMerchantDeposit}',
+          ),
+          _WalletInfoRow(
+            label: '广告占用',
+            value: '¥${balance.otcAdDepositReserved}',
+          ),
+          _WalletInfoRow(
+            label: '可用保证金',
+            value: '¥${balance.otcDepositAvailable}',
+          ),
+          const SizedBox(height: BimSpacing.x2),
+          const Text(
+            '保证金用于商家资格与广告额度，不计入钱包可用余额。广告下架或审核未通过后，相关占用将按平台规则释放。',
+            style: TextStyle(
+              color: BimColors.secondaryText,
+              fontSize: BimTypography.caption,
+              height: 1.5,
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
 }
 
 class _WalletEntryAnimation extends StatelessWidget {

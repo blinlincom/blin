@@ -704,6 +704,7 @@ class _WalletBillIcon extends StatelessWidget {
       '8' => Icons.add_card_outlined,
       '9' => Icons.chat_bubble_outline,
       '11' => Icons.qr_code_2,
+      '12' => Icons.shield_outlined,
       _ => Icons.account_balance_wallet_outlined,
     };
     final color = income ? const Color(0xff16a34a) : _dangerColor;
@@ -733,6 +734,7 @@ class _WalletSceneTabs extends StatelessWidget {
       BimSegmentOption(value: 'withdraw', label: '提现'),
       BimSegmentOption(value: 'im', label: '红包转账'),
       BimSegmentOption(value: 'scan', label: '扫码'),
+      BimSegmentOption(value: 'otc', label: 'OTC保证金'),
     ];
     return BimSegmentedControl<String>(
       options: tabs,

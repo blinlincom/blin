@@ -294,6 +294,10 @@ class WalletBalance {
     this.walletLockReason = '',
     this.freezeReason = '',
     this.freezeRecords = const [],
+    this.otcMerchantDeposit = '0.00',
+    this.otcAdDepositReserved = '0.00',
+    this.otcDepositAvailable = '0.00',
+    this.otcMerchantStatus = -1,
     this.payPasswordSet = false,
     this.payPasswordLocked = false,
     this.payPasswordLockedUntil = '',
@@ -318,6 +322,10 @@ class WalletBalance {
   final String walletLockReason;
   final String freezeReason;
   final List<WalletFreezeRecord> freezeRecords;
+  final String otcMerchantDeposit;
+  final String otcAdDepositReserved;
+  final String otcDepositAvailable;
+  final int otcMerchantStatus;
   final bool payPasswordSet;
   final bool payPasswordLocked;
   final String payPasswordLockedUntil;
@@ -379,6 +387,10 @@ class WalletBalance {
       walletLockReason: map['wallet_lock_reason']?.toString() ?? '',
       freezeReason: map['freeze_reason']?.toString() ?? '',
       freezeRecords: freezeRecords,
+      otcMerchantDeposit: _decimalLabel(map['otc_merchant_deposit']),
+      otcAdDepositReserved: _decimalLabel(map['otc_ad_deposit_reserved']),
+      otcDepositAvailable: _decimalLabel(map['otc_deposit_available']),
+      otcMerchantStatus: _intFrom(map['otc_merchant_status']),
       payPasswordSet: _enabled(map['pay_password_set']),
       payPasswordLocked: _enabled(map['pay_password_locked']),
       payPasswordLockedUntil:

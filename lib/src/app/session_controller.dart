@@ -991,12 +991,43 @@ class SessionController extends ChangeNotifier {
     );
   }
 
-  Future<Map<String, Object?>> applyOtcMerchant({String remark = ''}) {
+  Future<Map<String, Object?>> applyOtcMerchant({
+    required String payPassword,
+    String remark = '',
+  }) {
     final current = _requireSession();
     return _api.otcApplyMerchant(
       session: current,
       device: _device,
+      payPassword: payPassword,
       remark: remark,
+    );
+  }
+
+  Future<Map<String, Object?>> createOtcMerchantAd({
+    required String side,
+    required int assetId,
+    required int networkId,
+    required String price,
+    required String minFiat,
+    required String maxFiat,
+    required String availableAsset,
+    required List<String> paymentMethods,
+    String terms = '',
+  }) {
+    final current = _requireSession();
+    return _api.otcCreateMerchantAd(
+      session: current,
+      device: _device,
+      side: side,
+      assetId: assetId,
+      networkId: networkId,
+      price: price,
+      minFiat: minFiat,
+      maxFiat: maxFiat,
+      availableAsset: availableAsset,
+      paymentMethods: paymentMethods,
+      terms: terms,
     );
   }
 

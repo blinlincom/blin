@@ -490,13 +490,53 @@ class ApiClient {
   Future<Map<String, Object?>> otcApplyMerchant({
     required UserSession session,
     required String device,
+    required String payPassword,
     String remark = '',
   }) async {
     final result = await secureSignedImPost<Map<String, Object?>>(
       'otc_merchant_apply',
       session: session,
       device: device,
-      params: {'remark': remark},
+      params: {
+        'request_id': _nonce(),
+        'pay_password': payPassword,
+        'remark': remark,
+      },
+      secureResponse: true,
+    );
+    if (!result.isSuccess)
+      throw ApiException(result.message, code: result.code);
+    return result.data;
+  }
+
+  Future<Map<String, Object?>> otcCreateMerchantAd({
+    required UserSession session,
+    required String device,
+    required String side,
+    required int assetId,
+    required int networkId,
+    required String price,
+    required String minFiat,
+    required String maxFiat,
+    required String availableAsset,
+    required List<String> paymentMethods,
+    String terms = '',
+  }) async {
+    final result = await secureSignedImPost<Map<String, Object?>>(
+      'otc_merchant_ad_create',
+      session: session,
+      device: device,
+      params: {
+        'side': side,
+        'asset_id': assetId,
+        'network_id': networkId,
+        'price': price,
+        'min_fiat': minFiat,
+        'max_fiat': maxFiat,
+        'available_asset': availableAsset,
+        'payment_methods': paymentMethods,
+        'terms': terms,
+      },
       secureResponse: true,
     );
     if (!result.isSuccess)
