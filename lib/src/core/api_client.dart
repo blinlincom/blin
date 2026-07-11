@@ -567,6 +567,7 @@ class ApiClient {
     required int adId,
     required String side,
     required String fiatAmount,
+    required String payPassword,
     required int addressId,
     required int paymentMethodId,
   }) async {
@@ -578,6 +579,7 @@ class ApiClient {
         'request_id': _nonce(),
         'ad_id': adId,
         'fiat_amount': fiatAmount,
+        'pay_password': payPassword,
         'address_id': addressId,
         'payment_method_id': paymentMethodId,
       },
@@ -726,6 +728,7 @@ class ApiClient {
     required String minFiat,
     required String maxFiat,
     required String availableAsset,
+    required String payPassword,
     required List<String> paymentMethods,
     String terms = '',
   }) async {
@@ -741,6 +744,7 @@ class ApiClient {
         'min_fiat': minFiat,
         'max_fiat': maxFiat,
         'available_asset': availableAsset,
+        'pay_password': payPassword,
         'payment_methods': paymentMethods,
         'terms': terms,
       },

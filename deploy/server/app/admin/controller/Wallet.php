@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace app\admin\controller;
 
 use app\common\support\ResponseHelper;
+use app\common\support\DigitalAssetControlService;
 use app\common\support\WalletNoticeService;
 use app\common\tool\WukongIM;
 use think\facade\Db;
@@ -36,6 +37,13 @@ class Wallet extends Backend
                 'total' => $countQuery->count(),
             ]);
         }
+        $assetSummary=['account_count'=>Db::name('wallet_asset_account')->count(),'available_total'=>bcadd((string)(Db::name('wallet_asset_account')->sum('available_balance')?:0),'0',8),'frozen_total'=>bcadd((string)(Db::name('wallet_asset_account')->sum('frozen_balance')?:0),'0',8),'total_in'=>bcadd((string)(Db::name('wallet_asset_account')->sum('total_in')?:0),'0',8),'total_out'=>bcadd((string)(Db::name('wallet_asset_account')->sum('total_out')?:0),'0',8)];
+        $chainSummary=['address_count'=>Db::name('wallet_chain_address')->count(),'event_count'=>Db::name('wallet_chain_event')->count(),'credited_count'=>Db::name('wallet_chain_event')->where('process_status','credited')->count(),'pending_count'=>Db::name('wallet_chain_event')->whereNotIn('process_status',['credited','below_minimum'])->count()];
+        $chainConfig=Db::name('wallet_chain_config')->alias('c')->leftJoin('otc_asset a','a.id=c.asset_id and a.appid=c.appid')->leftJoin('otc_network n','n.id=c.network_id and n.appid=c.appid')->field('c.*,a.symbol,n.code network_code')->order('c.id')->select()->toArray();
+        $recentAddresses=Db::name('wallet_chain_address')->alias('ca')->leftJoin('user u','u.id=ca.user_id and u.appid=ca.appid')->leftJoin('otc_asset a','a.id=ca.asset_id and a.appid=ca.appid')->leftJoin('otc_network n','n.id=ca.network_id and n.appid=ca.appid')->field('ca.*,u.username,u.nickname,a.symbol,n.code network_code')->order('ca.id desc')->limit(8)->select()->toArray();
+        $recentEvents=Db::name('wallet_chain_event')->order('id desc')->limit(8)->select()->toArray();
+        $topAccounts=Db::name('wallet_asset_account')->alias('wa')->leftJoin('user u','u.id=wa.user_id and u.appid=wa.appid')->leftJoin('otc_asset a','a.id=wa.asset_id and a.appid=wa.appid')->field('wa.*,u.username,u.nickname,a.symbol')->order('wa.available_balance desc,wa.id desc')->limit(8)->select()->toArray();
+        View::assign(compact('assetSummary','chainSummary','chainConfig','recentAddresses','recentEvents','topAccounts'));
         return View::fetch();
     }
 
@@ -43,16 +51,105 @@ class Wallet extends Backend
     {
         if (Request::isAjax()) {
             $limit=input('limit/d')?:20;$page=input('page/d')?:1;$appid=input('appid/d');$username=trim((string)input('username',''));
-            $query=Db::name('wallet_asset_account')->alias('wa')->leftJoin('user u','u.id=wa.user_id and u.appid=wa.appid')->leftJoin('app a','a.appid=wa.appid')->leftJoin('otc_asset x','x.id=wa.asset_id and x.appid=wa.appid')->field('wa.*,u.username,u.nickname,a.appname,x.symbol');
+            $query=Db::name('wallet_asset_account')->alias('wa')->leftJoin('user u','u.id=wa.user_id and u.appid=wa.appid')->leftJoin('app a','a.appid=wa.appid')->leftJoin('otc_asset x','x.id=wa.asset_id and x.appid=wa.appid')->leftJoin('wallet_asset_control c','c.appid=wa.appid and c.user_id=wa.user_id and c.asset_id=wa.asset_id')->field('wa.*,u.username,u.nickname,a.appname,x.symbol,c.block_transfer,c.block_otc,c.block_withdraw,c.block_exchange,c.reason control_reason,(select coalesce(sum(h.remaining_amount),0) from mr_wallet_asset_hold h where h.account_id=wa.id and h.status in (1,4) and h.biz_type="otc_order") otc_frozen,(select coalesce(sum(h.remaining_amount),0) from mr_wallet_asset_hold h where h.account_id=wa.id and h.status in (1,4) and h.biz_type="admin_risk") risk_frozen');
             if($appid>0)$query->where('wa.appid',$appid);if($username!=='')$query->where('u.username|u.nickname','like','%'.$username.'%');
             $count=clone $query;return $this->tableResponse(['rows'=>$query->order('wa.id desc')->page($page,$limit)->select()->toArray(),'total'=>$count->count()]);
         }
         return View::fetch();
     }
 
+    public function asset_holds()
+    {
+        if (Request::isPost()) {
+            $action=trim((string)input('action',''));
+            try {
+                Db::startTrans();
+                if($action==='freeze'){
+                    $accountId=input('account_id/d');$account=Db::name('wallet_asset_account')->where('id',$accountId)->lock(true)->find();if(!$account)throw new \RuntimeException('数字资产账户不存在');
+                    $reason=mb_substr(trim((string)input('reason','')),0,255);if($reason==='')throw new \RuntimeException('冻结原因不能为空');
+                    $request='admin-freeze-'.$this->adminId().'-'.date('YmdHis').'-'.bin2hex(random_bytes(4));
+                    DigitalAssetControlService::createHold((int)$account['appid'],(int)$account['user_id'],(int)$account['asset_id'],$this->assetAmount(input('amount','')),'admin_risk','AR'.date('YmdHis').strtoupper(bin2hex(random_bytes(4))),$reason,$request,'admin',$this->adminId(),trim((string)input('expire_time',''))?:null);
+                }elseif($action==='release'){
+                    $holdId=input('hold_id/d');$hold=Db::name('wallet_asset_hold')->where('id',$holdId)->lock(true)->find();if(!$hold||(string)$hold['biz_type']!=='admin_risk')throw new \RuntimeException('只能解冻后台风控冻结');
+                    $reason=mb_substr(trim((string)input('reason','')),0,255);if($reason==='')throw new \RuntimeException('解冻原因不能为空');
+                    DigitalAssetControlService::releaseHold((int)$hold['appid'],$holdId,$this->assetAmount(input('amount','')),$reason,'admin-release-'.$this->adminId().'-'.date('YmdHis').'-'.bin2hex(random_bytes(4)),'admin',$this->adminId());
+                }else throw new \RuntimeException('操作类型错误');
+                Db::commit();return ResponseHelper::success('操作成功');
+            } catch(\Throwable $e){Db::rollback();return ResponseHelper::error($e->getMessage());}
+        }
+        if(Request::isAjax()){$limit=max(1,min(100,input('limit/d')?:20));$page=max(1,input('page/d')?:1);$keyword=trim((string)input('keyword',''));$type=trim((string)input('biz_type',''));$status=input('status','');$q=Db::name('wallet_asset_hold')->alias('h')->leftJoin('user u','u.id=h.user_id and u.appid=h.appid')->leftJoin('otc_asset x','x.id=h.asset_id and x.appid=h.appid')->field('h.*,u.username,u.nickname,x.symbol');if($keyword!=='')$q->where('u.username|u.nickname|h.hold_no|h.biz_no','like','%'.$keyword.'%');if($type!=='')$q->where('h.biz_type',$type);if($status!=='')$q->where('h.status',(int)$status);$count=clone $q;return $this->tableResponse(['rows'=>$q->order('h.id desc')->page($page,$limit)->select()->toArray(),'total'=>$count->count()]);}
+        return View::fetch();
+    }
+
+    public function asset_controls()
+    {
+        if(Request::isPost()){
+            $accountId=input('account_id/d');$account=Db::name('wallet_asset_account')->where('id',$accountId)->find();if(!$account)return ResponseHelper::error('数字资产账户不存在');$reason=mb_substr(trim((string)input('reason','')),0,255);$enabled=input('enabled/d')===1;
+            $values=['block_transfer'=>$enabled&&input('block_transfer/d')===1?1:0,'block_otc'=>$enabled&&input('block_otc/d')===1?1:0,'block_withdraw'=>$enabled&&input('block_withdraw/d')===1?1:0,'block_exchange'=>$enabled&&input('block_exchange/d')===1?1:0,'reason'=>$enabled?$reason:'','operator_id'=>$this->adminId(),'status'=>$enabled?1:0,'start_time'=>$enabled?date('Y-m-d H:i:s'):null,'end_time'=>$enabled&&trim((string)input('end_time',''))!==''?trim((string)input('end_time')):null,'update_time'=>date('Y-m-d H:i:s')];if($enabled&&$reason==='')return ResponseHelper::error('管控原因不能为空');$row=Db::name('wallet_asset_control')->where(['appid'=>$account['appid'],'user_id'=>$account['user_id'],'asset_id'=>$account['asset_id']])->find();if($row)Db::name('wallet_asset_control')->where('id',$row['id'])->update($values);else Db::name('wallet_asset_control')->insert($values+['appid'=>$account['appid'],'user_id'=>$account['user_id'],'asset_id'=>$account['asset_id'],'create_time'=>date('Y-m-d H:i:s')]);return ResponseHelper::success($enabled?'管控已生效':'管控已解除');
+        }
+        if(Request::isAjax()){$limit=max(1,min(100,input('limit/d')?:20));$page=max(1,input('page/d')?:1);$q=Db::name('wallet_asset_account')->alias('wa')->leftJoin('user u','u.id=wa.user_id and u.appid=wa.appid')->leftJoin('otc_asset x','x.id=wa.asset_id and x.appid=wa.appid')->leftJoin('wallet_asset_control c','c.appid=wa.appid and c.user_id=wa.user_id and c.asset_id=wa.asset_id')->field('wa.id account_id,wa.appid,wa.user_id,wa.available_balance,wa.frozen_balance,u.username,u.nickname,x.symbol,c.*');$count=clone $q;return $this->tableResponse(['rows'=>$q->order('wa.id desc')->page($page,$limit)->select()->toArray(),'total'=>$count->count()]);}return View::fetch();
+    }
+
+    public function asset_entries()
+    {
+        if (Request::isAjax()) {
+            $limit = max(1, min(100, input('limit/d') ?: 20));
+            $page = max(1, input('page/d') ?: 1);
+            $accountId = input('account_id/d');
+            $keyword = trim((string) input('keyword', ''));
+            $businessType = trim((string) input('business_type', ''));
+            $query = Db::name('wallet_asset_entry')->alias('e')
+                ->join('wallet_asset_journal j', 'j.id=e.journal_id')
+                ->join('wallet_asset_account wa', 'wa.id=e.account_id')
+                ->leftJoin('user u', 'u.id=e.user_id and u.appid=wa.appid')
+                ->leftJoin('app a', 'a.appid=wa.appid')
+                ->leftJoin('otc_asset x', 'x.id=wa.asset_id and x.appid=wa.appid')
+                ->field('e.*,j.journal_no,j.business_type,j.business_no,j.status as journal_status,wa.appid,wa.asset_id,u.username,u.nickname,a.appname,x.symbol');
+            if ($accountId > 0) {
+                $query->where('e.account_id', $accountId);
+            }
+            if ($keyword !== '') {
+                $query->where('u.username|u.nickname|j.journal_no|j.business_no|e.remark', 'like', '%' . $keyword . '%');
+            }
+            if ($businessType !== '') {
+                $query->where('j.business_type', $businessType);
+            }
+            $count = clone $query;
+            return $this->tableResponse([
+                'rows' => $query->order('e.id desc')->page($page, $limit)->select()->toArray(),
+                'total' => $count->count(),
+            ]);
+        }
+        $accountId = max(0, (int) input('account_id/d'));
+        $account = null;
+        if ($accountId > 0) {
+            $account = Db::name('wallet_asset_account')->alias('wa')
+                ->leftJoin('user u', 'u.id=wa.user_id and u.appid=wa.appid')
+                ->leftJoin('otc_asset x', 'x.id=wa.asset_id and x.appid=wa.appid')
+                ->field('wa.*,u.username,u.nickname,x.symbol')
+                ->where('wa.id', $accountId)->find();
+        }
+        View::assign(compact('accountId', 'account'));
+        return View::fetch();
+    }
+
     public function chain_addresses()
     {
-        if(Request::isAjax()){$limit=input('limit/d')?:20;$page=input('page/d')?:1;$query=Db::name('wallet_chain_address')->alias('ca')->leftJoin('user u','u.id=ca.user_id and u.appid=ca.appid')->leftJoin('app a','a.appid=ca.appid')->leftJoin('otc_asset x','x.id=ca.asset_id')->leftJoin('otc_network n','n.id=ca.network_id')->field('ca.*,u.username,u.nickname,a.appname,x.symbol,n.code network_code');return $this->tableResponse(['rows'=>$query->order('ca.id desc')->page($page,$limit)->select()->toArray(),'total'=>(clone $query)->count()]);}return View::fetch();
+        if(Request::isAjax()){$limit=max(1,min(100,input('limit/d')?:20));$page=max(1,input('page/d')?:1);$keyword=trim((string)input('keyword',''));$status=trim((string)input('status',''));$query=Db::name('wallet_chain_address')->alias('ca')->leftJoin('user u','u.id=ca.user_id and u.appid=ca.appid')->leftJoin('app a','a.appid=ca.appid')->leftJoin('otc_asset x','x.id=ca.asset_id and x.appid=ca.appid')->leftJoin('otc_network n','n.id=ca.network_id and n.appid=ca.appid')->field('ca.*,u.username,u.nickname,a.appname,x.symbol,n.code network_code');if($keyword!=='')$query->where(function($q)use($keyword){$q->where('u.username|u.nickname|ca.address_base58','like','%'.$keyword.'%');if(ctype_digit($keyword))$q->whereOr('ca.user_id',(int)$keyword);});if($status!=='')$query->where('ca.status',(int)$status);$count=clone $query;return $this->tableResponse(['rows'=>$query->order('ca.id desc')->page($page,$limit)->select()->toArray(),'total'=>$count->count()]);}
+        View::assign(['chainAddressStats'=>['total'=>Db::name('wallet_chain_address')->count(),'active'=>Db::name('wallet_chain_address')->where('status',1)->count(),'deposited'=>Db::name('wallet_chain_address')->whereNotNull('last_deposit_time')->count()]]);return View::fetch();
+    }
+
+    public function deposit_events()
+    {
+        if(Request::isAjax()){$limit=max(1,min(100,input('limit/d')?:20));$page=max(1,input('page/d')?:1);$keyword=trim((string)input('keyword',''));$status=trim((string)input('status',''));$q=Db::name('wallet_chain_event')->alias('e')->leftJoin('wallet_chain_address ca','ca.address_base58=e.to_address')->leftJoin('user u','u.id=ca.user_id and u.appid=ca.appid')->leftJoin('wallet_asset_journal j','j.request_id=concat("deposit-",e.txid,"-",e.log_index)')->field('e.*,ca.appid,ca.user_id,u.username,u.nickname,j.journal_no,j.business_no');if($keyword!=='')$q->where('e.txid|e.to_address|e.from_address|u.username|u.nickname','like','%'.$keyword.'%');if($status!=='')$q->where('e.process_status',$status);$count=clone $q;return $this->tableResponse(['rows'=>$q->order('e.id desc')->page($page,$limit)->select()->toArray(),'total'=>$count->count()]);}
+        View::assign(['depositStats'=>['total'=>Db::name('wallet_chain_event')->count(),'credited'=>Db::name('wallet_chain_event')->where('process_status','credited')->count(),'amount'=>bcadd((string)(Db::name('wallet_chain_event')->where('process_status','credited')->sum('amount')?:0),'0',8)]]);return View::fetch();
+    }
+
+    public function sweep_management()
+    {
+        if(Request::isPost()){$id=input('id/d');$row=Db::name('wallet_sweep_config')->where('id',$id)->find();if(!$row)return ResponseHelper::error('归集配置不存在');$target=trim((string)input('target_address',''));$resource=trim((string)input('resource_address',''));if($target!==''&&!preg_match('/^T[1-9A-HJ-NP-Za-km-z]{33}$/',$target))return ResponseHelper::error('归集钱包地址格式错误');if($resource!==''&&!preg_match('/^T[1-9A-HJ-NP-Za-km-z]{33}$/',$resource))return ResponseHelper::error('资源钱包地址格式错误');if(input('auto_enabled/d')===1)return ResponseHelper::error('签名、Energy/TRX和广播确认模块尚未启用，不能打开自动归集');Db::name('wallet_sweep_config')->where('id',$id)->update(['target_address'=>$target,'resource_address'=>$resource,'min_sweep_amount'=>$this->assetAmount(input('min_sweep_amount','10')),'auto_enabled'=>0,'signing_enabled'=>0,'update_time'=>date('Y-m-d H:i:s')]);return ResponseHelper::success('归集配置已保存，自动执行保持关闭');}
+        if(Request::isAjax()){$limit=max(1,min(100,input('limit/d')?:20));$page=max(1,input('page/d')?:1);$q=Db::name('wallet_sweep_order')->alias('s')->leftJoin('user u','u.id=s.user_id and u.appid=s.appid')->field('s.*,u.username,u.nickname');$count=clone $q;return $this->tableResponse(['rows'=>$q->order('s.id desc')->page($page,$limit)->select()->toArray(),'total'=>$count->count()]);}
+        $configs=Db::name('wallet_sweep_config')->alias('s')->leftJoin('otc_asset a','a.id=s.asset_id and a.appid=s.appid')->leftJoin('otc_network n','n.id=s.network_id and n.appid=s.appid')->field('s.*,a.symbol,n.code network_code')->select()->toArray();$addresses=Db::name('wallet_chain_address')->alias('ca')->leftJoin('user u','u.id=ca.user_id and u.appid=ca.appid')->field('ca.*,u.username,u.nickname')->whereNotNull('ca.last_deposit_time')->order('ca.id desc')->select()->toArray();View::assign(compact('configs','addresses'));return View::fetch();
     }
 
     public function asset_withdrawals()

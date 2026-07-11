@@ -192,6 +192,17 @@ final class OtcService
         Db::startTrans();try{$merchant=Db::name('otc_merchant')->where('appid',$this->appid)->where('user_id',$this->uid())->lock(true)->find();if(!$merchant||(int)$merchant['status']!==1)throw new \RuntimeException('商家尚未认证通过');
             $active=Db::name('otc_ad')->where('appid',$this->appid)->where('merchant_id',(int)$merchant['id'])->whereIn('status',[0,1])->count();if($active>=(int)($cfg['max_merchant_ads']??10))throw new \RuntimeException('广告数量已达上限');
             $depositAvailable=bcsub($this->decimal($merchant['deposit_amount'],2),$this->decimal($merchant['deposit_ad_reserved']??0,2),2);if(bccomp($depositAvailable,$reserved,2)<0)throw new \RuntimeException('可用保证金不足，无法申请广告上架');
+            $merchantUserId=(int)$merchant['user_id'];
+            if($side==='sell'){
+                DigitalAssetControlService::assertAllowed($this->appid,$merchantUserId,$assetId,'otc');
+                $account=$this->assetAccount($merchantUserId,$assetId);
+                $listed=(string)(Db::name('otc_ad')->where('appid',$this->appid)->where('merchant_id',(int)$merchant['id'])->where('side','sell')->where('asset_id',$assetId)->whereIn('status',[0,1])->sum('available_asset')?:0);
+                if(bccomp(bcadd($listed,$available,8),(string)$account['available_balance'],8)>0)throw new \RuntimeException('可用USDT不足以覆盖全部出售广告');
+            }else{
+                $merchantUser=Db::name('user')->where('appid',$this->appid)->where('id',$merchantUserId)->lock(true)->find();if(!$merchantUser||(int)($merchantUser['wallet_status']??1)!==1)throw new \RuntimeException('商家平台钱包不可用');
+                $rows=Db::name('otc_ad')->where('appid',$this->appid)->where('merchant_id',(int)$merchant['id'])->where('side','buy')->whereIn('status',[0,1])->field('price,available_asset')->select()->toArray();$listedFiat='0.00';foreach($rows as $item)$listedFiat=bcadd($listedFiat,bcmul((string)$item['price'],(string)$item['available_asset'],2),2);
+                $platformAvailable=bcsub((string)$merchantUser['money'],(string)($merchantUser['wallet_frozen_money']??0),2);if(bccomp(bcadd($listedFiat,$exposure,2),$platformAvailable,2)>0)throw new \RuntimeException('平台余额不足以覆盖全部收购广告');
+            }
             $now=date('Y-m-d H:i:s');Db::name('otc_merchant')->where('id',(int)$merchant['id'])->update(['deposit_ad_reserved'=>bcadd($this->decimal($merchant['deposit_ad_reserved']??0,2),$reserved,2),'version'=>Db::raw('version+1'),'update_time'=>$now]);
             $id=(int)Db::name('otc_ad')->insertGetId(['appid'=>$this->appid,'merchant_id'=>(int)$merchant['id'],'side'=>$side,'asset_id'=>$assetId,'network_id'=>$networkId,'fiat_currency'=>'CNY','price'=>$price,'min_fiat'=>$min,'max_fiat'=>$max,'available_asset'=>$available,'deposit_reserved'=>$reserved,'payment_methods'=>implode(',',$methods),'terms'=>mb_substr(trim((string)($data['terms']??'')),0,500),'status'=>0,'version'=>1,'create_time'=>$now,'update_time'=>$now]);Db::commit();return $this->adView(Db::name('otc_ad')->where('id',$id)->find()?:[]);
         }catch(\Throwable $e){Db::rollback();throw $e;}
@@ -210,7 +221,7 @@ final class OtcService
             if(!$lockedUser)throw new \RuntimeException('用户不存在');
             $old=Db::name('otc_order')->where('appid',$this->appid)->where('user_id',$this->uid())->where('request_id',$requestId)->find();
             if($old){Db::commit();return $this->orderView($old);}
-            $open=Db::name('otc_order')->where('appid',$this->appid)->where('user_id',$this->uid())->whereIn('status',['awaiting_payment','paid','releasing','appealing'])->count();
+            $open=Db::name('otc_order')->where('appid',$this->appid)->where('user_id',$this->uid())->whereIn('status',['settling','appealing','manual_review'])->count();
             if($open>=(int)$this->configRow()['max_open_orders'])throw new \RuntimeException('进行中的订单数量已达上限');
             $ad=Db::name('otc_ad')->where('appid',$this->appid)->where('id',(int)($data['ad_id']??0))->lock(true)->find();
             if(!$ad||(int)$ad['status']!==1)throw new \RuntimeException('广告已不可交易');
@@ -223,14 +234,21 @@ final class OtcService
             if(bccomp($asset,(string)$ad['available_asset'],8)>0)throw new \RuntimeException('广告库存不足');
             $payment=['id'=>0,'method_type'=>'balance','account_name'=>'平台余额','account_no_masked'=>'平台余额'];
             $address=['id'=>0,'label'=>'平台数字资产账户','address'=>'平台数字资产账户'];
-            $now=date('Y-m-d H:i:s');$timeout=max(5,(int)$this->configRow()['payment_timeout_minutes']);$orderNo=$this->number('O');
+            $now=date('Y-m-d H:i:s');$orderNo=$this->number('O');
             $sellerId=$side==='sell'?$this->uid():(int)$merchant['user_id'];
             $buyerId=$side==='buy'?$this->uid():(int)$merchant['user_id'];
+            DigitalAssetControlService::assertAllowed($this->appid,$sellerId,(int)$ad['asset_id'],'otc');
+            DigitalAssetControlService::assertAllowed($this->appid,$buyerId,(int)$ad['asset_id'],'otc');
             $this->holdAsset($sellerId,(int)$ad['asset_id'],$asset,$orderNo,$requestId);
             $this->holdFiat($buyerId,$fiat,$orderNo);
-            $id=(int)Db::name('otc_order')->insertGetId(['appid'=>$this->appid,'order_no'=>$orderNo,'request_id'=>$requestId,'ad_id'=>(int)$ad['id'],'merchant_id'=>(int)$merchant['id'],'user_id'=>$this->uid(),'buyer_id'=>$buyerId,'seller_id'=>$sellerId,'side'=>$side,'asset_id'=>(int)$ad['asset_id'],'network_id'=>(int)$ad['network_id'],'asset_amount'=>$asset,'price'=>$ad['price'],'fiat_amount'=>$fiat,'fiat_currency'=>$ad['fiat_currency'],'payment_method_id'=>0,'address_id'=>0,'address_snapshot'=>json_encode($address,JSON_UNESCAPED_UNICODE),'payment_snapshot'=>json_encode($payment,JSON_UNESCAPED_UNICODE),'status'=>'paid','version'=>1,'paid_time'=>$now,'expire_time'=>date('Y-m-d H:i:s',time()+$timeout*60),'create_time'=>$now,'update_time'=>$now]);
+            $id=(int)Db::name('otc_order')->insertGetId(['appid'=>$this->appid,'order_no'=>$orderNo,'request_id'=>$requestId,'ad_id'=>(int)$ad['id'],'merchant_id'=>(int)$merchant['id'],'user_id'=>$this->uid(),'buyer_id'=>$buyerId,'seller_id'=>$sellerId,'side'=>$side,'asset_id'=>(int)$ad['asset_id'],'network_id'=>(int)$ad['network_id'],'asset_amount'=>$asset,'price'=>$ad['price'],'fiat_amount'=>$fiat,'fiat_currency'=>$ad['fiat_currency'],'payment_method_id'=>0,'address_id'=>0,'address_snapshot'=>json_encode($address,JSON_UNESCAPED_UNICODE),'payment_snapshot'=>json_encode($payment,JSON_UNESCAPED_UNICODE),'status'=>'settling','version'=>1,'paid_time'=>$now,'expire_time'=>$now,'create_time'=>$now,'update_time'=>$now]);
             Db::name('otc_ad')->where('id',(int)$ad['id'])->update(['available_asset'=>bcsub((string)$ad['available_asset'],$asset,8),'version'=>Db::raw('version+1'),'update_time'=>$now]);
-            Db::name('otc_order_log')->insert(['appid'=>$this->appid,'order_id'=>$id,'operator_type'=>'user','operator_id'=>$this->uid(),'from_status'=>'','to_status'=>'paid','reason'=>'平台余额与数字资产已托管','request_id'=>$requestId,'create_time'=>$now]);
+            $order=Db::name('otc_order')->where('id',$id)->find();if(!$order)throw new \RuntimeException('OTC订单创建失败');
+            $this->consumeHold($order);$this->creditAsset($buyerId,(int)$ad['asset_id'],$asset,$orderNo);$this->consumeFiat($order);
+            $affected=Db::name('otc_order')->where('id',$id)->where('status','settling')->where('version',1)->update(['status'=>'completed','completed_time'=>$now,'version'=>Db::raw('version+1'),'update_time'=>$now]);if($affected!==1)throw new \RuntimeException('OTC订单结算状态异常');
+            Db::name('otc_order_log')->insert(['appid'=>$this->appid,'order_id'=>$id,'operator_type'=>'system','operator_id'=>0,'from_status'=>'settling','to_status'=>'completed','reason'=>'平台余额与平台USDT即时结算完成','request_id'=>$requestId,'create_time'=>$now]);
+            Db::name('otc_merchant')->where('id',(int)$merchant['id'])->update(['completed_orders'=>Db::raw('completed_orders+1'),'version'=>Db::raw('version+1'),'update_time'=>$now]);
+            $this->suspendUncoveredAds((int)$merchant['id'],(int)$ad['asset_id']);
             Db::commit();return $this->orderView(Db::name('otc_order')->where('id',$id)->find()?:[]);
         }catch(\Throwable $e){
             Db::rollback();
@@ -260,25 +278,12 @@ final class OtcService
 
     public function confirmRelease(array $data): array
     {
-        return $this->transition($data,'paid','completed',function(array $order):array{
-            if((int)$order['seller_id']!==$this->uid())throw new \RuntimeException('只有卖方可以确认放币');
-            $this->consumeHold($order);
-            $this->creditAsset((int)$order['buyer_id'],(int)$order['asset_id'],(string)$order['asset_amount'],(string)$order['order_no']);
-            $this->consumeFiat($order);
-            return ['completed_time'=>date('Y-m-d H:i:s')];
-        });
+        throw new \RuntimeException('平台余额OTC在下单时即时结算，无需确认放币');
     }
 
     public function cancel(array $data): array
     {
-        $orderNo=trim((string)($data['order_no']??''));$requestId=trim((string)($data['request_id']??''));
-        if($orderNo===''||$requestId==='')throw new \InvalidArgumentException('订单参数不完整');
-        Db::startTrans();
-        try{$order=$this->lockOrder($orderNo);if(!in_array((string)$order['status'],['paid'],true))throw new \RuntimeException('当前状态不能取消');
-            $this->releaseHold($order);$this->releaseFiat($order);$this->restoreAd($order);$now=date('Y-m-d H:i:s');
-            Db::name('otc_order')->where('id',(int)$order['id'])->where('version',(int)$order['version'])->update(['status'=>'cancelled','cancel_time'=>$now,'version'=>Db::raw('version+1'),'update_time'=>$now]);
-            $this->orderLog($order,'cancelled',$requestId,mb_substr(trim((string)($data['reason']??'')),0,255));Db::commit();return $this->order($orderNo);
-        }catch(\Throwable $e){Db::rollback();throw $e;}
+        throw new \RuntimeException('平台余额OTC为即时成交订单，成交后不能取消');
     }
 
     public function appeal(array $data): array
@@ -337,10 +342,7 @@ final class OtcService
 
     private function holdAsset(int $userId,int $assetId,string $amount,string $orderNo,string $requestId):void
     {
-        $account=$this->assetAccount($userId,$assetId);if(bccomp((string)$account['available_balance'],$amount,8)<0)throw new \RuntimeException('可用数字资产不足');$now=date('Y-m-d H:i:s');
-        Db::name('wallet_asset_account')->where('id',(int)$account['id'])->update(['available_balance'=>bcsub((string)$account['available_balance'],$amount,8),'frozen_balance'=>bcadd((string)$account['frozen_balance'],$amount,8),'version'=>Db::raw('version+1'),'update_time'=>$now]);
-        Db::name('wallet_asset_hold')->insert(['appid'=>$this->appid,'hold_no'=>$this->number('H'),'account_id'=>(int)$account['id'],'user_id'=>$userId,'asset_id'=>$assetId,'biz_type'=>'otc_order','biz_no'=>$orderNo,'amount'=>$amount,'status'=>1,'create_time'=>$now,'update_time'=>$now]);
-        $this->assetLedger($account,$userId,$assetId,'hold',$orderNo,$amount,$requestId,(string)$account['available_balance'],bcsub((string)$account['available_balance'],$amount,8),(string)$account['frozen_balance'],bcadd((string)$account['frozen_balance'],$amount,8));
+        DigitalAssetControlService::createHold($this->appid,$userId,$assetId,$amount,'otc_order',$orderNo,'OTC订单资产托管','otc-hold-'.$requestId,'system',0);
     }
 
     private function holdFiat(int $userId,string $amount,string $orderNo):void
@@ -360,17 +362,14 @@ final class OtcService
 
     private function releaseHold(array $order):void
     {
-        $hold=Db::name('wallet_asset_hold')->where('appid',$this->appid)->where('biz_type','otc_order')->where('biz_no',$order['order_no'])->where('status',1)->lock(true)->find();if(!$hold)return;$account=Db::name('wallet_asset_account')->where('id',(int)$hold['account_id'])->lock(true)->find();$now=date('Y-m-d H:i:s');
-        $afterAvailable=bcadd((string)$account['available_balance'],(string)$hold['amount'],8);$afterFrozen=bcsub((string)$account['frozen_balance'],(string)$hold['amount'],8);
-        Db::name('wallet_asset_account')->where('id',(int)$account['id'])->update(['available_balance'=>$afterAvailable,'frozen_balance'=>$afterFrozen,'version'=>Db::raw('version+1'),'update_time'=>$now]);Db::name('wallet_asset_hold')->where('id',(int)$hold['id'])->update(['status'=>2,'update_time'=>$now]);
-        $this->assetLedger($account,(int)$hold['user_id'],(int)$hold['asset_id'],'release_hold',(string)$order['order_no'],(string)$hold['amount'],'release-'.$order['order_no'],(string)$account['available_balance'],$afterAvailable,(string)$account['frozen_balance'],$afterFrozen);
+        $hold=Db::name('wallet_asset_hold')->where('appid',$this->appid)->where('biz_type','otc_order')->where('biz_no',$order['order_no'])->whereIn('status',[1,4])->lock(true)->find();if(!$hold)return;
+        DigitalAssetControlService::releaseHold($this->appid,(int)$hold['id'],(string)$hold['remaining_amount'],'OTC订单取消解冻','otc-release-'.$order['order_no'],'system',0);
     }
 
     private function consumeHold(array $order):void
     {
-        $hold=Db::name('wallet_asset_hold')->where('appid',$this->appid)->where('biz_type','otc_order')->where('biz_no',$order['order_no'])->where('status',1)->lock(true)->find();if(!$hold)throw new \RuntimeException('订单托管资产不存在');$account=Db::name('wallet_asset_account')->where('id',(int)$hold['account_id'])->lock(true)->find();$afterFrozen=bcsub((string)$account['frozen_balance'],(string)$hold['amount'],8);$now=date('Y-m-d H:i:s');
-        Db::name('wallet_asset_account')->where('id',(int)$account['id'])->update(['frozen_balance'=>$afterFrozen,'total_out'=>bcadd((string)$account['total_out'],(string)$hold['amount'],8),'version'=>Db::raw('version+1'),'update_time'=>$now]);Db::name('wallet_asset_hold')->where('id',(int)$hold['id'])->update(['status'=>3,'update_time'=>$now]);
-        $this->assetLedger($account,(int)$hold['user_id'],(int)$hold['asset_id'],'otc_sell',(string)$order['order_no'],(string)$hold['amount'],'sell-'.$order['order_no'],(string)$account['available_balance'],(string)$account['available_balance'],(string)$account['frozen_balance'],$afterFrozen);
+        $hold=Db::name('wallet_asset_hold')->where('appid',$this->appid)->where('biz_type','otc_order')->where('biz_no',$order['order_no'])->whereIn('status',[1,4])->lock(true)->find();if(!$hold)throw new \RuntimeException('订单托管资产不存在');
+        DigitalAssetControlService::consumeHold($this->appid,(int)$hold['id'],'otc-consume-'.$order['order_no'],'OTC订单完成扣除');
     }
 
     private function creditAsset(int $userId,int $assetId,string $amount,string $orderNo):void
@@ -383,6 +382,11 @@ final class OtcService
     {Db::name('wallet_asset_ledger')->insert(['appid'=>$this->appid,'ledger_no'=>$this->number('L'),'request_id'=>$request,'user_id'=>$userId,'asset_id'=>$assetId,'direction'=>in_array($scene,['otc_buy','release_hold'],true)?'in':'out','scene'=>$scene,'biz_no'=>$bizNo,'amount'=>$amount,'before_available'=>$beforeA,'after_available'=>$afterA,'before_frozen'=>$beforeF,'after_frozen'=>$afterF,'remark'=>'','create_time'=>date('Y-m-d H:i:s')]);}
 
     private function restoreAd(array $order):void{Db::name('otc_ad')->where('appid',$this->appid)->where('id',(int)$order['ad_id'])->update(['available_asset'=>Db::raw('available_asset+'.(string)$order['asset_amount']),'version'=>Db::raw('version+1'),'update_time'=>date('Y-m-d H:i:s')]);}
+    private function suspendUncoveredAds(int $merchantId,int $assetId):void
+    {
+        $merchant=Db::name('otc_merchant')->where('appid',$this->appid)->where('id',$merchantId)->find();if(!$merchant)return;$userId=(int)$merchant['user_id'];$assetAccount=$this->assetAccount($userId,$assetId,false);$assetAvailable=(string)$assetAccount['available_balance'];$sellRows=Db::name('otc_ad')->where('appid',$this->appid)->where('merchant_id',$merchantId)->where('side','sell')->where('asset_id',$assetId)->where('status',1)->order('id')->select()->toArray();$used='0.00000000';foreach($sellRows as $row){$next=bcadd($used,(string)$row['available_asset'],8);if(bccomp($next,$assetAvailable,8)>0)Db::name('otc_ad')->where('id',(int)$row['id'])->update(['status'=>3,'version'=>Db::raw('version+1'),'update_time'=>date('Y-m-d H:i:s')]);else $used=$next;}
+        $user=Db::name('user')->where('appid',$this->appid)->where('id',$userId)->find();if(!$user)return;$fiatAvailable=bcsub((string)$user['money'],(string)($user['wallet_frozen_money']??0),2);$buyRows=Db::name('otc_ad')->where('appid',$this->appid)->where('merchant_id',$merchantId)->where('side','buy')->where('status',1)->order('id')->select()->toArray();$fiatUsed='0.00';foreach($buyRows as $row){$exposure=bcmul((string)$row['price'],(string)$row['available_asset'],2);$next=bcadd($fiatUsed,$exposure,2);if(bccomp($next,$fiatAvailable,2)>0)Db::name('otc_ad')->where('id',(int)$row['id'])->update(['status'=>3,'version'=>Db::raw('version+1'),'update_time'=>date('Y-m-d H:i:s')]);else $fiatUsed=$next;}
+    }
     private function orderLog(array $order,string $to,string $request,string $reason):void{Db::name('otc_order_log')->insert(['appid'=>$this->appid,'order_id'=>(int)$order['id'],'operator_type'=>'user','operator_id'=>$this->uid(),'from_status'=>(string)$order['status'],'to_status'=>$to,'reason'=>$reason,'request_id'=>$request,'create_time'=>date('Y-m-d H:i:s')]);}
     private function configRow():array{return Db::name('otc_config')->where('appid',$this->appid)->find()?:['enabled'=>0,'merchant_deposit'=>'1000.00','payment_timeout_minutes'=>15,'max_open_orders'=>5];}
     private function assertEnabled():void{if((int)$this->configRow()['enabled']!==1)throw new \RuntimeException('OTC交易暂未开放');}

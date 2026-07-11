@@ -67,6 +67,7 @@ final class DigitalAssetService
     {
         $this->assertWalletActive();
         $asset = $this->usdtAsset();$network=$this->trc20Network($asset);$config=$this->chainConfig((int)$asset['id'],(int)$network['id']);if((int)($config['transfer_enabled']??0)!==1)throw new \RuntimeException('USDT站内转账暂未开放');
+        DigitalAssetControlService::assertAllowed($this->appid,$this->uid(),(int)$asset['id'],'transfer');
         $receiver = $this->receiver(trim((string)($data['username'] ?? '')));
         $amount = $this->positiveAmount($data['amount'] ?? '0');
         $account = $this->account((int)$asset['id'], false);
@@ -82,6 +83,7 @@ final class DigitalAssetService
         $amount = $this->positiveAmount($data['amount'] ?? '0');
         $remark = mb_substr(trim((string)($data['remark'] ?? '')), 0, 120);
         $asset = $this->usdtAsset();
+        DigitalAssetControlService::assertAllowed($this->appid,$this->uid(),(int)$asset['id'],'transfer');
         $params = ['sender_id'=>$this->uid(),'receiver_id'=>(int)$receiver['id'],'asset_id'=>(int)$asset['id'],'amount'=>$amount,'remark'=>$remark];
         $hash = hash('sha256', json_encode($params, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
         $existing = Db::name('wallet_asset_journal')->where('appid',$this->appid)->where('request_id',$requestId)->find();
@@ -121,7 +123,7 @@ final class DigitalAssetService
     public function withdrawPreview(array $data): array
     {
         $this->assertWalletActive();
-        $asset=$this->usdtAsset();$network=$this->trc20Network($asset);$config=$this->chainConfig((int)$asset['id'],(int)$network['id']);
+        $asset=$this->usdtAsset();DigitalAssetControlService::assertAllowed($this->appid,$this->uid(),(int)$asset['id'],'withdraw');$network=$this->trc20Network($asset);$config=$this->chainConfig((int)$asset['id'],(int)$network['id']);
         if((int)($config['status']??0)!==1||(int)($config['withdraw_enabled']??0)!==1)throw new \RuntimeException('USDT提币暂未开放');
         $address=$this->validateAddress((string)($data['address']??''));$amount=$this->positiveAmount($data['amount']??'0');$fee=$this->amount($config['withdraw_fee']??1);$min=$this->amount($config['min_withdraw']??10);
         if(bccomp($amount,$min,8)<0)throw new \RuntimeException('提币数量低于最低限额');if(bccomp($amount,$fee,8)<=0)throw new \RuntimeException('提币数量必须大于手续费');

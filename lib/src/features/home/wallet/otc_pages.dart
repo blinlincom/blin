@@ -942,9 +942,13 @@ class _OtcOrderSheetState extends State<_OtcOrderSheet> {
               value: '${assetAmount.toStringAsFixed(6)} ${widget.ad.symbol}',
             ),
             _OtcConfirmRow(label: '资产网络', value: widget.ad.networkCode),
+            _OtcConfirmRow(
+              label: widget.side == 'buy' ? '到账账户' : '收款账户',
+              value: widget.side == 'buy' ? '数字钱包' : '平台钱包',
+            ),
             const SizedBox(height: BimSpacing.x3),
             const Text(
-              '订单创建后请仅按订单信息完成交易，不接受私下更换账户或脱离平台处理。',
+              '平台余额与平台USDT将在确认后即时结算，成交后不能撤销。',
               style: TextStyle(
                 color: BimColors.secondaryText,
                 fontSize: BimTypography.caption,
@@ -966,23 +970,62 @@ class _OtcOrderSheetState extends State<_OtcOrderSheet> {
       ),
     );
     if (confirmed != true || !mounted) return;
+    final password = TextEditingController();
+    final passwordConfirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('验证支付密码'),
+        content: TextField(
+          controller: password,
+          autofocus: true,
+          obscureText: true,
+          keyboardType: TextInputType.number,
+          maxLength: 6,
+          decoration: const InputDecoration(labelText: '6位支付密码'),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('确认交易'),
+          ),
+        ],
+      ),
+    );
+    if (passwordConfirmed != true || password.text.length != 6) {
+      password.dispose();
+      if (passwordConfirmed == true && mounted) {
+        showBimSnackBar(context, '请输入6位支付密码', tone: BimNoticeTone.error);
+      }
+      return;
+    }
     setState(() => _busy = true);
     try {
       final order = await widget.controller.createOtcOrder(
         adId: widget.ad.id,
         side: widget.side,
         fiatAmount: _amount.text.trim(),
+        payPassword: password.text,
         addressId: int.tryParse('${_address!['id']}') ?? 0,
         paymentMethodId: int.tryParse('${_payment!['id']}') ?? 0,
       );
       if (!mounted) return;
+      password.clear();
+      password.dispose();
       Navigator.pop(context);
       showBimSnackBar(
         context,
-        '订单 ${order.orderNo} 已创建',
+        widget.side == 'buy'
+            ? '${order.assetAmount} ${widget.ad.symbol} 已存入数字钱包'
+            : '¥${order.fiatAmount} 已存入平台钱包',
         tone: BimNoticeTone.success,
       );
     } catch (error) {
+      password.clear();
+      password.dispose();
       if (mounted)
         showBimSnackBar(context, error.toString(), tone: BimNoticeTone.error);
     } finally {
@@ -1285,9 +1328,7 @@ class OtcManagementPage extends StatelessWidget {
             OtcMerchantPage(controller: controller, config: config),
           ),
         ),
-        const BimNoticeBanner(
-          text: '请确认收付款账户实名一致。OTC 交易存在价格波动与欺诈风险，请勿在订单之外私下交易。',
-        ),
+        const BimNoticeBanner(text: '平台余额与数字钱包即时结算，交易完成后不可撤销。'),
       ],
     ),
   );
@@ -1998,6 +2039,38 @@ class _OtcAdComposerPageState extends State<OtcAdComposerPage> {
   }
 
   Future<void> _submit() async {
+    final password = TextEditingController();
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('验证支付密码'),
+        content: TextField(
+          controller: password,
+          autofocus: true,
+          obscureText: true,
+          keyboardType: TextInputType.number,
+          maxLength: 6,
+          decoration: const InputDecoration(labelText: '6位支付密码'),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('确认提交'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || password.text.length != 6) {
+      password.dispose();
+      if (confirmed == true && mounted) {
+        showBimSnackBar(context, '请输入6位支付密码', tone: BimNoticeTone.error);
+      }
+      return;
+    }
     setState(() => _busy = true);
     try {
       await widget.controller.createOtcMerchantAd(
@@ -2008,13 +2081,18 @@ class _OtcAdComposerPageState extends State<OtcAdComposerPage> {
         minFiat: _min.text.trim(),
         maxFiat: _max.text.trim(),
         availableAsset: _amount.text.trim(),
-        paymentMethods: const ['alipay', 'wechat', 'bank'],
+        payPassword: password.text,
+        paymentMethods: const ['balance'],
         terms: _terms.text.trim(),
       );
+      password.clear();
+      password.dispose();
       if (!mounted) return;
       Navigator.pop(context);
       showBimSnackBar(context, '广告已提交审核', tone: BimNoticeTone.success);
     } catch (error) {
+      password.clear();
+      password.dispose();
       if (mounted)
         showBimSnackBar(context, error.toString(), tone: BimNoticeTone.error);
     } finally {

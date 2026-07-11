@@ -18918,19 +18918,24 @@ class Api extends BaseController
             $this->chatJson(1, '保证金缴纳成功', $this->otcService()->payDeposit($this->walletRequestId($data['request_id'] ?? '')));
         } catch (\Throwable $e) { $this->json(0, $e->getMessage()); }
     }
-    public function otc_merchant_ad_create() { $this->otcCall('createAd'); }
+    public function otc_merchant_ad_create()
+    {
+        $data=$this->secureChatRequestInput();
+        try{$this->verifyWalletPayPassword((int)$this->user_info['id'],trim((string)($data['pay_password']??'')));$this->chatJson(1,'广告已提交审核',$this->otcService()->createAd($data));}
+        catch(\Throwable $e){$this->json(0,$e->getMessage());}
+    }
 
     public function otc_order_buy_create()
     {
         $data = $this->secureChatRequestInput();
-        try { $this->chatJson(1, '订单创建成功', $this->otcService()->createOrder($data, 'buy')); }
+        try { $this->verifyWalletPayPassword((int)$this->user_info['id'],trim((string)($data['pay_password']??'')));$this->chatJson(1, '买入成功，USDT已存入数字钱包', $this->otcService()->createOrder($data, 'buy')); }
         catch (\Throwable $e) { $this->json(0, $e->getMessage()); }
     }
 
     public function otc_order_sell_create()
     {
         $data = $this->secureChatRequestInput();
-        try { $this->chatJson(1, '订单创建成功', $this->otcService()->createOrder($data, 'sell')); }
+        try { $this->verifyWalletPayPassword((int)$this->user_info['id'],trim((string)($data['pay_password']??'')));$this->chatJson(1, '卖出成功，款项已存入平台钱包', $this->otcService()->createOrder($data, 'sell')); }
         catch (\Throwable $e) { $this->json(0, $e->getMessage()); }
     }
 

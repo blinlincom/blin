@@ -1036,6 +1036,7 @@ class SessionController extends ChangeNotifier {
     required int adId,
     required String side,
     required String fiatAmount,
+    required String payPassword,
     required int addressId,
     required int paymentMethodId,
   }) {
@@ -1046,6 +1047,7 @@ class SessionController extends ChangeNotifier {
       adId: adId,
       side: side,
       fiatAmount: fiatAmount,
+      payPassword: payPassword,
       addressId: addressId,
       paymentMethodId: paymentMethodId,
     );
@@ -1129,6 +1131,7 @@ class SessionController extends ChangeNotifier {
     required String minFiat,
     required String maxFiat,
     required String availableAsset,
+    required String payPassword,
     required List<String> paymentMethods,
     String terms = '',
   }) {
@@ -1143,6 +1146,7 @@ class SessionController extends ChangeNotifier {
       minFiat: minFiat,
       maxFiat: maxFiat,
       availableAsset: availableAsset,
+      payPassword: payPassword,
       paymentMethods: paymentMethods,
       terms: terms,
     );

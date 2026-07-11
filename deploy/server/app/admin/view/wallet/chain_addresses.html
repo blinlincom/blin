@@ -1,3 +1,29 @@
 {extend name="layout"/}
-{block name="body"}<div class="container-fluid p-t-15"><div class="card"><div class="card-header"><div class="card-title">链上充值地址</div></div><div class="card-body"><div class="alert alert-info">这里只展示地址、公钥派生索引和归集状态，后台永不展示私钥或助记词。</div><table id="table"></table></div></div></div>{/block}
-{block name="js"}<script>$('#table').bootstrapTable({url:"{$Request.root}/wallet/chain_addresses",method:'get',dataType:'jsonp',pagination:true,sidePagination:'server',pageSize:20,columns:[{field:'id',title:'ID'},{field:'appname',title:'应用'},{field:'username',title:'用户名'},{field:'symbol',title:'资产'},{field:'network_code',title:'网络'},{field:'address_base58',title:'充值地址'},{field:'derivation_index',title:'派生索引'},{field:'status',title:'状态'},{field:'last_deposit_time',title:'最近充值'},{field:'last_sweep_time',title:'最近归集'}]});</script>{/block}
+{block name="body"}
+<div class="container-fluid p-t-15">
+    <div class="row">
+        <div class="col-md-4"><div class="card"><div class="card-body"><div class="text-muted">已分配地址</div><div class="h3 m-t-10">{$chainAddressStats.total|default=0}</div></div></div></div>
+        <div class="col-md-4"><div class="card"><div class="card-body"><div class="text-muted">正常地址</div><div class="h3 m-t-10">{$chainAddressStats.active|default=0}</div></div></div></div>
+        <div class="col-md-4"><div class="card"><div class="card-body"><div class="text-muted">产生过充值</div><div class="h3 m-t-10">{$chainAddressStats.deposited|default=0}</div></div></div></div>
+    </div>
+    <div class="card">
+        <header class="card-header"><div class="card-title">用户链上充值地址管理</div></header>
+        <div class="card-body">
+            <div class="alert alert-info">后台只管理用户与公开充值地址的绑定关系，不展示私钥、助记词或钱包主种子。</div>
+            <div id="address-toolbar" class="row">
+                <div class="col-md-5 m-b-10"><input class="form-control" id="address-keyword" placeholder="搜索用户名、昵称、用户ID或充值地址"></div>
+                <div class="col-md-2 m-b-10"><select class="form-control" id="address-status"><option value="">全部状态</option><option value="1">正常</option><option value="0">停用</option></select></div>
+                <div class="col-md-2 m-b-10"><button class="btn btn-primary" id="address-search"><i class="mdi mdi-magnify"></i> 查询</button></div>
+                <div class="col-md-3 m-b-10 text-right"><a class="btn btn-default" href="{$Request.root}/wallet/index"><i class="mdi mdi-view-dashboard-outline"></i> 返回钱包总览</a></div>
+            </div>
+            <table id="address-table"></table>
+        </div>
+    </div>
+</div>
+{/block}
+{block name="js"}<script>
+function escapeHtml(value){return $('<div>').text(value==null?'':String(value)).html();}
+function copyAddress(value){if(navigator.clipboard){navigator.clipboard.writeText(value).then(function(){lightyear.notify('地址已复制','success');});return;}var input=$('<input>').val(value).appendTo('body').select();document.execCommand('copy');input.remove();lightyear.notify('地址已复制','success');}
+$('#address-table').bootstrapTable({ url:"{$Request.root}/wallet/chain_addresses",method:'get',dataType:'json',toolbar:'#address-toolbar',pagination:true,sidePagination:'server',pageSize:20,pageList:[20,50,100],showRefresh:true,queryParams:function(p){return {limit:p.limit,page:(p.offset/p.limit)+1,keyword:$.trim($('#address-keyword').val()),status:$('#address-status').val()};},columns:[{field:'id',title:'ID',width:70},{field:'user_id',title:'用户',formatter:function(v,r){return '<strong>'+escapeHtml(r.nickname||r.username||'-')+'</strong><div class="text-muted">@'+escapeHtml(r.username||'-')+' · ID '+escapeHtml(v)+'</div>'; }},{field:'symbol',title:'资产/网络',formatter:function(v,r){return escapeHtml(v||'-')+' · '+escapeHtml(r.network_code||'-');}},{field:'address_base58',title:'充值地址',formatter:function(v){var safe=escapeHtml(v);return '<code>'+safe+'</code> <button type="button" class="btn btn-xs btn-default copy-address" data-address="'+safe+'"><i class="mdi mdi-content-copy"></i></button>'; }},{field:'status',title:'状态',formatter:function(v){return Number(v)===1?'<span class="badge bg-success">正常</span>':'<span class="badge bg-secondary">停用</span>'; }},{field:'assigned_time',title:'分配时间'},{field:'last_deposit_time',title:'最近充值',formatter:function(v){return v||'<span class="text-muted">暂无</span>'; }},{field:'last_sweep_time',title:'最近归集',formatter:function(v){return v||'<span class="text-muted">暂无</span>'; }}]});
+$('#address-search').on('click',function(){$('#address-table').bootstrapTable('refresh',{pageNumber:1});});$('#address-keyword').on('keydown',function(e){if(e.keyCode===13)$('#address-search').click();});$(document).on('click','.copy-address',function(){copyAddress($(this).data('address'));});
+</script>{/block}
