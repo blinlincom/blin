@@ -101,6 +101,15 @@ class _WalletPageState extends State<WalletPage> {
                       _WalletToolStrip(
                         actions: [
                           _WalletAction(
+                            icon: Icons.account_balance_wallet_outlined,
+                            label: 'USDT',
+                            color: BimColors.successText,
+                            onTap: () => _push(
+                              context,
+                              UsdtWalletPage(controller: widget.controller),
+                            ),
+                          ),
+                          _WalletAction(
                             icon: Icons.currency_exchange_outlined,
                             label: '买卖币',
                             color: BimColors.primary,

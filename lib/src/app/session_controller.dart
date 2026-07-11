@@ -918,6 +918,79 @@ class SessionController extends ChangeNotifier {
     return _api.otcConfig(session: current, device: _device);
   }
 
+  Future<UsdtWalletOverview> loadUsdtWalletOverview() {
+    final current = _requireSession();
+    return _api.usdtWalletOverview(session: current, device: _device);
+  }
+
+  Future<Map<String, Object?>> loadUsdtDepositAddress() {
+    final current = _requireSession();
+    return _api.usdtDepositAddress(session: current, device: _device);
+  }
+
+  Future<Map<String, Object?>> previewUsdtTransfer({
+    required String username,
+    required String amount,
+  }) {
+    final current = _requireSession();
+    return _api.usdtTransferPreview(
+      session: current,
+      device: _device,
+      username: username,
+      amount: amount,
+    );
+  }
+
+  Future<Map<String, Object?>> createUsdtTransfer({
+    required String username,
+    required String amount,
+    required String payPassword,
+    String remark = '',
+  }) {
+    final current = _requireSession();
+    return _api.usdtTransferCreate(
+      session: current,
+      device: _device,
+      username: username,
+      amount: amount,
+      payPassword: payPassword,
+      remark: remark,
+    );
+  }
+
+  Future<Map<String, Object?>> previewUsdtWithdraw({
+    required String address,
+    required String amount,
+  }) {
+    final current = _requireSession();
+    return _api.usdtWithdrawPreview(
+      session: current,
+      device: _device,
+      address: address,
+      amount: amount,
+    );
+  }
+
+  Future<Map<String, Object?>> createUsdtWithdraw({
+    required String address,
+    required String amount,
+    required String payPassword,
+  }) {
+    final current = _requireSession();
+    return _api.usdtWithdrawCreate(
+      session: current,
+      device: _device,
+      address: address,
+      amount: amount,
+      payPassword: payPassword,
+    );
+  }
+
+  Future<List<UsdtAssetBill>> loadUsdtAssetBills() {
+    final current = _requireSession();
+    return _api.usdtAssetBills(session: current, device: _device);
+  }
+
   Future<List<OtcAd>> loadOtcAds(String side) {
     final current = _requireSession();
     return _api.otcAds(session: current, device: _device, side: side);

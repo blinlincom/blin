@@ -1350,5 +1350,102 @@ class OtcOrder {
   }
 }
 
+class UsdtWalletOverview {
+  const UsdtWalletOverview({
+    required this.assetId,
+    required this.networkId,
+    required this.availableBalance,
+    required this.frozenBalance,
+    required this.totalBalance,
+    required this.depositEnabled,
+    required this.withdrawEnabled,
+    required this.transferEnabled,
+    required this.minDeposit,
+    required this.minWithdraw,
+    required this.withdrawFee,
+    required this.depositAddress,
+  });
+
+  final int assetId;
+  final int networkId;
+  final String availableBalance;
+  final String frozenBalance;
+  final String totalBalance;
+  final bool depositEnabled;
+  final bool withdrawEnabled;
+  final bool transferEnabled;
+  final String minDeposit;
+  final String minWithdraw;
+  final String withdrawFee;
+  final String depositAddress;
+
+  factory UsdtWalletOverview.fromJson(Object? value) {
+    final map = _objectMap(value);
+    return UsdtWalletOverview(
+      assetId: _intFrom(map['asset_id']),
+      networkId: _intFrom(map['network_id']),
+      availableBalance: _assetDecimal(map['available_balance']),
+      frozenBalance: _assetDecimal(map['frozen_balance']),
+      totalBalance: _assetDecimal(map['total_balance']),
+      depositEnabled: _enabled(map['deposit_enabled']),
+      withdrawEnabled: _enabled(map['withdraw_enabled']),
+      transferEnabled: _enabled(map['transfer_enabled']),
+      minDeposit: _assetDecimal(map['min_deposit']),
+      minWithdraw: _assetDecimal(map['min_withdraw']),
+      withdrawFee: _assetDecimal(map['withdraw_fee']),
+      depositAddress: '${map['deposit_address'] ?? ''}',
+    );
+  }
+}
+
+class UsdtAssetBill {
+  const UsdtAssetBill({
+    required this.id,
+    required this.businessType,
+    required this.businessNo,
+    required this.direction,
+    required this.availableDelta,
+    required this.frozenDelta,
+    required this.remark,
+    required this.createTime,
+  });
+  final int id;
+  final String businessType;
+  final String businessNo;
+  final String direction;
+  final String availableDelta;
+  final String frozenDelta;
+  final String remark;
+  final String createTime;
+
+  factory UsdtAssetBill.fromJson(Object? value) {
+    final map = _objectMap(value);
+    return UsdtAssetBill(
+      id: _intFrom(map['id']),
+      businessType: '${map['business_type'] ?? ''}',
+      businessNo: '${map['business_no'] ?? ''}',
+      direction: '${map['direction'] ?? ''}',
+      availableDelta: _assetSignedDecimal(map['available_delta']),
+      frozenDelta: _assetSignedDecimal(map['frozen_delta']),
+      remark: '${map['remark'] ?? ''}',
+      createTime: '${map['create_time'] ?? ''}',
+    );
+  }
+}
+
+String _assetDecimal(Object? value) {
+  final text = '$value'.trim();
+  if (!RegExp(r'^\d+(\.\d{1,8})?$').hasMatch(text)) return '0.00000000';
+  final parts = text.split('.');
+  return '${parts.first}.${(parts.length > 1 ? parts[1] : '').padRight(8, '0').substring(0, 8)}';
+}
+
+String _assetSignedDecimal(Object? value) {
+  final text = '$value'.trim();
+  final negative = text.startsWith('-');
+  final normalized = _assetDecimal(negative ? text.substring(1) : text);
+  return negative ? '-$normalized' : normalized;
+}
+
 int _intFrom(Object? value) =>
     value is int ? value : int.tryParse('$value') ?? 0;

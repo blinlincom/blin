@@ -333,6 +333,143 @@ class ApiClient {
     return OtcConfig.fromJson(result.data);
   }
 
+  Future<UsdtWalletOverview> usdtWalletOverview({
+    required UserSession session,
+    required String device,
+  }) async {
+    final result = await secureSignedImPost<Map<String, Object?>>(
+      'wallet_asset_overview',
+      session: session,
+      device: device,
+      params: const {},
+      secureResponse: true,
+    );
+    if (!result.isSuccess)
+      throw ApiException(result.message, code: result.code);
+    return UsdtWalletOverview.fromJson(result.data);
+  }
+
+  Future<Map<String, Object?>> usdtDepositAddress({
+    required UserSession session,
+    required String device,
+  }) async {
+    final result = await secureSignedImPost<Map<String, Object?>>(
+      'wallet_asset_deposit_address',
+      session: session,
+      device: device,
+      params: const {},
+      secureResponse: true,
+    );
+    if (!result.isSuccess)
+      throw ApiException(result.message, code: result.code);
+    return result.data;
+  }
+
+  Future<Map<String, Object?>> usdtTransferPreview({
+    required UserSession session,
+    required String device,
+    required String username,
+    required String amount,
+  }) async {
+    final result = await secureSignedImPost<Map<String, Object?>>(
+      'wallet_asset_transfer_preview',
+      session: session,
+      device: device,
+      params: {'username': username, 'amount': amount},
+      secureResponse: true,
+    );
+    if (!result.isSuccess)
+      throw ApiException(result.message, code: result.code);
+    return result.data;
+  }
+
+  Future<Map<String, Object?>> usdtTransferCreate({
+    required UserSession session,
+    required String device,
+    required String username,
+    required String amount,
+    required String payPassword,
+    String remark = '',
+  }) async {
+    final result = await secureSignedImPost<Map<String, Object?>>(
+      'wallet_asset_transfer_create',
+      session: session,
+      device: device,
+      params: {
+        'request_id': _nonce(),
+        'username': username,
+        'amount': amount,
+        'pay_password': payPassword,
+        'remark': remark,
+      },
+      secureResponse: true,
+    );
+    if (!result.isSuccess)
+      throw ApiException(result.message, code: result.code);
+    return result.data;
+  }
+
+  Future<Map<String, Object?>> usdtWithdrawPreview({
+    required UserSession session,
+    required String device,
+    required String address,
+    required String amount,
+  }) async {
+    final result = await secureSignedImPost<Map<String, Object?>>(
+      'wallet_asset_withdraw_preview',
+      session: session,
+      device: device,
+      params: {'address': address, 'amount': amount},
+      secureResponse: true,
+    );
+    if (!result.isSuccess)
+      throw ApiException(result.message, code: result.code);
+    return result.data;
+  }
+
+  Future<Map<String, Object?>> usdtWithdrawCreate({
+    required UserSession session,
+    required String device,
+    required String address,
+    required String amount,
+    required String payPassword,
+  }) async {
+    final result = await secureSignedImPost<Map<String, Object?>>(
+      'wallet_asset_withdraw_create',
+      session: session,
+      device: device,
+      params: {
+        'request_id': _nonce(),
+        'address': address,
+        'amount': amount,
+        'pay_password': payPassword,
+      },
+      secureResponse: true,
+    );
+    if (!result.isSuccess)
+      throw ApiException(result.message, code: result.code);
+    return result.data;
+  }
+
+  Future<List<UsdtAssetBill>> usdtAssetBills({
+    required UserSession session,
+    required String device,
+  }) async {
+    final result = await secureSignedImPost<Map<String, Object?>>(
+      'wallet_asset_bill_list',
+      session: session,
+      device: device,
+      params: const {'limit': '100'},
+      secureResponse: true,
+    );
+    if (!result.isSuccess)
+      throw ApiException(result.message, code: result.code);
+    final list = result.data['list'];
+    return list is List
+        ? list.map(UsdtAssetBill.fromJson).toList(growable: false)
+        : const [];
+  }
+
   Future<List<OtcAd>> otcAds({
     required UserSession session,
     required String device,

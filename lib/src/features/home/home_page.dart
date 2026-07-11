@@ -59,6 +59,7 @@ part 'wallet/payment_service_page.dart';
 part 'wallet/payment_service_widgets.dart';
 part 'wallet/service_account_settings_page.dart';
 part 'wallet/otc_pages.dart';
+part 'wallet/usdt_wallet_pages.dart';
 part 'chat/chat_page.dart';
 part 'chat/action_input_pages.dart';
 part 'chat/media_picker_pages.dart';

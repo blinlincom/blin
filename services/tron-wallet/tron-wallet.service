@@ -1,0 +1,25 @@
+[Unit]
+Description=BIM TRON Wallet Service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=www
+Group=www
+WorkingDirectory=/opt/bim-tron-wallet
+EnvironmentFile=/etc/bim/tron-wallet.env
+ExecStart=/opt/bim-tron-wallet/tron-wallet
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/log/bim-tron-wallet
+CapabilityBoundingSet=
+LockPersonality=true
+MemoryDenyWriteExecute=true
+
+[Install]
+WantedBy=multi-user.target
