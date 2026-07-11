@@ -126,7 +126,7 @@ class _ImageMessagePreview extends StatelessWidget {
           )
         : const _MediaLoadPlaceholder(
             icon: Icons.image_outlined,
-            title: '图片地址为空',
+            title: '暂时无法查看图片',
           );
     return ClipRRect(
       borderRadius: BorderRadius.circular(8),

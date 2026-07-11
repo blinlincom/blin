@@ -20,6 +20,7 @@ use app\common\support\DigitalAssetService;
 use app\common\support\AssetExchangeService;
 use app\common\support\WalletNoticeService;
 use app\common\support\UserDeviceSession;
+use app\common\support\RandomAvatarService;
 use Exception;
 use think\facade\Db;
 use think\facade\Cache;
@@ -2573,6 +2574,19 @@ class Api extends BaseController
 
     protected function formatChatGroup(array $group): array
     {
+        $avatarMembers = [];
+        if (trim((string)($group["avatar"] ?? "")) === "" && (int)($group["id"] ?? 0) > 0) {
+            $avatarMembers = Db::name("chat_group_member")
+                ->alias("m")
+                ->join("user u", "u.id=m.user_id and u.appid=m.appid")
+                ->where("m.appid", (int)$group["appid"])
+                ->where("m.group_id", (int)$group["id"])
+                ->where("m.status", 1)
+                ->field("u.id user_id,u.username,u.nickname,u.usertx avatar")
+                ->order("m.role desc,m.id asc")
+                ->limit(4)
+                ->select()->toArray();
+        }
         return [
             "id" => (int)$group["id"],
             "group_id" => (int)$group["id"],
@@ -2580,6 +2594,14 @@ class Api extends BaseController
             "channel_id" => (string)$group["channel_id"],
             "name" => (string)$group["name"],
             "avatar" => (string)($group["avatar"] ?? ""),
+            "avatar_members" => array_map(function ($member) {
+                return [
+                    "user_id" => (int)$member["user_id"],
+                    "username" => (string)$member["username"],
+                    "nickname" => (string)$member["nickname"],
+                    "avatar" => (string)($member["avatar"] ?? ""),
+                ];
+            }, $avatarMembers),
             "owner_id" => (int)$group["owner_id"],
             "notice" => (string)($group["notice"] ?? ""),
             "member_count" => (int)($group["member_count"] ?? 0),
@@ -6187,7 +6209,7 @@ class Api extends BaseController
             $add["username"] = $username;
             $add["password"] = md5($password . $salt);
             $add["salt"] = $salt;
-            $add["usertx"] = $userinfo_configuration['usertx'];
+            $add["usertx"] = RandomAvatarService::choose($userinfo_configuration);
             $add["nickname"] = $userinfo_configuration['nickname'];
             $add["money"] = $this->app_info["registration_configuration"]["money"];
             $add["integral"] = $this->app_info["registration_configuration"]["integral"];
@@ -13701,6 +13723,37 @@ class Api extends BaseController
         $this->chatJson(1, "success", $this->formatChatGroup($group));
     }
 
+    // 上传群头像。只有群主或管理员可以操作，上传完成后立即更新群资料。
+    public function im_group_avatar_upload()
+    {
+        $data = $this->secureChatRequestInput();
+        $groupId = (int)($data["group_id"] ?? 0);
+        if ($groupId <= 0) {
+            $this->json(0, "group_id不能为空");
+        }
+        $group = Db::name("chat_group")->where("id", $groupId)->where("appid", $this->appid)->where("status", 1)->find();
+        if (!$group) {
+            $this->json(0, "群聊不存在");
+        }
+        try {
+            $this->assertGroupMember($group, $this->user_info, true);
+            $upload = new Upload((int)$this->user_info["id"]);
+            $result = $upload->upload("file");
+            $avatar = trim((string)($result["filePath"] ?? $result["oss_path"] ?? ""));
+            if ($avatar === "") {
+                throw new \Exception("群头像上传失败");
+            }
+            Db::name("chat_group")->where("id", $groupId)->update([
+                "avatar" => $avatar,
+                "update_time" => date("Y-m-d H:i:s"),
+            ]);
+        } catch (\Exception $e) {
+            $this->json(0, $e->getMessage());
+        }
+        $group = Db::name("chat_group")->where("id", $groupId)->find();
+        $this->chatJson(1, "success", $this->formatChatGroup($group));
+    }
+
     //群聊列表
     public function im_group_list()
     {
@@ -15056,7 +15109,7 @@ class Api extends BaseController
             $add["password"] = md5($username . $salt);
             $add["salt"] = $salt;
             if ($state == 0) {
-                $add["usertx"] = $userinfo_configuration['usertx'];
+                $add["usertx"] = RandomAvatarService::choose($userinfo_configuration);
                 $add["nickname"] = $userinfo_configuration['nickname'];
             } else {
                 $add["usertx"] = $Response["figureurl_qq"];
@@ -15154,7 +15207,7 @@ class Api extends BaseController
         $add["username"] = $username;
         $add["password"] = md5($salt);
         $add["salt"] = $salt;
-        $add["usertx"] = $userinfo_configuration['usertx'];
+        $add["usertx"] = RandomAvatarService::choose($userinfo_configuration);
         $add["nickname"] = $userinfo_configuration['nickname'];
         $add["money"] = $this->app_info["registration_configuration"]["money"];
         $add["integral"] = $this->app_info["registration_configuration"]["integral"];

@@ -20,34 +20,48 @@ type DerivedAddress struct {
 	Path    string `json:"path"`
 }
 
-func Derive(seed []byte, appID, userID uint32) (DerivedAddress, error) {
+func DerivePrivateKey(seed []byte, appID, userID uint32) (*btcec.PrivateKey, DerivedAddress, error) {
 	if len(seed) < 32 {
-		return DerivedAddress{}, fmt.Errorf("master seed must contain at least 32 bytes")
+		return nil, DerivedAddress{}, fmt.Errorf("master seed must contain at least 32 bytes")
 	}
 	if appID >= hdkeychain.HardenedKeyStart || userID >= hdkeychain.HardenedKeyStart {
-		return DerivedAddress{}, fmt.Errorf("derivation index exceeds BIP32 limit")
+		return nil, DerivedAddress{}, fmt.Errorf("derivation index exceeds BIP32 limit")
 	}
 	key, err := hdkeychain.NewMaster(seed, &chaincfg.MainNetParams)
 	if err != nil {
-		return DerivedAddress{}, err
+		return nil, DerivedAddress{}, err
 	}
-	path := []uint32{
-		44 + hdkeychain.HardenedKeyStart,
-		195 + hdkeychain.HardenedKeyStart,
-		appID + hdkeychain.HardenedKeyStart,
-		0,
-		userID,
-	}
+	path := []uint32{44 + hdkeychain.HardenedKeyStart, 195 + hdkeychain.HardenedKeyStart, appID + hdkeychain.HardenedKeyStart, 0, userID}
 	for _, child := range path {
 		key, err = key.Derive(child)
 		if err != nil {
-			return DerivedAddress{}, err
+			return nil, DerivedAddress{}, err
 		}
 	}
 	privateKey, err := key.ECPrivKey()
 	if err != nil {
-		return DerivedAddress{}, err
+		return nil, DerivedAddress{}, err
 	}
+	derived, err := addressFromPrivateKey(privateKey, appID, userID)
+	return privateKey, derived, err
+}
+
+func Derive(seed []byte, appID, userID uint32) (DerivedAddress, error) {
+	_, derived, err := DerivePrivateKey(seed, appID, userID)
+	return derived, err
+}
+
+func AddressFromPrivateHex(value string) (DerivedAddress, *btcec.PrivateKey, error) {
+	raw, err := hex.DecodeString(value)
+	if err != nil || len(raw) != 32 {
+		return DerivedAddress{}, nil, fmt.Errorf("invalid private key")
+	}
+	key, _ := btcec.PrivKeyFromBytes(raw)
+	address, err := addressFromPrivateKey(key, 0, 0)
+	return address, key, err
+}
+
+func addressFromPrivateKey(privateKey *btcec.PrivateKey, appID, userID uint32) (DerivedAddress, error) {
 	publicKey := privateKey.PubKey().SerializeUncompressed()
 	if len(publicKey) != 65 || publicKey[0] != 4 {
 		return DerivedAddress{}, fmt.Errorf("unexpected secp256k1 public key")

@@ -19,9 +19,8 @@ final class DigitalAssetService
         $network = $this->trc20Network($asset);
         $account = $this->account((int)$asset['id'], false);
         $config = $this->chainConfig((int)$asset['id'], (int)$network['id']);
-        $address = Db::name('wallet_chain_address')
-            ->where('appid', $this->appid)->where('user_id', $this->uid())
-            ->where('asset_id', (int)$asset['id'])->where('network_id', (int)$network['id'])->find() ?: [];
+        $gasfree = Db::name('wallet_gasfree_account')->where('appid',$this->appid)->where('user_id',$this->uid())->where('asset_id',(int)$asset['id'])->where('network_id',(int)$network['id'])->where('status',1)->find() ?: [];
+        $gasfreeEnabled = GasFreeAccountService::enabledFor($this->appid,$this->uid(),(int)$asset['id'],(int)$network['id']);
         return [
             'asset_id' => (int)$asset['id'],
             'symbol' => 'USDT',
@@ -31,14 +30,15 @@ final class DigitalAssetService
             'available_balance' => $this->amount($account['available_balance'] ?? 0),
             'frozen_balance' => $this->amount($account['frozen_balance'] ?? 0),
             'total_balance' => $this->amount(bcadd((string)($account['available_balance'] ?? 0), (string)($account['frozen_balance'] ?? 0), 8)),
-            'deposit_enabled' => (int)($config['deposit_enabled'] ?? 0) === 1,
+            'deposit_enabled' => (int)($config['deposit_enabled'] ?? 0) === 1 && $gasfreeEnabled,
             'withdraw_enabled' => (int)($config['withdraw_enabled'] ?? 0) === 1,
             'transfer_enabled' => (int)($config['transfer_enabled'] ?? 1) === 1,
             'min_deposit' => $this->amount($config['min_deposit'] ?? 1),
             'min_withdraw' => $this->amount($config['min_withdraw'] ?? 10),
             'withdraw_fee' => $this->amount($config['withdraw_fee'] ?? 1),
-            'address_assigned' => $address ? 1 : 0,
-            'deposit_address' => (string)($address['address_base58'] ?? ''),
+            'address_assigned' => $gasfree ? 1 : 0,
+            'deposit_address' => $gasfreeEnabled?(string)($gasfree['gasfree_address']??''):'',
+            'deposit_address_type' => $gasfreeEnabled&&$gasfree?'gasfree':'',
         ];
     }
 
@@ -50,17 +50,7 @@ final class DigitalAssetService
         if ((int)($config['status'] ?? 0) !== 1 || (int)($config['deposit_enabled'] ?? 0) !== 1) {
             throw new \RuntimeException('USDT充值暂未开放');
         }
-        $row = Db::name('wallet_chain_address')->where('appid', $this->appid)->where('user_id', $this->uid())
-            ->where('asset_id', (int)$asset['id'])->where('network_id', (int)$network['id'])->find();
-        if (!$row) {
-            $row = $this->deriveAddress((int)$asset['id'], (int)$network['id'], $config);
-        }
-        return [
-            'asset' => 'USDT', 'network' => 'TRC20',
-            'address' => (string)$row['address_base58'],
-            'min_deposit' => $this->amount($config['min_deposit'] ?? 1),
-            'notice' => '仅支持向此地址充值USDT-TRC20，其他资产或网络将无法找回。',
-        ];
+        if(!GasFreeAccountService::enabledFor($this->appid,$this->uid(),(int)$asset['id'],(int)$network['id']))throw new \RuntimeException('USDT充值地址服务暂未开放');$gasfree=GasFreeAccountService::address($this->appid,$this->uid(),(int)$asset['id'],(int)$network['id'],(string)$config['contract_address'],(int)$config['decimals']);return ['asset'=>'USDT','network'=>'TRC20','address'=>(string)$gasfree['gasfree_address'],'address_type'=>'gasfree','min_deposit'=>$this->amount($config['min_deposit']??1),'notice'=>'仅支持向此地址充值USDT-TRC20，其他资产或网络将无法找回。'];
     }
 
     public function transferPreview(array $data): array
@@ -151,12 +141,6 @@ final class DigitalAssetService
     }
 
     public function withdrawals(): array { return Db::name('wallet_withdraw_order')->where('appid',$this->appid)->where('user_id',$this->uid())->order('id desc')->limit(100)->select()->toArray(); }
-
-    private function deriveAddress(int $assetId,int $networkId,array $config):array
-    {
-        $result=$this->walletServiceCall('/internal/address/derive',['appid'=>$this->appid,'user_id'=>$this->uid(),'asset_id'=>$assetId,'network_id'=>$networkId],$config);if(empty($result['address'])||!isset($result['index']))throw new \RuntimeException('地址服务返回异常');
-        $now=date('Y-m-d H:i:s');try{Db::name('wallet_chain_address')->insert(['appid'=>$this->appid,'user_id'=>$this->uid(),'asset_id'=>$assetId,'network_id'=>$networkId,'address_base58'=>(string)$result['address'],'address_hex'=>(string)($result['address_hex']??''),'derivation_index'=>(int)$result['index'],'derivation_path'=>(string)($result['path']??''),'status'=>1,'assigned_time'=>$now]);}catch(\Throwable){}$row=Db::name('wallet_chain_address')->where('appid',$this->appid)->where('user_id',$this->uid())->where('asset_id',$assetId)->where('network_id',$networkId)->find();if(!$row)throw new \RuntimeException('充值地址分配失败');return $row;
-    }
 
     private function account(int $assetId,bool $lock=true,?int $userId=null):array
     {

@@ -4,6 +4,7 @@ class _ChatHeader extends StatelessWidget {
   const _ChatHeader({
     required this.title,
     required this.avatarUrl,
+    this.avatarMembers = const [],
     required this.isGroup,
     required this.statusText,
     required this.online,
@@ -16,6 +17,7 @@ class _ChatHeader extends StatelessWidget {
 
   final String title;
   final String avatarUrl;
+  final List<Map<String, Object?>> avatarMembers;
   final bool isGroup;
   final String statusText;
   final bool online;
@@ -50,13 +52,21 @@ class _ChatHeader extends StatelessWidget {
               color: BimColors.primary,
             ),
             const SizedBox(width: BimSpacing.x2),
+          ] else ...[
+            _Avatar(
+              label: title,
+              imageUrl: avatarUrl,
+              compositeMembers: avatarMembers,
+              size: 34,
+              color: BimColors.success,
+              icon: avatarMembers.isEmpty ? Icons.groups : null,
+            ),
+            const SizedBox(width: BimSpacing.x2),
           ],
           Expanded(
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
-              crossAxisAlignment: isGroup
-                  ? CrossAxisAlignment.center
-                  : CrossAxisAlignment.start,
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
                   title.isEmpty ? (isGroup ? '群聊' : '聊天') : title,

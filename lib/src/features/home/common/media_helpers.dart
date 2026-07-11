@@ -1,18 +1,5 @@
 part of 'package:bim/src/features/home/home_page.dart';
 
-String _mediaTitle(String contentType) {
-  return switch (contentType) {
-    ChatContentTypes.image => '发送图片',
-    ChatContentTypes.emoji => '发送表情',
-    ChatContentTypes.gif => '发送 GIF',
-    ChatContentTypes.sticker => '发送贴纸',
-    ChatContentTypes.voice => '录制语音',
-    ChatContentTypes.video => '发送视频',
-    ChatContentTypes.file => '发送文件',
-    _ => '发送媒体',
-  };
-}
-
 String _mimeFromPath(String path, String contentType) {
   final ext = path.split('.').last.toLowerCase();
   if (contentType == ChatContentTypes.image) {
@@ -180,32 +167,4 @@ Future<List<Directory>> _candidateFileDirectories() async {
   }
 
   return dirs;
-}
-
-List<ActionInputField> _mediaFields(String contentType) {
-  final fields = <ActionInputField>[];
-  switch (contentType) {
-    case ChatContentTypes.video:
-      fields.add(
-        const ActionInputField(
-          id: 'duration',
-          label: '时长秒数',
-          keyboardType: TextInputType.number,
-        ),
-      );
-      break;
-    case ChatContentTypes.file:
-      fields
-        ..add(const ActionInputField(id: 'name', label: '文件名'))
-        ..add(const ActionInputField(id: 'mime', label: 'MIME 类型'))
-        ..add(
-          const ActionInputField(
-            id: 'size',
-            label: '文件大小',
-            keyboardType: TextInputType.number,
-          ),
-        );
-      break;
-  }
-  return fields;
 }

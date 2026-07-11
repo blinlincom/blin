@@ -70,6 +70,12 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   DateTime? _voiceRecordStartedAt;
   String _voiceRecordPath = '';
   List<String> _mentionUserIds = const [];
+  final Map<String, String> _mentionLabels = <String, String>{};
+  List<Map<String, Object?>> _mentionMembers = const [];
+  bool _mentionPickerVisible = false;
+  bool _mentionMembersLoading = false;
+  int _mentionStart = -1;
+  String _mentionQuery = '';
   String _replyClientMsgNo = '';
   Map<String, Object?> _replyQuote = const {};
   String _selectedClientMsgNo = '';
@@ -97,6 +103,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   int _onlineStatusToken = 0;
   String _lastImStatusText = '';
   int? _groupMemberCount;
+  List<Map<String, Object?>> _groupAvatarMembers = const [];
   int? _groupOnlineCount;
   bool _groupPresenceLoading = false;
   int _groupPresenceToken = 0;
@@ -168,6 +175,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         channelType: widget.channelType,
         text: _textController.text,
       );
+      _handleMentionInput();
     });
   }
 
@@ -433,6 +441,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       }
       setState(() {
         _groupMemberCount = members.length;
+        _groupAvatarMembers = members.take(4).toList(growable: false);
         _groupOnlineCount = onlineCount;
         _groupPresenceLoading = false;
       });
@@ -1695,6 +1704,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                         _ChatHeader(
                           title: _chatHeaderTitle(),
                           avatarUrl: _headerAvatarUrl(),
+                          avatarMembers: _groupAvatarMembers,
                           isGroup: _isGroup,
                           statusText: _chatHeaderStatusText(),
                           online: !_isGroup && _peerOnline,
@@ -1802,6 +1812,14 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                                   },
                                 ),
                         ),
+                        if (_mentionPickerVisible)
+                          _MentionPicker(
+                            members: _filteredMentionMembers,
+                            loading: _mentionMembersLoading,
+                            showAll: _mentionQuery.isEmpty,
+                            onAllSelected: () => _selectMentionAll(),
+                            onMemberSelected: _selectMentionMember,
+                          ),
                         _Composer(
                           controller: _textController,
                           focusNode: _inputFocusNode,
@@ -1840,7 +1858,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                               return _ChatToolsPanel(
                                 height: panelHeight,
                                 isGroup: _isGroup,
-                                onTextOption: _openTextOptions,
+                                onBurnAfterRead: _openTextOptions,
                                 onVoiceInput: _toggleVoiceMode,
                                 onImage: () =>
                                     _sendMedia(ChatContentTypes.image),
@@ -2323,6 +2341,8 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
           _replyQuote = const {};
           _mentionUserIds = const [];
           _mentionAll = false;
+          _mentionLabels.clear();
+          _mentionPickerVisible = false;
         });
         if (hadInputFocus) {
           _inputFocusNode.requestFocus();
@@ -2773,6 +2793,128 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     }
   }
 
+  void _handleMentionInput() {
+    if (!_isGroup || !_composerEnabled) {
+      return;
+    }
+    final value = _textController.value;
+    final cursor = value.selection.isValid
+        ? value.selection.baseOffset
+        : value.text.length;
+    if (cursor < 0 || cursor > value.text.length) {
+      return;
+    }
+    final beforeCursor = value.text.substring(0, cursor);
+    final match = RegExp(r'@([^\s@]*)$').firstMatch(beforeCursor);
+    final visible = match != null;
+    final query = match?.group(2)?.trim().toLowerCase() ?? '';
+    final start = match == null ? -1 : beforeCursor.lastIndexOf('@');
+
+    var mentionsChanged = false;
+    if (_mentionAll && !value.text.contains('@全体成员')) {
+      _mentionAll = false;
+      mentionsChanged = true;
+    }
+    final retainedIds = _mentionUserIds
+        .where((id) {
+          final label = _mentionLabels[id] ?? '';
+          return label.isNotEmpty && value.text.contains('@$label');
+        })
+        .toList(growable: false);
+    if (retainedIds.length != _mentionUserIds.length) {
+      _mentionUserIds = retainedIds;
+      mentionsChanged = true;
+    }
+    if (visible && _mentionMembers.isEmpty && !_mentionMembersLoading) {
+      unawaited(_loadMentionMembers());
+    }
+    if (!mounted ||
+        (_mentionPickerVisible == visible &&
+            _mentionQuery == query &&
+            _mentionStart == start &&
+            !mentionsChanged)) {
+      return;
+    }
+    setState(() {
+      _mentionPickerVisible = visible;
+      _mentionQuery = query;
+      _mentionStart = start;
+    });
+  }
+
+  Future<void> _loadMentionMembers() async {
+    setState(() => _mentionMembersLoading = true);
+    try {
+      final result = await widget.controller.groupMembers(_groupId);
+      final currentUserId = widget.controller.session?.userId.toString() ?? '';
+      final members = _listFromResult(result)
+          .where((member) => _memberUserId(member) != currentUserId)
+          .toList(growable: false);
+      if (!mounted) return;
+      setState(() => _mentionMembers = members);
+    } catch (error, stackTrace) {
+      AppLogger.error(
+        'ui',
+        'mention members load failed',
+        error: error,
+        stackTrace: stackTrace,
+      );
+      if (mounted) setState(() => _error = '群成员加载失败，请稍后重试');
+    } finally {
+      if (mounted) setState(() => _mentionMembersLoading = false);
+    }
+  }
+
+  List<Map<String, Object?>> get _filteredMentionMembers {
+    if (_mentionQuery.isEmpty) {
+      return _mentionMembers;
+    }
+    return _mentionMembers
+        .where((member) {
+          final title = _memberTitle(member).toLowerCase();
+          final username = _memberUsername(member).toLowerCase();
+          return title.contains(_mentionQuery) ||
+              username.contains(_mentionQuery);
+        })
+        .toList(growable: false);
+  }
+
+  void _selectMentionAll() {
+    _replaceMentionQuery('@全体成员 ');
+    setState(() {
+      _mentionAll = true;
+      _mentionUserIds = const [];
+      _mentionLabels.clear();
+    });
+  }
+
+  void _selectMentionMember(Map<String, Object?> member) {
+    final userId = _memberUserId(member);
+    if (userId.isEmpty) return;
+    final label = _memberTitle(member);
+    _replaceMentionQuery('@$label ');
+    setState(() {
+      _mentionAll = false;
+      _mentionLabels[userId] = label;
+      _mentionUserIds = {..._mentionUserIds, userId}.toList(growable: false);
+    });
+  }
+
+  void _replaceMentionQuery(String replacement) {
+    final value = _textController.value;
+    final cursor = value.selection.isValid
+        ? value.selection.baseOffset
+        : value.text.length;
+    if (_mentionStart < 0 || cursor < _mentionStart) return;
+    final next = value.text.replaceRange(_mentionStart, cursor, replacement);
+    final nextCursor = _mentionStart + replacement.length;
+    _textController.value = TextEditingValue(
+      text: next,
+      selection: TextSelection.collapsed(offset: nextCursor),
+    );
+    _inputFocusNode.requestFocus();
+  }
+
   Future<void> _startVoiceRecording() async {
     if (!_composerEnabled) {
       setState(() => _message = _groupMuteText(_groupMuteState));
@@ -3075,11 +3217,8 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         MaterialPageRoute(builder: (_) => const _InAppFilePickerPage()),
       );
     }
-    return _openInput(
-      context,
-      title: _mediaTitle(contentType),
-      fields: _mediaFields(contentType),
-    );
+    setState(() => _error = '暂不支持发送此类内容');
+    return Future.value(null);
   }
 
   Future<void> _sendContactCard() async {
@@ -3469,49 +3608,23 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       setState(() => _message = _groupMuteText(_groupMuteState));
       return;
     }
-    final data = await _openInput(
-      context,
-      title: '文本选项',
-      fields: [
-        if (_isGroup)
-          ActionInputField(
-            id: 'mention_user_ids',
-            label: '@成员',
-            hint: '多个成员用逗号分隔',
-            initial: _mentionUserIds.join(','),
-          ),
-        if (_isGroup)
-          ActionInputField(
-            id: 'mention_all',
-            label: '@所有人',
-            hint: '填 1 表示开启',
-            initial: _mentionAll ? '1' : '',
-          ),
-        ActionInputField(
-          id: 'burn_after_read',
-          label: '阅后即焚',
-          hint: '填 1 表示开启',
-          initial: _burnAfterRead ? '1' : '',
+    if (!mounted) return;
+    final data = await Navigator.of(context).push<_ChatTextOptionsResult>(
+      MaterialPageRoute(
+        builder: (_) => _ChatTextOptionsPage(
+          initialBurnAfterRead: _burnAfterRead,
+          initialBurnSeconds: _burnSeconds,
         ),
-        ActionInputField(
-          id: 'burn_after_read_seconds',
-          label: '倒计时秒数',
-          keyboardType: TextInputType.number,
-          initial: _burnSeconds > 0 ? _burnSeconds.toString() : '',
-        ),
-      ],
+      ),
     );
     if (data == null) {
       return;
     }
     final oldBurnAfterRead = _burnAfterRead;
     final oldBurnSeconds = _burnSeconds;
-    final nextBurnAfterRead = (data['burn_after_read'] ?? '') == '1';
-    final nextBurnSeconds =
-        int.tryParse(data['burn_after_read_seconds'] ?? '') ?? 0;
+    final nextBurnAfterRead = data.burnAfterRead;
+    final nextBurnSeconds = data.burnSeconds;
     setState(() {
-      _mentionUserIds = _idsFromText(data['mention_user_ids'] ?? '');
-      _mentionAll = (data['mention_all'] ?? '') == '1';
       _burnAfterRead = nextBurnAfterRead;
       _burnSeconds = nextBurnSeconds;
     });
@@ -4012,6 +4125,8 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       _replyQuote = const {};
       _mentionUserIds = const [];
       _mentionAll = false;
+      _mentionLabels.clear();
+      _mentionPickerVisible = false;
       _burnAfterRead = false;
       _burnSeconds = 0;
     });
@@ -4504,7 +4619,7 @@ String _qrMediaCoverRemoteUrl(
 Future<_QrScanImageSource> _downloadQrScanImage(String rawUrl) async {
   final url = _normalizeAvatarUrl(rawUrl);
   if (url.isEmpty) {
-    throw Exception('二维码图片地址为空');
+    throw Exception('二维码图片暂时无法保存');
   }
   final dir = await getTemporaryDirectory();
   final ext = _qrScanImageExtension(url);

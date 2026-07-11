@@ -2711,6 +2711,21 @@ class SessionController extends ChangeNotifier {
     );
   }
 
+  Future<Map<String, Object?>> uploadGroupAvatar({
+    required String groupId,
+    required String filePath,
+    void Function(double progress)? onUploadProgress,
+  }) {
+    final current = _requireSession();
+    return _chat.groupAvatarUpload(
+      session: current,
+      device: _device,
+      groupId: groupId,
+      filePath: filePath,
+      onUploadProgress: onUploadProgress,
+    );
+  }
+
   Future<Map<String, Object?>> deleteGroup(String groupId) {
     final current = _requireSession();
     return _chat.groupDelete(

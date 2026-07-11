@@ -1935,11 +1935,20 @@ class _OtcAdComposerPageState extends State<OtcAdComposerPage> {
   final _amount = TextEditingController();
   final _terms = TextEditingController();
   bool _busy = false;
+  late Future<(UsdtWalletOverview, WalletBalance)> _balances;
   @override
   void initState() {
     super.initState();
     _asset = widget.config.assets.first;
     _network = _asset.networks.first;
+    _balances =
+        Future.wait<Object>([
+          widget.controller.loadUsdtWalletOverview(),
+          widget.controller.loadWalletBalance(refresh: true),
+        ]).then(
+          (items) =>
+              (items[0] as UsdtWalletOverview, items[1] as WalletBalance),
+        );
   }
 
   @override
@@ -1959,81 +1968,125 @@ class _OtcAdComposerPageState extends State<OtcAdComposerPage> {
         (double.tryParse(_amount.text) ?? 0);
     return BimScaffold(
       topBar: const BimTopBar(title: '发布广告'),
-      body: ListView(
-        padding: const EdgeInsets.all(BimSpacing.x4),
-        children: [
-          BimSegmentedControl<String>(
-            selected: _side,
-            options: const [
-              BimSegmentOption(value: 'sell', label: '卖币广告'),
-              BimSegmentOption(value: 'buy', label: '买币广告'),
-            ],
-            onChanged: (value) => setState(() => _side = value),
-          ),
-          const SizedBox(height: BimSpacing.x4),
-          DropdownButtonFormField<OtcNetwork>(
-            initialValue: _network,
-            items: [
-              for (final network in _asset.networks)
-                DropdownMenuItem(
-                  value: network,
-                  child: Text('${_asset.symbol} · ${network.code}'),
+      body: FutureBuilder<(UsdtWalletOverview, WalletBalance)>(
+        future: _balances,
+        builder: (context, snapshot) {
+          if (snapshot.hasError)
+            return BimEmptyState(
+              title: '余额加载失败',
+              message: snapshot.error.toString(),
+              actionLabel: '重新加载',
+              onAction: () {
+                setState(() {
+                  _balances =
+                      Future.wait<Object>([
+                        widget.controller.loadUsdtWalletOverview(),
+                        widget.controller.loadWalletBalance(refresh: true),
+                      ]).then(
+                        (items) => (
+                          items[0] as UsdtWalletOverview,
+                          items[1] as WalletBalance,
+                        ),
+                      );
+                });
+              },
+            );
+          if (!snapshot.hasData)
+            return const BimLoadingState(label: '正在核对可用余额');
+          final usdt = double.tryParse(snapshot.data!.$1.availableBalance) ?? 0;
+          final fiat = double.tryParse(snapshot.data!.$2.availableBalance) ?? 0;
+          final amount = double.tryParse(_amount.text) ?? 0;
+          final occupied = _side == 'sell' ? amount : exposure;
+          final available = _side == 'sell' ? usdt : fiat;
+          final over = occupied > available;
+          return ListView(
+            padding: const EdgeInsets.all(BimSpacing.x4),
+            children: [
+              BimSegmentedControl<String>(
+                selected: _side,
+                options: const [
+                  BimSegmentOption(value: 'sell', label: '卖币广告'),
+                  BimSegmentOption(value: 'buy', label: '买币广告'),
+                ],
+                onChanged: (value) => setState(() => _side = value),
+              ),
+              const SizedBox(height: BimSpacing.x4),
+              DropdownButtonFormField<OtcNetwork>(
+                initialValue: _network,
+                items: [
+                  for (final network in _asset.networks)
+                    DropdownMenuItem(
+                      value: network,
+                      child: Text('${_asset.symbol} · ${network.code}'),
+                    ),
+                ],
+                onChanged: (value) =>
+                    setState(() => _network = value ?? _network),
+                decoration: const InputDecoration(labelText: '资产网络'),
+              ),
+              TextField(
+                controller: _price,
+                onChanged: (_) => setState(() {}),
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
                 ),
+                decoration: const InputDecoration(
+                  labelText: '单价',
+                  prefixText: '¥ ',
+                ),
+              ),
+              TextField(
+                controller: _amount,
+                onChanged: (_) => setState(() {}),
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
+                decoration: InputDecoration(
+                  labelText: '广告数量',
+                  suffixText: _asset.symbol,
+                ),
+              ),
+              TextField(
+                controller: _min,
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
+                decoration: const InputDecoration(
+                  labelText: '单笔最小金额',
+                  prefixText: '¥ ',
+                ),
+              ),
+              TextField(
+                controller: _max,
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
+                decoration: const InputDecoration(
+                  labelText: '单笔最大金额',
+                  prefixText: '¥ ',
+                ),
+              ),
+              TextField(
+                controller: _terms,
+                maxLength: 500,
+                maxLines: 3,
+                decoration: const InputDecoration(labelText: '交易说明'),
+              ),
+              BimNoticeBanner(
+                text: _side == 'sell'
+                    ? 'USDT可用 ${usdt.toStringAsFixed(8)}，本次托管 ${amount.toStringAsFixed(8)}，发布后剩余 ${(usdt - amount).clamp(0, double.infinity).toStringAsFixed(8)}。'
+                    : '平台可用余额 ¥${fiat.toStringAsFixed(2)}，本次托管 ¥${exposure.toStringAsFixed(2)}，发布后剩余 ¥${(fiat - exposure).clamp(0, double.infinity).toStringAsFixed(2)}。',
+                tone: over ? BimNoticeTone.warning : BimNoticeTone.info,
+              ),
+              const SizedBox(height: BimSpacing.x4),
+              BimButton(
+                label: '提交上架审核',
+                busy: _busy,
+                onPressed: _busy || over || occupied <= 0 ? null : _submit,
+              ),
             ],
-            onChanged: (value) => setState(() => _network = value ?? _network),
-            decoration: const InputDecoration(labelText: '资产网络'),
-          ),
-          TextField(
-            controller: _price,
-            onChanged: (_) => setState(() {}),
-            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            decoration: const InputDecoration(
-              labelText: '单价',
-              prefixText: '¥ ',
-            ),
-          ),
-          TextField(
-            controller: _amount,
-            onChanged: (_) => setState(() {}),
-            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            decoration: InputDecoration(
-              labelText: '广告数量',
-              suffixText: _asset.symbol,
-            ),
-          ),
-          TextField(
-            controller: _min,
-            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            decoration: const InputDecoration(
-              labelText: '单笔最小金额',
-              prefixText: '¥ ',
-            ),
-          ),
-          TextField(
-            controller: _max,
-            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            decoration: const InputDecoration(
-              labelText: '单笔最大金额',
-              prefixText: '¥ ',
-            ),
-          ),
-          TextField(
-            controller: _terms,
-            maxLength: 500,
-            maxLines: 3,
-            decoration: const InputDecoration(labelText: '交易说明'),
-          ),
-          BimNoticeBanner(
-            text:
-                '预计广告敞口 ¥${exposure.toStringAsFixed(2)}。提交后将按后台比例占用可用保证金，审核驳回或下架后自动释放。',
-          ),
-          const SizedBox(height: BimSpacing.x4),
-          BimButton(
-            label: '提交上架审核',
-            busy: _busy,
-            onPressed: _busy ? null : _submit,
-          ),
-        ],
+          );
+        },
       ),
     );
   }

@@ -820,38 +820,78 @@ class _ContactCardPreview extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final name = _value(payload, [
-      'card_nickname',
-      'card_name',
-      'nickname',
-      'name',
-      'card_username',
-      'card_user_id',
-    ]);
-    final avatar = _value(payload, ['card_avatar', 'avatar']);
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        _Avatar(
-          label: name,
-          imageUrl: avatar,
-          size: 32,
-          color: BimColors.success,
-        ),
-        const SizedBox(width: 8),
-        Flexible(
-          child: Text(
-            name.isEmpty ? '名片' : name,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
-              color: _textColor,
-              fontSize: 15,
-              fontWeight: FontWeight.w700,
+    final card = _asObjectMap(payload['contact_card']);
+    final profile = _asObjectMap(card['profile']);
+    final name = _value(
+      card,
+      ['nickname', 'name', 'username'],
+      fallback: _value(
+        profile,
+        ['nickname', 'name', 'username'],
+        fallback: _value(payload, [
+          'card_nickname',
+          'card_name',
+          'nickname',
+          'name',
+          'card_username',
+          'card_user_id',
+        ]),
+      ),
+    );
+    final username = _value(
+      card,
+      ['username'],
+      fallback: _value(profile, [
+        'username',
+      ], fallback: _value(payload, ['card_username'])),
+    );
+    final avatar = _value(
+      card,
+      ['avatar'],
+      fallback: _value(profile, [
+        'avatar',
+        'usertx',
+      ], fallback: _value(payload, ['card_avatar', 'avatar'])),
+    );
+    return ConstrainedBox(
+      constraints: const BoxConstraints(minWidth: 180, maxWidth: 240),
+      child: Row(
+        children: [
+          _Avatar(
+            label: name,
+            imageUrl: avatar,
+            size: 40,
+            color: BimColors.success,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  name.isEmpty ? '个人名片' : name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: _textColor,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                if (username.isNotEmpty) ...[
+                  const SizedBox(height: 3),
+                  Text(
+                    '@$username',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(color: _mutedColor, fontSize: 12),
+                  ),
+                ],
+              ],
             ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }

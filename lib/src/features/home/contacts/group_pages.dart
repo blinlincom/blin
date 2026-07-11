@@ -183,6 +183,100 @@ class _CreateGroupPageState extends State<CreateGroupPage> {
   }
 }
 
+class _GroupFriendPickerPage extends StatefulWidget {
+  const _GroupFriendPickerPage({
+    required this.controller,
+    required this.excludedUserIds,
+  });
+
+  final SessionController controller;
+  final Set<String> excludedUserIds;
+
+  @override
+  State<_GroupFriendPickerPage> createState() => _GroupFriendPickerPageState();
+}
+
+class _GroupFriendPickerPageState extends State<_GroupFriendPickerPage> {
+  final Set<String> _selected = {};
+  late Future<List<Map<String, Object?>>> _friendsFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _friendsFuture = widget.controller.loadFriends();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return BimScaffold(
+      topBar: BimTopBar(
+        title: _selected.isEmpty ? '选择联系人' : '已选择 ${_selected.length} 人',
+        actions: [
+          TextButton(
+            onPressed: _selected.isEmpty
+                ? null
+                : () => Navigator.of(
+                    context,
+                  ).pop<List<String>>(_selected.toList(growable: false)),
+            child: const Text('完成'),
+          ),
+        ],
+      ),
+      body: BimContentViewport(
+        maxWidth: 760,
+        child: FutureBuilder<List<Map<String, Object?>>>(
+          future: _friendsFuture,
+          builder: (context, snapshot) {
+            if (snapshot.connectionState != ConnectionState.done) {
+              return const BimLoadingState(label: '正在加载联系人');
+            }
+            if (snapshot.hasError) {
+              return _ErrorState(
+                text: snapshot.error.toString(),
+                onRetry: () => setState(
+                  () => _friendsFuture = widget.controller.loadFriends(
+                    forceRefresh: true,
+                  ),
+                ),
+              );
+            }
+            final friends = (snapshot.data ?? const [])
+                .where(
+                  (friend) =>
+                      !widget.excludedUserIds.contains(_friendUserId(friend)),
+                )
+                .toList(growable: false);
+            if (friends.isEmpty) {
+              return const BimEmptyState(
+                title: '没有可添加的联系人',
+                message: '群内已经包含你的全部联系人',
+              );
+            }
+            return ListView.builder(
+              itemCount: friends.length,
+              itemBuilder: (context, index) {
+                final friend = friends[index];
+                final id = _friendUserId(friend);
+                return _SelectableContactTile(
+                  title: _friendTitle(friend),
+                  subtitle: _friendSubtitle(friend),
+                  avatarUrl: _friendAvatarUrl(friend),
+                  selected: _selected.contains(id),
+                  onTap: () => setState(() {
+                    if (!_selected.add(id)) {
+                      _selected.remove(id);
+                    }
+                  }),
+                );
+              },
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
 class GroupDetailPage extends StatefulWidget {
   const GroupDetailPage({
     required this.controller,
@@ -214,11 +308,13 @@ class _GroupDetailPageState extends State<GroupDetailPage> {
   String _error = '';
   String _message = '';
   late bool _pinned;
+  String _groupAvatar = '';
 
   @override
   void initState() {
     super.initState();
     _pinned = _initialPinned();
+    _groupAvatar = widget.avatarUrl;
     _refreshMembers();
   }
 
@@ -248,6 +344,12 @@ class _GroupDetailPageState extends State<GroupDetailPage> {
               onAdd: _addMembers,
             ),
             const _SectionHeader(text: '群聊资料'),
+            _GroupAvatarSettingsTile(
+              title: widget.title,
+              imageUrl: _groupAvatar,
+              members: _members,
+              onTap: _uploadGroupAvatar,
+            ),
             _GroupSettingsInfoTile(
               title: '群聊名称',
               value: widget.title.isEmpty ? '群聊' : widget.title,
@@ -411,7 +513,6 @@ class _GroupDetailPageState extends State<GroupDetailPage> {
       title: '更新群资料',
       fields: const [
         ActionInputField(id: 'name', label: '群名称'),
-        ActionInputField(id: 'avatar', label: '群头像地址'),
         ActionInputField(id: 'notice', label: '群公告', maxLines: 3),
       ],
     );
@@ -422,26 +523,49 @@ class _GroupDetailPageState extends State<GroupDetailPage> {
       () => widget.controller.updateGroup(
         groupId: widget.groupId,
         name: data['name'] ?? '',
-        avatar: data['avatar'] ?? '',
         notice: data['notice'] ?? '',
       ),
     );
   }
 
-  Future<void> _addMembers() async {
-    final data = await _openInput(
-      context,
-      title: '添加群成员',
-      fields: const [
-        ActionInputField(id: 'member_ids', label: '成员账号', hint: '多个账号用逗号分隔'),
-      ],
+  Future<void> _uploadGroupAvatar() async {
+    final selected = await Navigator.of(context).push<Map<String, String>>(
+      MaterialPageRoute(
+        builder: (_) =>
+            const _InAppMediaPickerPage(contentType: ChatContentTypes.image),
+      ),
     );
-    if (data == null) {
+    final filePath = selected?['file_path']?.trim() ?? '';
+    if (filePath.isEmpty || !mounted) {
       return;
     }
-    final ids = _idsFromText(data['member_ids'] ?? '');
-    if (ids.isEmpty) {
-      setState(() => _error = '成员不能为空');
+    await _run(() async {
+      final result = await widget.controller.uploadGroupAvatar(
+        groupId: widget.groupId,
+        filePath: filePath,
+      );
+      final avatar = _value(result, ['avatar']);
+      if (avatar.isNotEmpty && mounted) {
+        setState(() => _groupAvatar = avatar);
+      }
+      return result;
+    });
+  }
+
+  Future<void> _addMembers() async {
+    final existingIds = _members
+        .map(_memberUserId)
+        .where((item) => item.isNotEmpty)
+        .toSet();
+    final ids = await Navigator.of(context).push<List<String>>(
+      MaterialPageRoute(
+        builder: (_) => _GroupFriendPickerPage(
+          controller: widget.controller,
+          excludedUserIds: existingIds,
+        ),
+      ),
+    );
+    if (ids == null || ids.isEmpty || !mounted) {
       return;
     }
     await _run(
@@ -667,6 +791,13 @@ class GroupMemberListPage extends StatefulWidget {
 
 class _GroupMemberListPageState extends State<GroupMemberListPage> {
   var _version = 0;
+  final _searchController = TextEditingController();
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -688,30 +819,78 @@ class _GroupMemberListPageState extends State<GroupMemberListPage> {
             if (members.isEmpty) {
               return const _EmptyState(text: '暂无成员');
             }
-            return ListView(
-              children: [
-                for (final member in members)
-                  _PlainListTile(
-                    icon: Icons.person_outline,
-                    title: _memberTitle(member),
-                    subtitle: _memberSubtitle(member),
-                    trailing: _memberUsername(member),
-                    onTap: () async {
-                      await Navigator.of(context).push(
-                        MaterialPageRoute<void>(
-                          builder: (_) => GroupMemberActionPage(
-                            controller: widget.controller,
-                            groupId: widget.groupId,
-                            member: member,
-                          ),
+            final currentUserId =
+                widget.controller.session?.userId.toString() ?? '';
+            final self = members.where(
+              (item) => _memberUserId(item) == currentUserId,
+            );
+            final selfRole = self.isEmpty ? 0 : _intValue(self.first, ['role']);
+            return StatefulBuilder(
+              builder: (context, updateFilter) {
+                final query = _searchController.text.trim().toLowerCase();
+                final visible = members
+                    .where((member) {
+                      if (query.isEmpty) return true;
+                      return _memberTitle(
+                            member,
+                          ).toLowerCase().contains(query) ||
+                          _memberUsername(member).toLowerCase().contains(query);
+                    })
+                    .toList(growable: false);
+                return Column(
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.all(BimSpacing.x4),
+                      child: TextField(
+                        controller: _searchController,
+                        onChanged: (_) => updateFilter(() {}),
+                        decoration: const InputDecoration(
+                          hintText: '搜索群成员',
+                          prefixIcon: Icon(Icons.search),
                         ),
-                      );
-                      if (mounted) {
-                        setState(() => _version++);
-                      }
-                    },
-                  ),
-              ],
+                      ),
+                    ),
+                    Expanded(
+                      child: visible.isEmpty
+                          ? const _EmptyState(text: '没有找到群成员')
+                          : ListView.separated(
+                              itemCount: visible.length,
+                              separatorBuilder: (_, _) =>
+                                  const Divider(height: 1),
+                              itemBuilder: (context, index) {
+                                final member = visible[index];
+                                return ListTile(
+                                  leading: _Avatar(
+                                    label: _memberTitle(member),
+                                    imageUrl: _avatarUrlFromMap(member),
+                                    size: 42,
+                                  ),
+                                  title: Text(_memberTitle(member)),
+                                  subtitle: Text(_memberSubtitle(member)),
+                                  trailing: const Icon(Icons.chevron_right),
+                                  onTap: () async {
+                                    await Navigator.of(context).push(
+                                      MaterialPageRoute<void>(
+                                        builder: (_) => GroupMemberActionPage(
+                                          controller: widget.controller,
+                                          groupId: widget.groupId,
+                                          member: member,
+                                          currentUserRole: selfRole,
+                                          isSelf:
+                                              _memberUserId(member) ==
+                                              currentUserId,
+                                        ),
+                                      ),
+                                    );
+                                    if (mounted) setState(() => _version++);
+                                  },
+                                );
+                              },
+                            ),
+                    ),
+                  ],
+                );
+              },
             );
           },
         ),

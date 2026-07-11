@@ -16,16 +16,31 @@ import (
 	"strings"
 	"time"
 
+	"bim/tron-wallet/internal/gasfree"
 	"bim/tron-wallet/internal/tron"
+	"github.com/btcsuite/btcd/btcec/v2"
 )
 
 type server struct {
-	secret   string
-	seed     []byte
-	tronAPI  string
-	apiKey   string
-	callback string
-	client   *http.Client
+	secret            string
+	seed              []byte
+	tronAPI           string
+	apiKey            string
+	callback          string
+	client            *http.Client
+	tronClient        tron.Client
+	workerID          string
+	resourceKey       *btcec.PrivateKey
+	resourceAddress   string
+	resourceTopupSun  int64
+	hotKey            *btcec.PrivateKey
+	hotAddress        string
+	chainWorker       bool
+	gasfreeClient     gasfree.Client
+	gasfreeEnabled    bool
+	gasfreeAuto       bool
+	gasfreeChainID    uint64
+	gasfreeController string
 }
 
 type deriveRequest struct {
@@ -35,6 +50,10 @@ type deriveRequest struct {
 
 type validateRequest struct {
 	Address string `json:"address"`
+}
+type gasfreeAccountRequest struct {
+	AppID  uint32 `json:"appid"`
+	UserID uint32 `json:"user_id"`
 }
 
 func main() {
@@ -51,11 +70,37 @@ func main() {
 		}
 		seed = parsed
 	}
-	s := &server{secret: secret, seed: seed, tronAPI: strings.TrimRight(env("TRON_EVENT_API_URL", "https://api.trongrid.io"), "/"), apiKey: strings.TrimSpace(os.Getenv("TRON_API_KEY")), callback: strings.TrimRight(strings.TrimSpace(os.Getenv("TRON_CALLBACK_URL")), "/"), client: &http.Client{Timeout: 12 * time.Second}}
+	client := &http.Client{Timeout: 12 * time.Second}
+	fullnode := strings.TrimRight(env("TRON_FULLNODE_URL", "https://api.trongrid.io"), "/")
+	resourceAddress, resourceKey, err := parsePrivateEnv("TRON_RESOURCE_PRIVATE_KEY")
+	if err != nil {
+		log.Fatal(err)
+	}
+	hotAddress, hotKey, err := parsePrivateEnv("TRON_WITHDRAW_HOT_PRIVATE_KEY")
+	if err != nil {
+		log.Fatal(err)
+	}
+	chainWorker := strings.EqualFold(env("TRON_CHAIN_WORKER_ENABLED", "false"), "true")
+	gasfreeEnabled := strings.EqualFold(env("TRON_GASFREE_ENABLED", "false"), "true")
+	gasfreeAuto := strings.EqualFold(env("TRON_GASFREE_AUTO_ENABLED", "false"), "true")
+	gasfreeChainID, err := strconv.ParseUint(env("TRON_GASFREE_CHAIN_ID", "728126428"), 10, 64)
+	if err != nil || gasfreeChainID == 0 {
+		log.Fatal("TRON_GASFREE_CHAIN_ID is invalid")
+	}
+	gasfreeController := strings.TrimSpace(env("TRON_GASFREE_VERIFYING_CONTRACT", "TFFAMQLZybALaLb4uxHA9RBE7pxhUAjF3U"))
+	if _, err = tron.ValidateAddress(gasfreeController); err != nil {
+		log.Fatal("TRON_GASFREE_VERIFYING_CONTRACT is invalid")
+	}
+	gasfreeClient := gasfree.Client{BaseURL: strings.TrimRight(strings.TrimSpace(os.Getenv("TRON_GASFREE_API_URL")), "/"), APIKey: strings.TrimSpace(os.Getenv("TRON_GASFREE_API_KEY")), APISecret: strings.TrimSpace(os.Getenv("TRON_GASFREE_API_SECRET")), HTTP: client}
+	if gasfreeEnabled && (!gasfreeClient.Ready() || len(seed) == 0) {
+		log.Fatal("GasFree enabled without credentials or master seed")
+	}
+	s := &server{secret: secret, seed: seed, tronAPI: strings.TrimRight(env("TRON_EVENT_API_URL", "https://api.trongrid.io"), "/"), apiKey: strings.TrimSpace(os.Getenv("TRON_API_KEY")), callback: strings.TrimRight(strings.TrimSpace(os.Getenv("TRON_CALLBACK_URL")), "/"), client: client, tronClient: tron.Client{BaseURL: fullnode, APIKey: strings.TrimSpace(os.Getenv("TRON_API_KEY")), HTTP: client}, workerID: env("TRON_WORKER_ID", "wallet-1"), resourceKey: resourceKey, resourceAddress: resourceAddress.Address, resourceTopupSun: envInt64("TRON_RESOURCE_TOPUP_SUN", 30000000), hotKey: hotKey, hotAddress: hotAddress.Address, chainWorker: chainWorker, gasfreeClient: gasfreeClient, gasfreeEnabled: gasfreeEnabled, gasfreeAuto: gasfreeAuto, gasfreeChainID: gasfreeChainID, gasfreeController: gasfreeController}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", s.health)
 	mux.HandleFunc("POST /internal/address/derive", s.auth(s.derive))
 	mux.HandleFunc("POST /internal/address/validate", s.auth(s.validate))
+	mux.HandleFunc("POST /internal/gasfree/account", s.auth(s.gasfreeAccount))
 	httpServer := &http.Server{
 		Addr:              listen,
 		Handler:           requestLimit(mux),
@@ -64,9 +109,15 @@ func main() {
 		WriteTimeout:      8 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
-	log.Printf("tron wallet service listening on %s (address derivation enabled=%t)", listen, len(seed) > 0)
+	log.Printf("tron wallet service listening on %s (legacy address generation disabled, gasfree enabled=%t)", listen, gasfreeEnabled)
 	if s.callback != "" {
 		go s.scanLoop()
+		if s.chainWorker {
+			go s.workerLoop()
+		}
+		if s.gasfreeEnabled {
+			go s.gasfreeLoop()
+		}
 	} else {
 		log.Printf("deposit scanner disabled: TRON_CALLBACK_URL is empty")
 	}
@@ -249,25 +300,54 @@ func (s *server) validate(w http.ResponseWriter, r *http.Request, body []byte) {
 }
 
 func (s *server) health(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "address_derivation_enabled": len(s.seed) > 0})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":                         true,
+		"legacy_address_generation":  false,
+		"chain_worker_enabled":       s.chainWorker,
+		"resource_wallet_configured": s.resourceKey != nil,
+		"withdraw_wallet_configured": s.hotKey != nil,
+		"resource_address":           s.resourceAddress,
+		"withdraw_address":           s.hotAddress,
+		"gasfree_enabled":            s.gasfreeEnabled,
+		"gasfree_credentials_ready":  s.gasfreeClient.Ready(),
+		"gasfree_auto_enabled":       s.gasfreeAuto,
+	})
 }
 
 func (s *server) derive(w http.ResponseWriter, r *http.Request, body []byte) {
-	if len(s.seed) == 0 {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "address derivation is not configured"})
+	writeJSON(w, http.StatusGone, map[string]any{"error": "legacy address generation is disabled"})
+}
+
+func (s *server) gasfreeAccount(w http.ResponseWriter, _ *http.Request, body []byte) {
+	if !s.gasfreeEnabled || !s.gasfreeClient.Ready() || len(s.seed) == 0 {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "gasfree is disabled"})
 		return
 	}
-	var request deriveRequest
-	if err := json.Unmarshal(body, &request); err != nil || request.AppID == 0 || request.UserID == 0 {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid derive request"})
+	var request gasfreeAccountRequest
+	if json.Unmarshal(body, &request) != nil || request.AppID == 0 || request.UserID == 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid request"})
 		return
 	}
-	result, err := tron.Derive(s.seed, request.AppID, request.UserID)
+	derived, err := tron.Derive(s.seed, request.AppID, request.UserID)
 	if err != nil {
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, result)
+	account, err := s.gasfreeClient.Account(derived.Address)
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]any{"error": err.Error()})
+		return
+	}
+	if account.AccountAddress != derived.Address {
+		writeJSON(w, http.StatusBadGateway, map[string]any{"error": "gasfree EOA mismatch"})
+		return
+	}
+	providers, err := s.gasfreeClient.Providers()
+	if err != nil || len(providers) == 0 {
+		writeJSON(w, http.StatusBadGateway, map[string]any{"error": "gasfree provider unavailable"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"eoa_address": derived.Address, "gasfree_address": account.GasFreeAddress, "provider_address": providers[0].Address, "active": account.Active, "allow_submit": account.AllowSubmit, "recommended_nonce": account.Nonce, "assets": account.Assets})
 }
 
 func (s *server) auth(next func(http.ResponseWriter, *http.Request, []byte)) http.HandlerFunc {

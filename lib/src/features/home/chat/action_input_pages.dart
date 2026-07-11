@@ -20,6 +20,94 @@ class ActionInputField {
   final bool obscureText;
 }
 
+class _ChatTextOptionsResult {
+  const _ChatTextOptionsResult({
+    required this.burnAfterRead,
+    required this.burnSeconds,
+  });
+
+  final bool burnAfterRead;
+  final int burnSeconds;
+}
+
+class _ChatTextOptionsPage extends StatefulWidget {
+  const _ChatTextOptionsPage({
+    required this.initialBurnAfterRead,
+    required this.initialBurnSeconds,
+  });
+
+  final bool initialBurnAfterRead;
+  final int initialBurnSeconds;
+
+  @override
+  State<_ChatTextOptionsPage> createState() => _ChatTextOptionsPageState();
+}
+
+class _ChatTextOptionsPageState extends State<_ChatTextOptionsPage> {
+  late bool _burnAfterRead = widget.initialBurnAfterRead;
+  late final TextEditingController _seconds = TextEditingController(
+    text: widget.initialBurnSeconds > 0
+        ? widget.initialBurnSeconds.toString()
+        : '',
+  );
+
+  @override
+  void dispose() {
+    _seconds.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return BimScaffold(
+      topBar: BimTopBar(
+        title: '阅后即焚',
+        actions: [TextButton(onPressed: _submit, child: const Text('完成'))],
+      ),
+      body: BimContentViewport(
+        maxWidth: 680,
+        child: ListView(
+          children: [
+            BimSettingsSwitchTile(
+              title: '阅后即焚',
+              subtitle: '对方阅读后按设定时间自动隐藏',
+              value: _burnAfterRead,
+              onChanged: (value) => setState(() => _burnAfterRead = value),
+            ),
+            if (_burnAfterRead)
+              Padding(
+                padding: const EdgeInsets.all(BimSpacing.x4),
+                child: TextField(
+                  controller: _seconds,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(
+                    labelText: '阅读后保留时间',
+                    hintText: '请输入秒数',
+                    suffixText: '秒',
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _submit() {
+    final seconds = int.tryParse(_seconds.text.trim()) ?? 0;
+    if (_burnAfterRead && seconds <= 0) {
+      _showChatSnack(context, '请输入有效的保留时间', error: true);
+      return;
+    }
+    Navigator.of(context).pop(
+      _ChatTextOptionsResult(
+        burnAfterRead: _burnAfterRead,
+        burnSeconds: _burnAfterRead ? seconds : 0,
+      ),
+    );
+  }
+}
+
 void _showChatSnack(BuildContext context, String text, {bool error = false}) {
   showBimSnackBar(
     context,

@@ -327,7 +327,7 @@ Future<void> _openQrScanResult({
 }) async {
   final text = raw.trim();
   if (text.isEmpty) {
-    throw Exception('二维码内容为空');
+    throw Exception('二维码暂时无法生成');
   }
 
   Widget page;
@@ -768,7 +768,7 @@ class _FriendQrResultPageState extends State<FriendQrResultPage> {
       'uid',
     ], fallback: _uidFromUserId(friendId));
     if (friendId.isEmpty || channelId.isEmpty) {
-      setState(() => _error = '用户 IM 信息为空');
+      setState(() => _error = '暂时无法打开该用户资料');
       return;
     }
     _openPrivateChat(context, widget.controller, {
@@ -786,17 +786,10 @@ class _UnknownQrResultPage extends StatelessWidget {
 
   final String raw;
 
-  Future<void> _copy(BuildContext context) async {
-    await Clipboard.setData(ClipboardData(text: raw));
-    if (context.mounted) {
-      _showChatSnack(context, '已复制');
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     return BimScaffold(
-      topBar: const BimTopBar(title: '二维码内容'),
+      topBar: const BimTopBar(title: '扫一扫'),
       body: BimContentViewport(
         maxWidth: 680,
         child: ListView(
@@ -805,7 +798,7 @@ class _UnknownQrResultPage extends StatelessWidget {
             const Icon(Icons.qr_code_2, size: 52, color: _mutedColor),
             const SizedBox(height: 16),
             const Text(
-              '未识别到可处理的业务二维码',
+              '暂时无法识别这个二维码',
               textAlign: TextAlign.center,
               style: TextStyle(
                 color: _textColor,
@@ -813,30 +806,17 @@ class _UnknownQrResultPage extends StatelessWidget {
                 fontWeight: FontWeight.w800,
               ),
             ),
-            const SizedBox(height: 22),
-            DecoratedBox(
-              decoration: BoxDecoration(
-                color: _surfaceColor,
-                border: Border.all(color: _lightBorderColor),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Padding(
-                padding: const EdgeInsets.all(14),
-                child: SelectableText(
-                  raw,
-                  style: const TextStyle(
-                    color: _textColor,
-                    fontSize: 14,
-                    height: 1.45,
-                  ),
-                ),
-              ),
+            const SizedBox(height: 10),
+            const Text(
+              '请确认二维码来自可信来源，或尝试重新扫描',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: _mutedColor, fontSize: 13),
             ),
-            const SizedBox(height: 18),
+            const SizedBox(height: 24),
             BimButton(
-              label: '复制内容',
-              onPressed: () => _copy(context),
-              icon: Icons.copy,
+              label: '重新扫描',
+              onPressed: () => Navigator.of(context).maybePop(),
+              icon: Icons.qr_code_scanner,
             ),
           ],
         ),

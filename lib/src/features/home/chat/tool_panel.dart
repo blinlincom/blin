@@ -4,7 +4,7 @@ class _ChatToolsPanel extends StatefulWidget {
   const _ChatToolsPanel({
     required this.height,
     required this.isGroup,
-    required this.onTextOption,
+    required this.onBurnAfterRead,
     required this.onVoiceInput,
     required this.onImage,
     required this.onEmoji,
@@ -21,7 +21,7 @@ class _ChatToolsPanel extends StatefulWidget {
 
   final double height;
   final bool isGroup;
-  final VoidCallback onTextOption;
+  final VoidCallback onBurnAfterRead;
   final VoidCallback onVoiceInput;
   final VoidCallback onImage;
   final VoidCallback onEmoji;
@@ -75,7 +75,7 @@ class _ChatToolsPanelState extends State<_ChatToolsPanel> {
       _ToolItem('名片', widget.onContactCard, Icons.badge_rounded),
       _ToolItem('表情', widget.onEmoji, Icons.emoji_emotions_rounded),
       _ToolItem('贴纸', widget.onSticker, Icons.sticky_note_2_rounded),
-      _ToolItem('文本选项', widget.onTextOption, Icons.tune_rounded),
+      _ToolItem('阅后即焚', widget.onBurnAfterRead, Icons.timer_outlined),
       if (widget.isGroup && widget.onGroupMembers != null)
         _ToolItem('群成员', widget.onGroupMembers!, Icons.groups_rounded),
     ];

@@ -7,6 +7,7 @@ class _Avatar extends StatelessWidget {
     this.color = _primaryColor,
     this.icon,
     this.imageUrl = '',
+    this.compositeMembers = const [],
   });
 
   final String label;
@@ -14,6 +15,7 @@ class _Avatar extends StatelessWidget {
   final Color color;
   final IconData? icon;
   final String imageUrl;
+  final List<Map<String, Object?>> compositeMembers;
 
   @override
   Widget build(BuildContext context) {
@@ -26,6 +28,9 @@ class _Avatar extends StatelessWidget {
     );
     final url = _normalizeAvatarUrl(imageUrl);
     if (url.isEmpty) {
+      if (compositeMembers.isNotEmpty) {
+        return _CompositeGroupAvatar(members: compositeMembers, size: size);
+      }
       return fallback;
     }
     return Container(
@@ -52,6 +57,61 @@ class _Avatar extends StatelessWidget {
             errorBuilder: (_, __, ___) => const SizedBox.shrink(),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _CompositeGroupAvatar extends StatelessWidget {
+  const _CompositeGroupAvatar({required this.members, required this.size});
+
+  final List<Map<String, Object?>> members;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    final visible = members.take(4).toList(growable: false);
+    final gap = max(1.0, size * 0.035);
+    final cellSize = visible.length == 1 ? size : (size - gap) / 2;
+    return Container(
+      width: size,
+      height: size,
+      padding: EdgeInsets.all(gap),
+      clipBehavior: Clip.antiAlias,
+      decoration: BoxDecoration(
+        color: BimColors.fill,
+        borderRadius: BorderRadius.circular(_avatarRadius(size)),
+      ),
+      child: visible.length == 1
+          ? _groupAvatarMember(visible.first, cellSize)
+          : Wrap(
+              spacing: gap,
+              runSpacing: gap,
+              children: [
+                for (final member in visible)
+                  SizedBox(
+                    width: cellSize - gap,
+                    height: cellSize - gap,
+                    child: _groupAvatarMember(member, cellSize - gap),
+                  ),
+              ],
+            ),
+    );
+  }
+
+  Widget _groupAvatarMember(Map<String, Object?> member, double cellSize) {
+    final label = _value(member, [
+      'nickname',
+      'name',
+      'username',
+    ], fallback: '群成员');
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(max(2, cellSize * 0.12)),
+      child: _Avatar(
+        label: label,
+        imageUrl: _avatarUrlFromMap(member),
+        size: cellSize,
+        color: BimColors.primary,
       ),
     );
   }

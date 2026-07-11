@@ -1,5 +1,89 @@
 part of 'package:bim/src/features/home/home_page.dart';
 
+class _MentionPicker extends StatelessWidget {
+  const _MentionPicker({
+    required this.members,
+    required this.loading,
+    required this.showAll,
+    required this.onAllSelected,
+    required this.onMemberSelected,
+  });
+
+  final List<Map<String, Object?>> members;
+  final bool loading;
+  final bool showAll;
+  final VoidCallback onAllSelected;
+  final ValueChanged<Map<String, Object?>> onMemberSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    final itemCount = members.length + (showAll ? 1 : 0);
+    return Material(
+      color: BimColors.surface,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxHeight: 280),
+        child: loading && itemCount == 0
+            ? const Padding(
+                padding: EdgeInsets.all(BimSpacing.x4),
+                child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+              )
+            : itemCount == 0
+            ? const Padding(
+                padding: EdgeInsets.all(BimSpacing.x4),
+                child: Center(child: Text('没有匹配的群成员')),
+              )
+            : ListView.separated(
+                shrinkWrap: true,
+                padding: const EdgeInsets.symmetric(vertical: BimSpacing.x2),
+                itemCount: itemCount,
+                separatorBuilder: (_, _) => const Divider(height: 1),
+                itemBuilder: (context, index) {
+                  if (showAll && index == 0) {
+                    return ListTile(
+                      dense: true,
+                      leading: const _MentionAllAvatar(),
+                      title: const Text('全体成员'),
+                      subtitle: const Text('通知群内所有成员'),
+                      onTap: onAllSelected,
+                    );
+                  }
+                  final member = members[index - (showAll ? 1 : 0)];
+                  return ListTile(
+                    dense: true,
+                    leading: _Avatar(
+                      label: _memberTitle(member),
+                      imageUrl: _avatarUrlFromMap(member),
+                      size: 38,
+                    ),
+                    title: Text(_memberTitle(member)),
+                    subtitle: Text(_memberSubtitle(member)),
+                    onTap: () => onMemberSelected(member),
+                  );
+                },
+              ),
+      ),
+    );
+  }
+}
+
+class _MentionAllAvatar extends StatelessWidget {
+  const _MentionAllAvatar();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 38,
+      height: 38,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: BimColors.primaryWeak,
+        borderRadius: BorderRadius.circular(BimRadius.sm),
+      ),
+      child: const Icon(Icons.campaign_outlined, color: BimColors.primary),
+    );
+  }
+}
+
 class _Composer extends StatelessWidget {
   const _Composer({
     required this.controller,

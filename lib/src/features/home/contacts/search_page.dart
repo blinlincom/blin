@@ -205,7 +205,7 @@ class _SearchPageState extends State<SearchPage> {
       'uid',
     ], fallback: _uidFromUserId(friendId));
     if (friendId.isEmpty || channelId.isEmpty) {
-      setState(() => _error = '用户 IM 信息为空');
+      setState(() => _error = '暂时无法打开该用户资料');
       return;
     }
     _openPrivateChat(context, widget.controller, {

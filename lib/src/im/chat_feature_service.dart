@@ -186,6 +186,22 @@ class ChatFeatureService {
     );
   }
 
+  Future<Map<String, Object?>> groupAvatarUpload({
+    required UserSession session,
+    required String device,
+    required String groupId,
+    required String filePath,
+    void Function(double progress)? onUploadProgress,
+  }) {
+    return _api.uploadGroupAvatar(
+      session: session,
+      device: device,
+      groupId: groupId,
+      filePath: filePath,
+      onUploadProgress: onUploadProgress,
+    );
+  }
+
   Future<Map<String, Object?>> groupMembers({
     required UserSession session,
     required String device,

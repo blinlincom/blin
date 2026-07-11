@@ -1,5 +1,65 @@
 part of 'package:bim/src/features/home/home_page.dart';
 
+class _GroupAvatarSettingsTile extends StatelessWidget {
+  const _GroupAvatarSettingsTile({
+    required this.title,
+    required this.imageUrl,
+    required this.members,
+    required this.onTap,
+  });
+
+  final String title;
+  final String imageUrl;
+  final List<Map<String, Object?>> members;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return BimPressable(
+      onTap: onTap,
+      semanticLabel: '更换群头像',
+      child: Container(
+        constraints: const BoxConstraints(minHeight: 76),
+        padding: const EdgeInsets.symmetric(horizontal: BimSpacing.x4),
+        decoration: const BoxDecoration(
+          color: BimColors.surface,
+          border: Border(bottom: BorderSide(color: BimColors.borderLight)),
+        ),
+        child: Row(
+          children: [
+            const SizedBox(
+              width: 112,
+              child: Text(
+                '群头像',
+                style: TextStyle(
+                  color: BimColors.text,
+                  fontSize: BimTypography.bodyLarge,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+            const Spacer(),
+            _Avatar(
+              label: title,
+              imageUrl: imageUrl,
+              compositeMembers: members,
+              size: 48,
+              color: BimColors.success,
+              icon: members.isEmpty ? Icons.groups : null,
+            ),
+            const SizedBox(width: BimSpacing.x1),
+            const Icon(
+              Icons.chevron_right,
+              color: BimColors.mutedText,
+              size: 22,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _GroupInfoMemberGrid extends StatelessWidget {
   const _GroupInfoMemberGrid({
     required this.loading,
@@ -57,29 +117,34 @@ class _GroupInfoMemberGrid extends StatelessWidget {
                 ),
                 child: Column(
                   children: [
-                    Wrap(
-                      spacing: columnSpacing,
-                      runSpacing: rowSpacing,
-                      children: [
-                        for (final member in preview)
-                          _GroupMemberGridItem(
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: Wrap(
+                        alignment: WrapAlignment.start,
+                        runAlignment: WrapAlignment.start,
+                        spacing: columnSpacing,
+                        runSpacing: rowSpacing,
+                        children: [
+                          for (final member in preview)
+                            _GroupMemberGridItem(
+                              width: itemWidth,
+                              avatarSize: avatarSize,
+                              title: _memberTitle(member),
+                              avatarUrl: _avatarUrlFromMap(member),
+                              onTap: onOpenAll,
+                            ),
+                          for (var index = 0; index < placeholderCount; index++)
+                            _GroupMemberPlaceholderItem(
+                              width: itemWidth,
+                              avatarSize: avatarSize,
+                            ),
+                          _GroupMemberAddItem(
                             width: itemWidth,
                             avatarSize: avatarSize,
-                            title: _memberTitle(member),
-                            avatarUrl: _avatarUrlFromMap(member),
-                            onTap: onOpenAll,
+                            onTap: onAdd,
                           ),
-                        for (var index = 0; index < placeholderCount; index++)
-                          _GroupMemberPlaceholderItem(
-                            width: itemWidth,
-                            avatarSize: avatarSize,
-                          ),
-                        _GroupMemberAddItem(
-                          width: itemWidth,
-                          avatarSize: avatarSize,
-                          onTap: onAdd,
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
                     if (showMore) ...[
                       const SizedBox(height: BimSpacing.x4),
@@ -295,6 +360,7 @@ class _GroupSettingsInfoTile extends StatelessWidget {
       onTap: onTap,
       valueMaxLines: 2,
       minHeight: 62,
+      titleWidth: 112,
     );
   }
 }

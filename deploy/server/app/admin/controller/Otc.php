@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace app\admin\controller;
 
 use app\common\support\ResponseHelper;
+use app\common\support\OtcAdEscrowService;
 use think\facade\Db;
 use think\facade\Request;
 use think\facade\View;
@@ -50,7 +51,7 @@ class Otc extends Backend
     public function review_ad()
     {
         $id=input('id/d');$status=input('status/d');$reason=mb_substr(trim((string)input('reason','')),0,255);if(!in_array($status,[1,2,3],true)||$reason==='')return ResponseHelper::error('审核参数不完整');
-        Db::startTrans();try{$row=Db::name('otc_ad')->where('id',$id)->lock(true)->find();if(!$row)throw new \Exception('广告不存在');$before=$row;$now=date('Y-m-d H:i:s');if(in_array($status,[2,3],true)&&in_array((int)$row['status'],[0,1],true)&&bccomp((string)($row['deposit_reserved']??0),'0.00',2)>0){$merchant=Db::name('otc_merchant')->where('id',(int)$row['merchant_id'])->lock(true)->find();$next=bcsub((string)($merchant['deposit_ad_reserved']??0),(string)$row['deposit_reserved'],2);if(bccomp($next,'0.00',2)<0)$next='0.00';Db::name('otc_merchant')->where('id',(int)$merchant['id'])->update(['deposit_ad_reserved'=>$next,'version'=>Db::raw('version+1'),'update_time'=>$now]);Db::name('otc_ad')->where('id',$id)->update(['deposit_reserved'=>'0.00']);}Db::name('otc_ad')->where('id',$id)->update(['status'=>$status,'version'=>Db::raw('version+1'),'update_time'=>$now]);$after=Db::name('otc_ad')->where('id',$id)->find();$this->audit((int)$row['appid'],'ad_review','ad',$id,$before,$after,$reason);Db::commit();return ResponseHelper::success('广告状态已更新');}catch(\Throwable $e){Db::rollback();return ResponseHelper::error($e->getMessage());}
+        Db::startTrans();try{$row=Db::name('otc_ad')->where('id',$id)->lock(true)->find();if(!$row)throw new \Exception('广告不存在');$before=$row;$now=date('Y-m-d H:i:s');if(in_array($status,[2,3],true)&&in_array((int)$row['status'],[0,1],true)){OtcAdEscrowService::release($row,$status===2?'OTC广告审核驳回退回':'OTC广告下架退回','admin',(int)($this->admin_info['id']??0));if(bccomp((string)($row['deposit_reserved']??0),'0.00',2)>0){$merchant=Db::name('otc_merchant')->where('id',(int)$row['merchant_id'])->lock(true)->find();$next=bcsub((string)($merchant['deposit_ad_reserved']??0),(string)$row['deposit_reserved'],2);if(bccomp($next,'0.00',2)<0)$next='0.00';Db::name('otc_merchant')->where('id',(int)$merchant['id'])->update(['deposit_ad_reserved'=>$next,'version'=>Db::raw('version+1'),'update_time'=>$now]);}Db::name('otc_ad')->where('id',$id)->update(['deposit_reserved'=>'0.00','escrow_remaining'=>'0.00000000']);}Db::name('otc_ad')->where('id',$id)->update(['status'=>$status,'version'=>Db::raw('version+1'),'update_time'=>$now]);$after=Db::name('otc_ad')->where('id',$id)->find();$this->audit((int)$row['appid'],'ad_review','ad',$id,$before,$after,$reason);Db::commit();return ResponseHelper::success('广告状态已更新');}catch(\Throwable $e){Db::rollback();return ResponseHelper::error($e->getMessage());}
     }
 
     public function config()

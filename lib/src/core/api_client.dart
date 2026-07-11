@@ -1430,6 +1430,27 @@ class ApiClient {
     );
   }
 
+  Future<Map<String, Object?>> uploadGroupAvatar({
+    required UserSession session,
+    required String device,
+    required String groupId,
+    required String filePath,
+    void Function(double progress)? onUploadProgress,
+  }) {
+    final clientMsgNo = _nonce();
+    return secureImBusinessAction(
+      action: 'im_group_avatar_upload',
+      session: session,
+      device: device,
+      clientMsgNo: clientMsgNo,
+      params: {'client_msg_no': clientMsgNo},
+      secureParams: {'group_id': groupId},
+      filePath: filePath,
+      onUploadProgress: onUploadProgress,
+      secureResponse: true,
+    );
+  }
+
   Future<Map<String, Object?>> uploadProfileBackground({
     required UserSession session,
     required String device,

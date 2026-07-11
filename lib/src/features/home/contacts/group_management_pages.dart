@@ -249,12 +249,16 @@ class GroupMemberActionPage extends StatefulWidget {
     required this.controller,
     required this.groupId,
     required this.member,
+    required this.currentUserRole,
+    required this.isSelf,
     super.key,
   });
 
   final SessionController controller;
   final String groupId;
   final Map<String, Object?> member;
+  final int currentUserRole;
+  final bool isSelf;
 
   @override
   State<GroupMemberActionPage> createState() => _GroupMemberActionPageState();
@@ -267,94 +271,163 @@ class _GroupMemberActionPageState extends State<GroupMemberActionPage> {
   @override
   Widget build(BuildContext context) {
     final memberId = _memberUserId(widget.member);
+    final targetRole = _intValue(widget.member, ['role']);
+    final isOwner = widget.currentUserRole == 1;
+    final canManage =
+        !widget.isSelf &&
+        (isOwner || (widget.currentUserRole == 2 && targetRole == 0));
     return BimScaffold(
       topBar: BimTopBar(title: _memberTitle(widget.member)),
       body: BimContentViewport(
         maxWidth: 680,
         child: ListView(
           children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(
+                BimSpacing.x4,
+                BimSpacing.x4,
+                BimSpacing.x4,
+                BimSpacing.x2,
+              ),
+              child: Row(
+                children: [
+                  _Avatar(
+                    label: _memberTitle(widget.member),
+                    imageUrl: _avatarUrlFromMap(widget.member),
+                    size: 58,
+                  ),
+                  const SizedBox(width: BimSpacing.x3),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          _memberTitle(widget.member),
+                          style: Theme.of(context).textTheme.titleMedium,
+                        ),
+                        const SizedBox(height: BimSpacing.x1),
+                        Text(
+                          _memberSubtitle(widget.member),
+                          style: const TextStyle(
+                            color: BimColors.secondaryText,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            if (!widget.isSelf)
+              _PlainListTile(
+                icon: Icons.chat_bubble_outline,
+                title: '发送消息',
+                subtitle: '进入与该成员的私聊',
+                trailing: '',
+                onTap: () {
+                  final channelId = _uidFromUserId(memberId);
+                  Navigator.of(context).push(
+                    _chatPageRoute(
+                      ChatPage(
+                        controller: widget.controller,
+                        title: _memberTitle(widget.member),
+                        channelId: channelId,
+                        groupId: '',
+                        channelType: _privateChannelType,
+                      ),
+                    ),
+                  );
+                },
+              ),
             _PlainListTile(
               icon: Icons.badge_outlined,
               title: '成员',
               subtitle: _memberSubtitle(widget.member),
               trailing: _memberRoleText(widget.member),
             ),
-            _PlainListTile(
-              icon: Icons.volume_off_outlined,
-              title: '永久禁言',
-              subtitle: '由系统或管理员限制该成员发言',
-              trailing: '',
-              onTap: () => _mute(memberId, permanent: true),
-            ),
-            _PlainListTile(
-              icon: Icons.timer_outlined,
-              title: '限时禁言',
-              subtitle: '设置禁言秒数和原因',
-              trailing: '',
-              onTap: () => _mute(memberId, permanent: false),
-            ),
-            _PlainListTile(
-              icon: Icons.volume_up_outlined,
-              title: '解除禁言',
-              subtitle: '恢复该成员群内发言',
-              trailing: '',
-              onTap: () => _run(
-                () => widget.controller.unmuteGroupMember(
-                  groupId: widget.groupId,
-                  memberId: memberId,
+            if (canManage)
+              _PlainListTile(
+                icon: Icons.volume_off_outlined,
+                title: '永久禁言',
+                subtitle: '由系统或管理员限制该成员发言',
+                trailing: '',
+                onTap: () => _mute(memberId, permanent: true),
+              ),
+            if (canManage)
+              _PlainListTile(
+                icon: Icons.timer_outlined,
+                title: '限时禁言',
+                subtitle: '设置禁言秒数和原因',
+                trailing: '',
+                onTap: () => _mute(memberId, permanent: false),
+              ),
+            if (canManage)
+              _PlainListTile(
+                icon: Icons.volume_up_outlined,
+                title: '解除禁言',
+                subtitle: '恢复该成员群内发言',
+                trailing: '',
+                onTap: () => _run(
+                  () => widget.controller.unmuteGroupMember(
+                    groupId: widget.groupId,
+                    memberId: memberId,
+                  ),
                 ),
               ),
-            ),
-            _PlainListTile(
-              icon: Icons.admin_panel_settings_outlined,
-              title: '设为管理员',
-              subtitle: '仅群主可操作',
-              trailing: '',
-              onTap: () => _run(
-                () => widget.controller.setGroupAdmin(
-                  groupId: widget.groupId,
-                  memberId: memberId,
-                  isAdmin: true,
+            if (isOwner && targetRole == 0)
+              _PlainListTile(
+                icon: Icons.admin_panel_settings_outlined,
+                title: '设为管理员',
+                subtitle: '仅群主可操作',
+                trailing: '',
+                onTap: () => _run(
+                  () => widget.controller.setGroupAdmin(
+                    groupId: widget.groupId,
+                    memberId: memberId,
+                    isAdmin: true,
+                  ),
                 ),
               ),
-            ),
-            _PlainListTile(
-              icon: Icons.remove_moderator_outlined,
-              title: '取消管理员',
-              subtitle: '仅群主可操作',
-              trailing: '',
-              onTap: () => _run(
-                () => widget.controller.setGroupAdmin(
-                  groupId: widget.groupId,
-                  memberId: memberId,
-                  isAdmin: false,
+            if (isOwner && targetRole == 2)
+              _PlainListTile(
+                icon: Icons.remove_moderator_outlined,
+                title: '取消管理员',
+                subtitle: '仅群主可操作',
+                trailing: '',
+                onTap: () => _run(
+                  () => widget.controller.setGroupAdmin(
+                    groupId: widget.groupId,
+                    memberId: memberId,
+                    isAdmin: false,
+                  ),
                 ),
               ),
-            ),
-            _PlainListTile(
-              icon: Icons.workspace_premium_outlined,
-              title: '转让群主',
-              subtitle: '新群主必须是当前成员',
-              trailing: '',
-              onTap: () => _run(
-                () => widget.controller.transferGroupOwner(
-                  groupId: widget.groupId,
-                  newOwnerId: memberId,
+            if (isOwner && !widget.isSelf)
+              _PlainListTile(
+                icon: Icons.workspace_premium_outlined,
+                title: '转让群主',
+                subtitle: '新群主必须是当前成员',
+                trailing: '',
+                onTap: () => _run(
+                  () => widget.controller.transferGroupOwner(
+                    groupId: widget.groupId,
+                    newOwnerId: memberId,
+                  ),
                 ),
               ),
-            ),
-            _PlainListTile(
-              icon: Icons.person_remove_outlined,
-              title: '移出群聊',
-              subtitle: '同步移除频道订阅者',
-              trailing: '',
-              onTap: () => _run(
-                () => widget.controller.removeGroupMembers(
-                  groupId: widget.groupId,
-                  memberIds: [memberId],
+            if (canManage)
+              _PlainListTile(
+                icon: Icons.person_remove_outlined,
+                title: '移出群聊',
+                subtitle: '移出后对方将不再收到本群消息',
+                trailing: '',
+                onTap: () => _run(
+                  () => widget.controller.removeGroupMembers(
+                    groupId: widget.groupId,
+                    memberIds: [memberId],
+                  ),
                 ),
               ),
-            ),
             _ResultBlock(text: _message),
             _ErrorBlock(text: _error),
           ],

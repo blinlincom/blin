@@ -93,6 +93,27 @@ Map<String, Object?> _asObjectMap(Object? value) {
   return const {};
 }
 
+List<Map<String, Object?>> _mapListValue(
+  Map<String, Object?> item,
+  List<String> keys,
+) {
+  for (final key in keys) {
+    final value = item[key];
+    if (value is List) {
+      return value
+          .whereType<Map>()
+          .map(
+            (entry) => entry.map(
+              (entryKey, entryValue) =>
+                  MapEntry(entryKey.toString(), entryValue),
+            ),
+          )
+          .toList(growable: false);
+    }
+  }
+  return const [];
+}
+
 List<Map<String, Object?>> _listFromResult(Map<String, Object?> result) {
   Object? value = result['list'] ?? result['items'];
   final data = result['data'];

@@ -126,6 +126,7 @@ class _ConversationTile extends StatelessWidget {
     required this.unread,
     required this.isGroup,
     required this.avatarUrl,
+    this.avatarMembers = const [],
     required this.onTap,
     this.onLongPress,
     this.isPinned = false,
@@ -137,6 +138,7 @@ class _ConversationTile extends StatelessWidget {
   final int unread;
   final bool isGroup;
   final String avatarUrl;
+  final List<Map<String, Object?>> avatarMembers;
   final VoidCallback onTap;
   final VoidCallback? onLongPress;
   final bool isPinned;
@@ -171,6 +173,7 @@ class _ConversationTile extends StatelessWidget {
                     child: _Avatar(
                       label: title,
                       imageUrl: avatarUrl,
+                      compositeMembers: isGroup ? avatarMembers : const [],
                       size: 48,
                       color: isGroup ? const Color(0xff34c759) : _primaryColor,
                       icon: isGroup ? Icons.groups : null,

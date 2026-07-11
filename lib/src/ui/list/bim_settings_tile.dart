@@ -12,6 +12,7 @@ class BimSettingsTile extends StatelessWidget {
     this.showChevron,
     this.valueMaxLines = 1,
     this.minHeight = 58,
+    this.titleWidth,
     super.key,
   });
 
@@ -22,6 +23,7 @@ class BimSettingsTile extends StatelessWidget {
   final bool? showChevron;
   final int valueMaxLines;
   final double minHeight;
+  final double? titleWidth;
 
   @override
   Widget build(BuildContext context) {
@@ -42,22 +44,13 @@ class BimSettingsTile extends StatelessWidget {
             ? CrossAxisAlignment.start
             : CrossAxisAlignment.center,
         children: [
-          Expanded(
-            child: Text(
-              title,
-              maxLines: value.isEmpty ? 2 : 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                color: danger ? BimColors.dangerDeep : BimColors.text,
-                fontSize: BimTypography.bodyLarge,
-                fontWeight: FontWeight.w700,
-                height: 1.25,
-              ),
-            ),
-          ),
+          if (titleWidth != null)
+            SizedBox(width: titleWidth, child: _title(danger))
+          else
+            Expanded(child: _title(danger)),
           if (value.isNotEmpty) ...[
             const SizedBox(width: BimSpacing.x4),
-            Flexible(
+            Expanded(
               child: Text(
                 value,
                 maxLines: valueMaxLines,
@@ -87,6 +80,20 @@ class BimSettingsTile extends StatelessWidget {
       return content;
     }
     return BimPressable(onTap: onTap, semanticLabel: title, child: content);
+  }
+
+  Widget _title(bool danger) {
+    return Text(
+      title,
+      maxLines: value.isEmpty ? 2 : 1,
+      overflow: TextOverflow.ellipsis,
+      style: TextStyle(
+        color: danger ? BimColors.dangerDeep : BimColors.text,
+        fontSize: BimTypography.bodyLarge,
+        fontWeight: FontWeight.w700,
+        height: 1.25,
+      ),
+    );
   }
 }
 
