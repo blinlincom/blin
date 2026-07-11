@@ -991,6 +991,37 @@ class SessionController extends ChangeNotifier {
     return _api.usdtAssetBills(session: current, device: _device);
   }
 
+  Future<Map<String, Object?>> loadAssetExchangeOverview() {
+    final current = _requireSession();
+    return _api.assetExchangeOverview(session: current, device: _device);
+  }
+
+  Future<Map<String, Object?>> quoteAssetExchange({
+    required String amount,
+    required String requestId,
+  }) {
+    final current = _requireSession();
+    return _api.assetExchangeQuote(
+      session: current,
+      device: _device,
+      amount: amount,
+      requestId: requestId,
+    );
+  }
+
+  Future<Map<String, Object?>> executeAssetExchange({
+    required String quoteToken,
+    required String payPassword,
+  }) {
+    final current = _requireSession();
+    return _api.assetExchangeExecute(
+      session: current,
+      device: _device,
+      quoteToken: quoteToken,
+      payPassword: payPassword,
+    );
+  }
+
   Future<List<OtcAd>> loadOtcAds(String side) {
     final current = _requireSession();
     return _api.otcAds(session: current, device: _device, side: side);
@@ -1017,6 +1048,19 @@ class SessionController extends ChangeNotifier {
       fiatAmount: fiatAmount,
       addressId: addressId,
       paymentMethodId: paymentMethodId,
+    );
+  }
+
+  Future<Map<String, Object?>> loadOtcTradeOptions({
+    required int adId,
+    required String side,
+  }) {
+    final current = _requireSession();
+    return _api.otcTradeOptions(
+      session: current,
+      device: _device,
+      adId: adId,
+      side: side,
     );
   }
 

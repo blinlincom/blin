@@ -17,6 +17,7 @@ use app\common\support\LiveKitToken;
 use app\common\support\MomentsControl;
 use app\common\support\OtcService;
 use app\common\support\DigitalAssetService;
+use app\common\support\AssetExchangeService;
 use app\common\support\WalletNoticeService;
 use app\common\support\UserDeviceSession;
 use Exception;
@@ -18859,10 +18860,44 @@ class Api extends BaseController
         catch (\Throwable $e) { $this->json(0, $e->getMessage()); }
     }
 
+    protected function assetExchangeService(): AssetExchangeService
+    {
+        return new AssetExchangeService((int)$this->appid, (array)$this->user_info);
+    }
+
+    public function wallet_asset_exchange_overview()
+    {
+        $this->secureChatRequestInput(false);
+        try { $this->chatJson(1, 'success', $this->assetExchangeService()->overview()); }
+        catch (\Throwable $e) { $this->json(0, $e->getMessage()); }
+    }
+
+    public function wallet_asset_exchange_quote()
+    {
+        $data=$this->secureChatRequestInput();
+        try { $this->chatJson(1, 'success', $this->assetExchangeService()->quote($data)); }
+        catch (\Throwable $e) { $this->json(0, $e->getMessage()); }
+    }
+
+    public function wallet_asset_exchange_execute()
+    {
+        $data=$this->secureChatRequestInput();
+        try {$this->verifyWalletPayPassword((int)$this->user_info['id'],trim((string)($data['pay_password']??'')));$this->chatJson(1,'兑换成功',$this->assetExchangeService()->execute($data));}
+        catch (\Throwable $e) { $this->json(0, $e->getMessage()); }
+    }
+
+    public function wallet_asset_exchange_orders()
+    {
+        $this->secureChatRequestInput(false);
+        try { $this->chatJson(1, 'success', ['list'=>$this->assetExchangeService()->orders()]); }
+        catch (\Throwable $e) { $this->json(0, $e->getMessage()); }
+    }
+
     public function otc_config() { $this->otcCall('config', false); }
     public function otc_asset_list() { $this->otcCall('assets', false, true); }
     public function wallet_asset_address_list() { $this->otcCall('addresses', false, true); }
     public function otc_payment_method_list() { $this->otcCall('paymentMethods', false, true); }
+    public function otc_trade_options() { $this->otcCall('tradeOptions'); }
     public function otc_merchant_status() { $this->otcCall('merchant', false); }
     public function otc_ad_list() { $this->otcCall('ads', false, true); }
     public function otc_order_list() { $this->otcCall('orders', false, true); }

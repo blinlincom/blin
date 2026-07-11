@@ -1,0 +1,177 @@
+{extend name="layout" /}
+{block name="body"}
+<div class="container-fluid">
+    <div class="row">
+        <div class="col-lg-12">
+            <div class="card">
+                <header class="card-header">
+                    <div class="card-title">钱包收付款订单</div>
+                </header>
+                <div class="card-body">
+                    <div class="row search-box">
+                        <div class="col-md-2 mb-2">
+                            <select class="form-control" id="search_appid">
+                                <option value="">请选择app</option>
+                                {volist name="app_list" id="vo"}
+                                <option value="{$vo.appid}">{$vo.appname}</option>
+                                {/volist}
+                            </select>
+                        </div>
+                        <div class="col-md-2 mb-2">
+                            <input class="form-control" type="text" id="search_order_no" placeholder="订单号">
+                        </div>
+                        <div class="col-md-2 mb-2">
+                            <input class="form-control" type="number" id="search_user_id" placeholder="用户ID">
+                        </div>
+                        <div class="col-md-2 mb-2">
+                            <select class="form-control" id="search_order_type">
+                                <option value="">全部类型</option>
+                                <option value="collect">收款码</option>
+                                <option value="pay">付款码</option>
+                            </select>
+                        </div>
+                        <div class="col-md-2 mb-2">
+                            <select class="form-control" id="search_status">
+                                <option value="">全部状态</option>
+                                <option value="0">待支付</option>
+                                <option value="1">已支付</option>
+                                <option value="2">已取消</option>
+                                <option value="3">已过期</option>
+                            </select>
+                        </div>
+                        <div class="col-md-2 mb-2">
+                            <a class="btn btn-default" onclick="javascript:$('#table').bootstrapTable('refresh');" href="#!">
+                                <i class="mdi mdi-magnify"></i> 搜索
+                            </a>
+                        </div>
+                    </div>
+                    <div id="toolbar" class="toolbar-btn-action">
+                        <a class="btn btn-label btn-default" href="{$Request.root}/wallet/bills">
+                            <label><i class="mdi mdi-format-list-bulleted" aria-hidden="true"></i></label>余额流水
+                        </a>
+                        <a class="btn btn-label btn-default" href="{$Request.root}/wallet/pay_passwords">
+                            <label><i class="mdi mdi-lock-outline" aria-hidden="true"></i></label>支付密码
+                        </a>
+                        <a class="btn btn-label btn-default" href="{$Request.root}/wallet/risk">
+                            <label><i class="mdi mdi-shield-account-outline" aria-hidden="true"></i></label>钱包风控
+                        </a>
+                        <a class="btn btn-label btn-default" href="{$Request.root}/wallet/merchants">
+                            <label><i class="mdi mdi-store" aria-hidden="true"></i></label>商户管理
+                        </a>
+                        <a class="btn btn-label btn-primary" href="{$Request.root}/wallet/asset_accounts">
+                            <label><i class="mdi mdi-currency-usd" aria-hidden="true"></i></label>数字资产账户
+                        </a>
+                        <a class="btn btn-label btn-default" href="{$Request.root}/wallet/chain_addresses">
+                            <label><i class="mdi mdi-qrcode" aria-hidden="true"></i></label>充值地址
+                        </a>
+                        <a class="btn btn-label btn-default" href="{$Request.root}/wallet/asset_withdrawals">
+                            <label><i class="mdi mdi-bank-transfer-out" aria-hidden="true"></i></label>USDT提币
+                        </a>
+                        <a class="btn btn-label btn-default" href="{$Request.root}/wallet/asset_chain_config">
+                            <label><i class="mdi mdi-cog-outline" aria-hidden="true"></i></label>链上配置
+                        </a>
+                        <a class="btn btn-label btn-default" href="{$Request.root}/wallet/asset_exchange">
+                            <label><i class="mdi mdi-swap-horizontal" aria-hidden="true"></i></label>闪兑管理
+                        </a>
+                    </div>
+                    <table id="table"></table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{/block}
+{block name="js"}
+<script>
+    $('#table').bootstrapTable({
+        classes: 'table table-bordered table-hover table-striped lyear-table',
+        url: "{$Request.root}/wallet/index",
+        uniqueId: 'id',
+        idField: 'id',
+        dataType: 'jsonp',
+        method: 'get',
+        toolbar: '#toolbar',
+        pagination: true,
+        showColumns: true,
+        showRefresh: true,
+        showButtonIcons: true,
+        showButtonText: false,
+        showFullscreen: true,
+        totalField: 'total',
+        undefinedText: '-',
+        sidePagination: "server",
+        pageSize: 10,
+        pageList: [5, 10, 25, 50, 100],
+        buttonsClass: 'default',
+        buttonsPrefix: 'btn',
+        iconsPrefix: 'mdi',
+        iconSize: 'mini',
+        icons: {
+            columns: 'mdi-table-column-remove',
+            refresh: 'mdi-refresh',
+            fullscreen: 'mdi-monitor-screenshot',
+        },
+        queryParams: function (params) {
+            return {
+                limit: params.limit,
+                page: (params.offset / params.limit) + 1,
+                appid: $.trim($('#search_appid').val()),
+                order_no: $.trim($('#search_order_no').val()),
+                user_id: $.trim($('#search_user_id').val()),
+                order_type: $.trim($('#search_order_type').val()),
+                status: $.trim($('#search_status').val())
+            };
+        },
+        columns: [{
+            field: 'id',
+            title: 'ID',
+            width: 80
+        }, {
+            field: 'order_no',
+            title: '订单号'
+        }, {
+            field: 'appname',
+            title: '所属App'
+        }, {
+            field: 'order_type_name',
+            title: '类型'
+        }, {
+            field: 'payer_name',
+            title: '付款方'
+        }, {
+            field: 'payee_name',
+            title: '收款方'
+        }, {
+            field: 'amount_label',
+            title: '金额'
+        }, {
+            field: 'status_name',
+            title: '状态',
+            formatter: function (value, row) {
+                if (row.status == 1) {
+                    return '<span class="badge bg-success">' + value + '</span>';
+                }
+                if (row.status == 3) {
+                    return '<span class="badge bg-secondary">' + value + '</span>';
+                }
+                if (row.status == 2) {
+                    return '<span class="badge bg-danger">' + value + '</span>';
+                }
+                return '<span class="badge bg-warning">' + value + '</span>';
+            }
+        }, {
+            field: 'remark',
+            title: '备注'
+        }, {
+            field: 'expire_time',
+            title: '过期时间'
+        }, {
+            field: 'paid_time',
+            title: '支付时间'
+        }, {
+            field: 'create_time',
+            title: '创建时间'
+        }]
+    });
+</script>
+{/block}

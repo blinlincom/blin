@@ -772,17 +772,17 @@ class _OtcOrderSheet extends StatefulWidget {
 class _OtcOrderSheetState extends State<_OtcOrderSheet> {
   final _amount = TextEditingController();
   bool _busy = false;
-  late Future<List<Object>> _options;
+  late Future<Map<String, Object?>> _options;
   Map<String, Object?>? _address;
   Map<String, Object?>? _payment;
 
   @override
   void initState() {
     super.initState();
-    _options = Future.wait<Object>([
-      widget.controller.loadOtcAddresses(),
-      widget.controller.loadOtcPaymentMethods(),
-    ]);
+    _options = widget.controller.loadOtcTradeOptions(
+      adId: widget.ad.id,
+      side: widget.side,
+    );
   }
 
   @override
@@ -829,20 +829,30 @@ class _OtcOrderSheetState extends State<_OtcOrderSheet> {
             ),
           ),
           const SizedBox(height: BimSpacing.x4),
-          FutureBuilder<List<Object>>(
+          FutureBuilder<Map<String, Object?>>(
             future: _options,
             builder: (context, snapshot) {
               if (!snapshot.hasData) {
                 return const BimLoadingState(label: '正在读取交易资料', compact: true);
               }
-              final addresses = snapshot.data![0] as List<Map<String, Object?>>;
-              final payments = snapshot.data![1] as List<Map<String, Object?>>;
+              final addressRaw = snapshot.data!['addresses'];
+              final paymentRaw = snapshot.data!['payments'];
+              final addresses = addressRaw is List
+                  ? addressRaw
+                        .map((item) => Map<String, Object?>.from(item as Map))
+                        .toList(growable: false)
+                  : const <Map<String, Object?>>[];
+              final payments = paymentRaw is List
+                  ? paymentRaw
+                        .map((item) => Map<String, Object?>.from(item as Map))
+                        .toList(growable: false)
+                  : const <Map<String, Object?>>[];
               _address ??= addresses.isEmpty ? null : addresses.first;
               _payment ??= payments.isEmpty ? null : payments.first;
               return Column(
                 children: [
                   _OtcOptionRow(
-                    label: '收币地址',
+                    label: '数字资产账户',
                     value: _address?['address']?.toString() ?? '未绑定',
                     onTap: addresses.isEmpty
                         ? null
@@ -853,7 +863,7 @@ class _OtcOrderSheetState extends State<_OtcOrderSheet> {
                           ),
                   ),
                   _OtcOptionRow(
-                    label: '收款方式',
+                    label: '结算方式',
                     value: _payment?['account_no_masked']?.toString() ?? '未绑定',
                     onTap: payments.isEmpty
                         ? null
@@ -864,10 +874,10 @@ class _OtcOrderSheetState extends State<_OtcOrderSheet> {
                           ),
                   ),
                   if (addresses.isEmpty || payments.isEmpty)
-                    const Padding(
-                      padding: EdgeInsets.only(top: BimSpacing.x3),
+                    Padding(
+                      padding: const EdgeInsets.only(top: BimSpacing.x3),
                       child: BimNoticeBanner(
-                        text: '请先在交易管理中绑定收币地址和实名收款方式。',
+                        text: '平台余额或数字资产账户当前不可用，请稍后重试。',
                         tone: BimNoticeTone.warning,
                       ),
                     ),
@@ -876,7 +886,7 @@ class _OtcOrderSheetState extends State<_OtcOrderSheet> {
             },
           ),
           const SizedBox(height: BimSpacing.x3),
-          const BimNoticeBanner(text: '数字资产由平台托管，确认法币到账前不要放币。'),
+          const BimNoticeBanner(text: '平台余额与数字资产由平台同时托管，订单取消或超时会自动原路退回。'),
           const SizedBox(height: BimSpacing.x4),
           BimButton(
             label: _busy ? '提交中' : '确认下单',

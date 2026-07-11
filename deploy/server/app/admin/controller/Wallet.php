@@ -66,6 +66,13 @@ class Wallet extends Backend
         $rows=Db::name('otc_asset')->alias('a')->join('otc_asset_network an','an.asset_id=a.id and an.appid=a.appid')->join('otc_network n','n.id=an.network_id and n.appid=a.appid')->leftJoin('wallet_chain_config c','c.appid=a.appid and c.asset_id=a.id and c.network_id=n.id')->leftJoin('app p','p.appid=a.appid')->where('a.symbol','USDT')->whereIn('n.code',['TRC20','TRON'])->field('a.appid,p.appname,a.id asset_id,a.symbol,n.id network_id,n.code network_code,c.*')->select()->toArray();View::assign('rows',$rows);return View::fetch();
     }
 
+    public function asset_exchange()
+    {
+        if(Request::isPost()){$id=input('id/d');$row=Db::name('wallet_exchange_config')->where('id',$id)->find();if(!$row)return ResponseHelper::error('闪兑配置不存在');$rate=$this->assetAmount(input('rate','0'));$fee=trim((string)input('fee_rate','0'));$min=$this->assetAmount(input('min_amount','1'));$max=$this->assetAmount(input('max_amount','10000'));$daily=$this->assetAmount(input('daily_limit','50000'));if(bccomp($rate,'0',8)<=0)return ResponseHelper::error('汇率必须大于0');if(!preg_match('/^\d+(\.\d{1,6})?$/',$fee)||bccomp($fee,'100',6)>=0)return ResponseHelper::error('手续费率必须在0到100之间');if(bccomp($max,$min,8)<0||bccomp($daily,$min,8)<0)return ResponseHelper::error('限额配置不正确');Db::name('wallet_exchange_config')->where('id',$id)->update(['rate'=>$rate,'fee_rate'=>$fee,'min_amount'=>$min,'max_amount'=>$max,'daily_limit'=>$daily,'quote_ttl'=>max(15,min(300,input('quote_ttl/d')?:60)),'status'=>input('status/d')===1?1:0,'config_version'=>Db::raw('config_version+1'),'update_time'=>date('Y-m-d H:i:s')]);return ResponseHelper::success('闪兑配置已保存');}
+        if(Request::isAjax()){$limit=input('limit/d')?:20;$page=input('page/d')?:1;$query=Db::name('wallet_exchange_order')->alias('o')->leftJoin('user u','u.id=o.user_id and u.appid=o.appid')->leftJoin('app a','a.appid=o.appid')->field('o.*,u.username,u.nickname,a.appname');return $this->tableResponse(['rows'=>$query->order('o.id desc')->page($page,$limit)->select()->toArray(),'total'=>(clone $query)->count()]);}
+        $configs=Db::name('wallet_exchange_config')->alias('c')->join('otc_asset x','x.id=c.source_asset_id and x.appid=c.appid')->leftJoin('app a','a.appid=c.appid')->field('c.*,x.symbol,a.appname')->select()->toArray();View::assign('configs',$configs);return View::fetch();
+    }
+
     public function bills()
     {
         if (Request::isAjax()) {

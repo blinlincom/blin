@@ -123,10 +123,28 @@ class _UsdtWalletPageState extends State<UsdtWalletPage> {
                           child: _UsdtAction(
                             icon: Icons.south_west,
                             label: '充值',
-                            enabled: wallet.depositEnabled,
+                            enabled: true,
                             onTap: () => _push(
                               context,
-                              UsdtDepositPage(controller: widget.controller),
+                              wallet.depositEnabled
+                                  ? UsdtDepositPage(
+                                      controller: widget.controller,
+                                    )
+                                  : const UsdtUnavailablePage(
+                                      title: 'USDT 充值',
+                                      message: '链上充值服务尚未开放，当前不能生成充值地址。',
+                                    ),
+                            ),
+                          ),
+                        ),
+                        Expanded(
+                          child: _UsdtAction(
+                            icon: Icons.currency_exchange,
+                            label: 'USDD闪兑',
+                            enabled: true,
+                            onTap: () => _push(
+                              context,
+                              AssetExchangePage(controller: widget.controller),
                             ),
                           ),
                         ),
@@ -145,10 +163,17 @@ class _UsdtWalletPageState extends State<UsdtWalletPage> {
                           child: _UsdtAction(
                             icon: Icons.north_east,
                             label: '提币',
-                            enabled: wallet.withdrawEnabled,
+                            enabled: true,
                             onTap: () => _push(
                               context,
-                              UsdtWithdrawPage(controller: widget.controller),
+                              wallet.withdrawEnabled
+                                  ? UsdtWithdrawPage(
+                                      controller: widget.controller,
+                                    )
+                                  : const UsdtUnavailablePage(
+                                      title: 'USDT 提币',
+                                      message: '链上提币服务尚未开放，站内转账仍可正常使用。',
+                                    ),
                             ),
                           ),
                         ),
@@ -185,6 +210,22 @@ class _UsdtWalletPageState extends State<UsdtWalletPage> {
         );
       },
     ),
+  );
+}
+
+class UsdtUnavailablePage extends StatelessWidget {
+  const UsdtUnavailablePage({
+    required this.title,
+    required this.message,
+    super.key,
+  });
+  final String title;
+  final String message;
+
+  @override
+  Widget build(BuildContext context) => BimScaffold(
+    topBar: BimTopBar(title: title),
+    body: BimEmptyState(title: '暂未开放', message: message),
   );
 }
 
@@ -561,3 +602,154 @@ String _usdtBillTitle(String type) => switch (type) {
   'deposit' => '链上充值',
   _ => 'USDT余额变动',
 };
+
+class AssetExchangePage extends StatefulWidget {
+  const AssetExchangePage({required this.controller, super.key});
+  final SessionController controller;
+  @override
+  State<AssetExchangePage> createState() => _AssetExchangePageState();
+}
+
+class _AssetExchangePageState extends State<AssetExchangePage> {
+  final _amount = TextEditingController();
+  late Future<Map<String, Object?>> _overview;
+  bool _busy = false;
+  @override
+  void initState() {
+    super.initState();
+    _overview = widget.controller.loadAssetExchangeOverview();
+  }
+
+  @override
+  void dispose() {
+    _amount.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => BimScaffold(
+    topBar: const BimTopBar(title: 'USDD 闪兑'),
+    body: FutureBuilder<Map<String, Object?>>(
+      future: _overview,
+      builder: (context, snapshot) {
+        if (snapshot.hasError)
+          return BimEmptyState(
+            title: '闪兑暂不可用',
+            message: _walletInlineError(snapshot.error!),
+          );
+        if (!snapshot.hasData) return const BimLoadingState(label: '正在加载闪兑配置');
+        final data = snapshot.data!;
+        final enabled = data['enabled'] == true;
+        return ListView(
+          padding: const EdgeInsets.all(BimSpacing.x4),
+          children: [
+            BimNoticeBanner(
+              text: enabled ? '按当前报价将 USDD 兑换为平台余额，最终到账金额以确认页为准。' : '闪兑服务暂未开放。',
+              tone: enabled ? BimNoticeTone.info : BimNoticeTone.warning,
+            ),
+            const SizedBox(height: BimSpacing.x4),
+            Row(
+              children: [
+                Expanded(
+                  child: _UsdtMetric(
+                    label: 'USDD可用',
+                    value: '${data['available_balance'] ?? '0.00000000'}',
+                  ),
+                ),
+                Expanded(
+                  child: _UsdtMetric(
+                    label: '平台余额',
+                    value: '¥${data['platform_balance'] ?? '0.00'}',
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: BimSpacing.x5),
+            TextField(
+              controller: _amount,
+              enabled: enabled && !_busy,
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+              ),
+              decoration: InputDecoration(
+                labelText: '兑换数量',
+                suffixText: 'USDD',
+                helperText:
+                    '单笔 ${data['min_amount'] ?? '-'} - ${data['max_amount'] ?? '-'} USDD',
+              ),
+            ),
+            const SizedBox(height: BimSpacing.x3),
+            Text(
+              '当前汇率：1 USDD = ${data['rate'] ?? '-'} 平台余额\n手续费率：${data['fee_rate'] ?? '0'}%',
+              style: const TextStyle(color: BimColors.mutedText, height: 1.6),
+            ),
+            const SizedBox(height: BimSpacing.x5),
+            BimButton(
+              label: _busy ? '处理中' : '获取报价',
+              onPressed: enabled && !_busy ? _submit : null,
+            ),
+          ],
+        );
+      },
+    ),
+  );
+  Future<void> _submit() async {
+    final value = _amount.text.trim();
+    if (value.isEmpty) {
+      showBimSnackBar(context, '请输入兑换数量', tone: BimNoticeTone.error);
+      return;
+    }
+    setState(() => _busy = true);
+    try {
+      final requestId = 'exchange_${DateTime.now().microsecondsSinceEpoch}';
+      final quote = await widget.controller.quoteAssetExchange(
+        amount: value,
+        requestId: requestId,
+      );
+      if (!mounted) return;
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('确认闪兑'),
+          content: Text(
+            '支付 ${quote['source_amount']} USDD\n手续费 ${quote['fee_amount']}\n到账 ¥${quote['target_amount']}\n\n报价有效至 ${quote['expire_time']}',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('取消'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('继续'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true || !mounted) return;
+      final password = await _showWalletPayPasswordSheet(
+        context,
+        title: '验证支付密码',
+        amountLabel:
+            '${quote['source_amount']} USDD → ¥${quote['target_amount']}',
+      );
+      if (password.isEmpty || !mounted) return;
+      await widget.controller.executeAssetExchange(
+        quoteToken: '${quote['quote_token']}',
+        payPassword: password,
+      );
+      if (!mounted) return;
+      showBimSnackBar(context, '兑换成功', tone: BimNoticeTone.success);
+      setState(() => _overview = widget.controller.loadAssetExchangeOverview());
+    } catch (error) {
+      if (mounted)
+        showBimSnackBar(
+          context,
+          _walletInlineError(error),
+          tone: BimNoticeTone.error,
+        );
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+}

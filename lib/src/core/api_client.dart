@@ -470,6 +470,58 @@ class ApiClient {
         : const [];
   }
 
+  Future<Map<String, Object?>> assetExchangeOverview({
+    required UserSession session,
+    required String device,
+  }) async {
+    final result = await secureSignedImPost<Map<String, Object?>>(
+      'wallet_asset_exchange_overview',
+      session: session,
+      device: device,
+      params: const {},
+      secureResponse: true,
+    );
+    if (!result.isSuccess)
+      throw ApiException(result.message, code: result.code);
+    return result.data;
+  }
+
+  Future<Map<String, Object?>> assetExchangeQuote({
+    required UserSession session,
+    required String device,
+    required String amount,
+    required String requestId,
+  }) async {
+    final result = await secureSignedImPost<Map<String, Object?>>(
+      'wallet_asset_exchange_quote',
+      session: session,
+      device: device,
+      params: {'amount': amount, 'request_id': requestId},
+      secureResponse: true,
+    );
+    if (!result.isSuccess)
+      throw ApiException(result.message, code: result.code);
+    return result.data;
+  }
+
+  Future<Map<String, Object?>> assetExchangeExecute({
+    required UserSession session,
+    required String device,
+    required String quoteToken,
+    required String payPassword,
+  }) async {
+    final result = await secureSignedImPost<Map<String, Object?>>(
+      'wallet_asset_exchange_execute',
+      session: session,
+      device: device,
+      params: {'quote_token': quoteToken, 'pay_password': payPassword},
+      secureResponse: true,
+    );
+    if (!result.isSuccess)
+      throw ApiException(result.message, code: result.code);
+    return result.data;
+  }
+
   Future<List<OtcAd>> otcAds({
     required UserSession session,
     required String device,
@@ -534,6 +586,24 @@ class ApiClient {
     if (!result.isSuccess)
       throw ApiException(result.message, code: result.code);
     return OtcOrder.fromJson(result.data);
+  }
+
+  Future<Map<String, Object?>> otcTradeOptions({
+    required UserSession session,
+    required String device,
+    required int adId,
+    required String side,
+  }) async {
+    final result = await secureSignedImPost<Map<String, Object?>>(
+      'otc_trade_options',
+      session: session,
+      device: device,
+      params: {'ad_id': adId, 'side': side},
+      secureResponse: true,
+    );
+    if (!result.isSuccess)
+      throw ApiException(result.message, code: result.code);
+    return result.data;
   }
 
   Future<List<Map<String, Object?>>> otcAddresses({
