@@ -68,14 +68,6 @@ class _DiscoverTabState extends State<DiscoverTab> {
               FriendQrScannerPage(controller: widget.controller),
             ),
           ),
-          _MenuTile(
-            icon: Icons.currency_exchange_outlined,
-            iconColor: BimColors.primary,
-            title: 'OTC 买卖',
-            subtitle: '通过认证商家买卖数字资产',
-            onTap: () =>
-                _push(context, OtcHomePage(controller: widget.controller)),
-          ),
         ],
       ),
     );

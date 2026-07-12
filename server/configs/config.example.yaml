@@ -1,0 +1,79 @@
+# BIM Go 服务配置示例。生产密钥必须使用 env:// 或 file://，禁止直接写入 YAML。
+server:
+  env: development
+  public_url: http://127.0.0.1:8080
+  listen: 127.0.0.1:8080
+  roles: [api, admin, gateway, worker, scheduler]
+  shutdown_timeout: 15s
+
+database:
+  dsn: env://BIM_DATABASE_DSN
+  max_open_conns: 40
+  max_idle_conns: 10
+  conn_max_lifetime: 30m
+
+redis:
+  mode: single
+  addresses: [127.0.0.1:6379]
+  password: env://BIM_REDIS_PASSWORD
+  db: 0
+  key_prefix: bim
+
+security:
+  token_signing_key: file:///etc/bim/secrets/token.key
+  request_signing_key: file:///etc/bim/secrets/request.key
+  field_encryption_key: file:///etc/bim/secrets/field.key
+  allowed_clock_skew: 30s
+  replay_window: 5m
+  trusted_proxies: [127.0.0.1/32]
+
+gateway:
+  enabled: true
+  path_prefix: /api/sync
+  heartbeat_interval: 25s
+  max_connections: 20000
+  max_connections_per_ip: 3000
+  queue_size: 1000
+  stream_max_len: 10000
+  ticket_single_use: true
+  allowed_origins: [https://blcold.cn]
+
+wukongim:
+  base_url: http://127.0.0.1:5001
+  manager_token: env://BIM_WUKONG_MANAGER_TOKEN
+  webhook_secret: env://BIM_WUKONG_WEBHOOK_SECRET
+  channel_type_person: 1
+  channel_type_group: 2
+
+livekit:
+  url: ws://127.0.0.1:7880
+  api_key: env://BIM_LIVEKIT_API_KEY
+  api_secret: env://BIM_LIVEKIT_API_SECRET
+  webhook_secret: env://BIM_LIVEKIT_WEBHOOK_SECRET
+
+storage:
+  driver: local
+  # 对外可访问的 API 根地址，不要追加 /uploads 或 /api。
+  public_base_url: http://127.0.0.1:8080
+  local:
+    root: ./var/uploads
+
+# 短信/邮件统一发送器。服务会向该地址 POST scene、target、code，生产环境必须配置 HTTPS。
+verification:
+  provider_url: https://notification-provider.example.com/v1/send-code
+  provider_token: env://BIM_VERIFICATION_PROVIDER_TOKEN
+  code_ttl: 5m
+  captcha_ttl: 2m
+
+wallet:
+  currency: CNY
+  scale: 2
+  payment_password_max_attempts: 3
+  payment_password_lock: 30m
+
+features:
+  moments: true
+  service_accounts: true
+  platform_wallet: true
+  digital_assets: false
+  otc: false

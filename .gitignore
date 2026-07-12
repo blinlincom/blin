@@ -37,6 +37,15 @@ migrate_working_dir/
 /build/
 /coverage/
 
+# BIM Go/Vue rebuild artifacts
+/server/bim-server
+/server/var/
+/admin-web/node_modules/
+/admin-web/dist/
+/admin-web/*.tsbuildinfo
+/admin-web/vite.config.js
+/admin-web/vite.config.d.ts
+
 # Symbolication related
 app.*.symbols
 

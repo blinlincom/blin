@@ -1,10 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 
 import '../core/app_logger.dart';
-import '../core/binary_codec.dart';
 
 class GatewayFrame {
   const GatewayFrame({
@@ -36,57 +34,51 @@ class GatewayFrame {
   bool get isKick => type == 'kick';
   bool get isError => type == 'error';
 
-  factory GatewayFrame.fromJson(Map<String, Object?> map) {
-    final payload = map['payload'];
+  factory GatewayFrame.fromEvent({
+    required String eventId,
+    required String eventType,
+    required Map<String, Object?> data,
+  }) {
+    final rawPayload = data['payload'];
+    final payload = rawPayload is Map
+        ? _objectMap(rawPayload)
+        : <String, Object?>{};
     return GatewayFrame(
-      type: map['type']?.toString() ?? '',
-      cursor: map['cursor']?.toString() ?? '',
-      channelId: map['channel_id']?.toString() ?? '',
-      channelType: int.tryParse(map['channel_type']?.toString() ?? '') ?? 0,
-      clientMsgNo: map['client_msg_no']?.toString() ?? '',
-      messageId: map['message_id']?.toString() ?? '',
-      messageSeq: int.tryParse(map['message_seq']?.toString() ?? '') ?? 0,
-      timestamp: int.tryParse(map['timestamp']?.toString() ?? '') ?? 0,
-      reason: map['reason']?.toString() ?? map['message']?.toString() ?? '',
-      payload: _payloadMap(payload),
+      type: _normalizeEventType(eventType, data),
+      cursor: eventId,
+      channelId: data['channel_id']?.toString() ?? '',
+      channelType: int.tryParse(data['channel_type']?.toString() ?? '') ?? 0,
+      clientMsgNo: data['client_msg_no']?.toString() ?? '',
+      messageId: data['message_id']?.toString() ?? data['id']?.toString() ?? '',
+      messageSeq: int.tryParse(data['message_seq']?.toString() ?? '') ?? 0,
+      timestamp: _eventTimestamp(data),
+      reason: data['reason']?.toString() ?? data['message']?.toString() ?? '',
+      payload: <String, Object?>{...payload, ...data, 'event_type': eventType},
     );
   }
 }
 
-Map<String, Object?> _payloadMap(Object? value) {
-  if (value is Map) {
-    return value.map((key, item) => MapEntry(key.toString(), item));
+String _normalizeEventType(String eventType, Map<String, Object?> data) {
+  final value = eventType.trim().toLowerCase();
+  if (value == 'read_receipt' ||
+      value.contains('presence') ||
+      value.startsWith('call_') ||
+      value == 'kick' ||
+      value == 'error') {
+    return value;
   }
-  if (value is! String || value.trim().isEmpty) {
-    return const <String, Object?>{};
+  if (data.containsKey('channel_id') || data.containsKey('client_msg_no')) {
+    return 'message';
   }
-  final text = value.trim();
-  final direct = _tryJsonMap(text);
-  if (direct.isNotEmpty) {
-    return direct;
-  }
-  try {
-    final decoded = utf8.decode(base64Decode(text));
-    final base64Json = _tryJsonMap(decoded);
-    if (base64Json.isNotEmpty) {
-      return base64Json;
-    }
-    return {'content': decoded};
-  } catch (_) {
-    return {'content': text};
-  }
+  return value;
 }
 
-Map<String, Object?> _tryJsonMap(String text) {
-  try {
-    final decoded = jsonDecode(text);
-    if (decoded is Map) {
-      return decoded.map((key, value) => MapEntry(key.toString(), value));
-    }
-  } catch (_) {
-    return const <String, Object?>{};
-  }
-  return const <String, Object?>{};
+int _eventTimestamp(Map<String, Object?> data) {
+  final raw = data['timestamp'] ?? data['created_at'];
+  final numeric = int.tryParse(raw?.toString() ?? '');
+  if (numeric != null) return numeric;
+  return DateTime.tryParse(raw?.toString() ?? '')?.millisecondsSinceEpoch ??
+      DateTime.now().millisecondsSinceEpoch;
 }
 
 class GatewayStreamException implements Exception {
@@ -99,32 +91,24 @@ class GatewayStreamException implements Exception {
   String toString() => message;
 }
 
+/// Maintains the authenticated WSS connection, heartbeat, cursor and ACK.
 class GatewayStreamClient {
-  GatewayStreamClient({HttpClient? httpClient})
-    : _httpClient = httpClient ?? HttpClient();
-
-  final HttpClient _httpClient;
-
-  StreamSubscription<List<int>>? _subscription;
+  WebSocket? _socket;
+  StreamSubscription<dynamic>? _subscription;
   Timer? _watchdog;
-  Uint8List _buffer = Uint8List(0);
   DateTime? _lastFrameAt;
-  DateTime? _connectedAt;
-  bool _closed = false;
+  bool _closed = true;
   bool _closedNotified = false;
-  String _streamId = '';
-  int _chunkSeq = 0;
-  int _frameSeq = 0;
   void Function(String reason, Object? error)? _onClosed;
 
   DateTime? get lastFrameAt => _lastFrameAt;
   bool get hasValidatedFrame => _lastFrameAt != null;
 
   bool isHealthy({Duration staleAfter = const Duration(seconds: 65)}) {
-    final lastFrameAt = _lastFrameAt;
+    final last = _lastFrameAt;
     return !_closed &&
-        lastFrameAt != null &&
-        DateTime.now().difference(lastFrameAt) <= staleAfter;
+        last != null &&
+        DateTime.now().difference(last) <= staleAfter;
   }
 
   Future<void> connect({
@@ -135,283 +119,150 @@ class GatewayStreamClient {
     required void Function(GatewayFrame frame) onFrame,
     required void Function(String reason, Object? error) onClosed,
   }) async {
-    if (uri.scheme != 'http' && uri.scheme != 'https') {
-      throw GatewayStreamException('Gateway 实时地址必须是 HTTP/HTTPS');
-    }
-    if (frameKey.trim().isEmpty) {
-      throw const GatewayStreamException('Gateway 帧密钥缺失');
+    final wsUri = _webSocketUri(uri);
+    if (ticket.trim().isEmpty) {
+      throw const GatewayStreamException('Gateway 连接票据缺失');
     }
     _onClosed = onClosed;
     _closed = false;
     _closedNotified = false;
-    _streamId = AppLogger.traceId('gateway');
-    _chunkSeq = 0;
-    _frameSeq = 0;
-    _buffer = Uint8List(0);
     _lastFrameAt = null;
-    _connectedAt = null;
     AppLogger.info(
       'im',
-      'gateway stream connect start',
+      'gateway websocket connect start',
       data: {
-        'stream_id': _streamId,
-        'scheme': uri.scheme,
-        'host': uri.host,
-        'port': uri.hasPort ? uri.port : 0,
-        'path': uri.path,
-        'ticket_len': ticket.length,
-        'frame_key_len': frameKey.length,
+        'scheme': wsUri.scheme,
+        'host': wsUri.host,
+        'path': wsUri.path,
         'last_cursor': lastCursor,
-        'last_cursor_len': lastCursor.length,
       },
     );
-    final request = await _httpClient
-        .postUrl(uri)
-        .timeout(const Duration(seconds: 8));
-    request.headers.contentType = ContentType.json;
-    request.headers.set(HttpHeaders.acceptHeader, 'application/octet-stream');
-    final body = jsonEncode({'ticket': ticket, 'last_cursor': lastCursor});
-    request.add(utf8.encode(body));
-    final response = await request.close().timeout(const Duration(seconds: 12));
-    if (response.statusCode != HttpStatus.ok) {
-      final text = await utf8.decoder.bind(response).join();
-      AppLogger.warn(
-        'im',
-        'gateway stream connect rejected',
-        data: {
-          'stream_id': _streamId,
-          'status_code': response.statusCode,
-          'body_len': text.length,
-          'body': text,
+    try {
+      final socket = await WebSocket.connect(
+        wsUri.toString(),
+      ).timeout(const Duration(seconds: 10));
+      socket.pingInterval = const Duration(seconds: 20);
+      _socket = socket;
+      socket.add(
+        jsonEncode({
+          'type': 'connect',
+          'ticket': ticket,
+          'last_event_id': lastCursor.isEmpty ? '0-0' : lastCursor,
+        }),
+      );
+      _subscription = socket.listen(
+        (raw) => _handleRaw(raw, onFrame),
+        onError: (Object error, StackTrace stackTrace) {
+          _notifyClosed('socket_error', error);
         },
+        onDone: () => _notifyClosed('socket_closed', null),
+        cancelOnError: true,
       );
-      throw GatewayStreamException(
-        'Gateway 打开失败(${response.statusCode}) $text',
-        statusCode: response.statusCode,
-      );
+      _watchdog = Timer.periodic(const Duration(seconds: 15), (_) {
+        final last = _lastFrameAt;
+        if (last != null &&
+            DateTime.now().difference(last) > const Duration(seconds: 70)) {
+          _notifyClosed('heartbeat_timeout', null);
+          unawaited(close());
+        }
+      });
+    } catch (error) {
+      _closed = true;
+      throw GatewayStreamException('Gateway 连接失败: $error');
     }
-    _connectedAt = DateTime.now();
-    AppLogger.info(
-      'im',
-      'gateway stream connected',
-      data: {
-        'stream_id': _streamId,
-        'status_code': response.statusCode,
-        'content_type': response.headers.contentType?.toString() ?? '',
-      },
-    );
-    _watchdog = Timer.periodic(const Duration(seconds: 10), (_) {
-      final reference = _lastFrameAt ?? _connectedAt;
-      if (reference == null) {
+  }
+
+  Uri _webSocketUri(Uri uri) {
+    if (uri.scheme == 'wss' || uri.scheme == 'ws') return uri;
+    if (uri.scheme == 'https') return uri.replace(scheme: 'wss');
+    if (uri.scheme == 'http') return uri.replace(scheme: 'ws');
+    throw const GatewayStreamException('Gateway 地址必须使用 WS/WSS');
+  }
+
+  void _handleRaw(dynamic raw, void Function(GatewayFrame frame) onFrame) {
+    try {
+      final decoded = jsonDecode(
+        raw is String ? raw : utf8.decode(raw as List<int>),
+      );
+      if (decoded is! Map) return;
+      final map = _objectMap(decoded);
+      final type = map['type']?.toString() ?? '';
+      _lastFrameAt = DateTime.now();
+      if (type == 'ping') {
+        _socket?.add(jsonEncode({'type': 'pong'}));
+        onFrame(const GatewayFrame(type: 'heartbeat'));
         return;
       }
-      final silentSeconds = DateTime.now().difference(reference).inSeconds;
-      if (silentSeconds > 60) {
-        AppLogger.warn(
-          'im',
-          'gateway heartbeat timeout',
-          data: {'silent_seconds': silentSeconds},
+      if (type == 'event') {
+        final eventId = map['event_id']?.toString() ?? '';
+        final envelope = _objectMap(map['payload']);
+        final eventType = envelope['event_type']?.toString() ?? '';
+        final data = _decodeEventData(envelope['data']);
+        onFrame(
+          GatewayFrame.fromEvent(
+            eventId: eventId,
+            eventType: eventType,
+            data: data,
+          ),
         );
-        close();
-        _notifyClosed('heartbeat_timeout', null);
+        if (eventId.isNotEmpty) {
+          _socket?.add(jsonEncode({'type': 'ack', 'event_id': eventId}));
+        }
+        return;
       }
-    });
-    _subscription = response.listen(
-      (chunk) {
-        try {
-          _chunkSeq++;
-          if (_chunkSeq == 1 || _chunkSeq % 100 == 0) {
-            AppLogger.info(
-              'im',
-              'gateway chunk sampled',
-              data: {
-                'stream_id': _streamId,
-                'chunk_no': _chunkSeq,
-                'chunk_bytes': chunk.length,
-                'buffer_before': _buffer.length,
-              },
-            );
-          }
-          _appendAndDecode(Uint8List.fromList(chunk), frameKey, onFrame);
-        } catch (error) {
-          if (_closed) {
-            return;
-          }
-          unawaited(close());
-          _notifyClosed('frame_decode_error', error);
-        }
-      },
-      onError: (Object error) {
-        if (_closed) {
-          return;
-        }
-        _notifyClosed('stream_error', error);
-      },
-      onDone: () {
-        if (_closed) {
-          return;
-        }
-        _notifyClosed('stream_done', null);
-      },
-      cancelOnError: true,
-    );
+      onFrame(
+        GatewayFrame(
+          type: type,
+          reason: map['reason']?.toString() ?? map['message']?.toString() ?? '',
+          payload: map,
+        ),
+      );
+    } catch (error, stackTrace) {
+      AppLogger.error(
+        'im',
+        'gateway frame decode failed',
+        error: error,
+        stackTrace: stackTrace,
+      );
+      _notifyClosed('invalid_frame', error);
+    }
+  }
+
+  Map<String, Object?> _decodeEventData(Object? value) {
+    if (value is Map) return _objectMap(value);
+    if (value is String && value.isNotEmpty) {
+      final decoded = jsonDecode(value);
+      if (decoded is Map) return _objectMap(decoded);
+    }
+    return <String, Object?>{};
   }
 
   Future<void> close() async {
-    AppLogger.info(
-      'im',
-      'gateway stream close requested',
-      data: {
-        'stream_id': _streamId,
-        'chunk_count': _chunkSeq,
-        'frame_count': _frameSeq,
-        'buffer_bytes': _buffer.length,
-      },
-    );
+    if (_closed) return;
     _closed = true;
     _watchdog?.cancel();
     _watchdog = null;
-    await _subscription?.cancel().catchError((Object _) => null);
+    await _subscription?.cancel();
     _subscription = null;
-    _httpClient.close(force: true);
-  }
-
-  void _appendAndDecode(
-    Uint8List chunk,
-    String frameKey,
-    void Function(GatewayFrame frame) onFrame,
-  ) {
-    _buffer = Uint8List.fromList([..._buffer, ...chunk]);
-    while (_buffer.length >= 4) {
-      final length = ByteData.sublistView(_buffer, 0, 4).getUint32(0);
-      if (length <= 0 || length > 1024 * 1024) {
-        throw const GatewayStreamException('Gateway 帧长度异常');
-      }
-      final frameLength = 4 + length;
-      if (_buffer.length < frameLength) {
-        return;
-      }
-      final payload = _buffer.sublist(4, frameLength);
-      _buffer = _buffer.sublist(frameLength);
-      final frameNo = ++_frameSeq;
-      final decoded = jsonDecode(utf8.decode(payload));
-      if (decoded is! Map) {
-        AppLogger.warn(
-          'im',
-          'gateway frame skipped for non-map payload',
-          data: {
-            'stream_id': _streamId,
-            'frame_no': frameNo,
-            'frame_bytes': length,
-            'buffer_remaining': _buffer.length,
-          },
-        );
-        continue;
-      }
-      final map = decoded.map((key, value) => MapEntry(key.toString(), value));
-      final rawFrame = _decryptFrameEnvelope(map, frameKey);
-      final frame = GatewayFrame.fromJson(
-        rawFrame.map((key, value) => MapEntry(key.toString(), value)),
-      );
-      _lastFrameAt = DateTime.now();
-      if (!frame.isHeartbeat || frameNo == 1 || frameNo % 12 == 0) {
-        AppLogger.info(
-          'im',
-          'gateway frame received',
-          data: {
-            'stream_id': _streamId,
-            'frame_no': frameNo,
-            'frame_bytes': length,
-            'buffer_remaining': _buffer.length,
-            'type': frame.type,
-            'has_cursor': frame.cursor.isNotEmpty,
-            'cursor_len': frame.cursor.length,
-            'channel_id': frame.channelId,
-            'channel_type': frame.channelType,
-            'client_msg_no': frame.clientMsgNo,
-            'message_id': frame.messageId,
-            'message_seq': frame.messageSeq,
-            'timestamp': frame.timestamp,
-            'payload_summary': _payloadSummary(frame.payload),
-          },
-        );
-      }
-      onFrame(frame);
-    }
-  }
-
-  Map<String, Object?> _decryptFrameEnvelope(
-    Map<String, Object?> map,
-    String frameKey,
-  ) {
-    if (map['type'] != 'secure') {
-      throw const GatewayStreamException('Gateway 返回了未加密帧');
-    }
-    if (map['alg']?.toString() != 'AES-256-GCM') {
-      throw const GatewayStreamException('Gateway 帧加密算法不支持');
-    }
-    final keyBytes = base64Decode(frameKey);
-    if (keyBytes.length != 32) {
-      throw const GatewayStreamException('Gateway 帧密钥长度错误');
-    }
-    final nonce = base64Decode(map['nonce']?.toString() ?? '');
-    final ciphertext = base64Decode(map['ciphertext']?.toString() ?? '');
-    final plain = BinaryCodec.aesGcmDecrypt(
-      key: keyBytes,
-      nonce: nonce,
-      cipherText: ciphertext,
-      associatedData: utf8.encode('bim-gateway-frame-v1'),
-    );
-    final decoded = jsonDecode(utf8.decode(plain));
-    if (decoded is! Map) {
-      throw const GatewayStreamException('Gateway 帧明文格式错误');
-    }
-    return decoded.map((key, value) => MapEntry(key.toString(), value));
+    await _socket?.close(WebSocketStatus.normalClosure, 'client_close');
+    _socket = null;
   }
 
   void _notifyClosed(String reason, Object? error) {
-    if (_closedNotified) {
-      return;
-    }
+    if (_closedNotified) return;
     _closedNotified = true;
+    _closed = true;
     _watchdog?.cancel();
-    _watchdog = null;
     AppLogger.warn(
       'im',
-      'gateway stream closed',
-      data: {
-        'stream_id': _streamId,
-        'reason': reason,
-        'error': error?.toString() ?? '',
-        'chunk_count': _chunkSeq,
-        'frame_count': _frameSeq,
-        'buffer_bytes': _buffer.length,
-        'validated': hasValidatedFrame,
-        'connected_ms': _connectedAt == null
-            ? 0
-            : DateTime.now().difference(_connectedAt!).inMilliseconds,
-        'last_frame_age_ms': _lastFrameAt == null
-            ? -1
-            : DateTime.now().difference(_lastFrameAt!).inMilliseconds,
-      },
+      'gateway websocket closed',
+      data: {'reason': reason, 'error': error?.toString() ?? ''},
     );
     _onClosed?.call(reason, error);
   }
 }
 
-Map<String, Object?> _payloadSummary(Map<String, Object?> payload) {
-  final content = payload['content']?.toString() ?? '';
-  return {
-    'key_count': payload.length,
-    'keys': payload.keys.take(80).toList(growable: false),
-    'content_type': payload['content_type']?.toString() ?? '',
-    'type': payload['type']?.toString() ?? '',
-    'cmd': payload['cmd']?.toString() ?? '',
-    'content_len': content.length,
-    'has_red_packet': payload['red_packet'] is Map,
-    'has_transfer': payload['transfer'] is Map,
-    'has_file_path': (payload['file_path']?.toString() ?? '').isNotEmpty,
-    'has_image_path': (payload['image_path']?.toString() ?? '').isNotEmpty,
-    'has_video_path': (payload['video_path']?.toString() ?? '').isNotEmpty,
-  };
+Map<String, Object?> _objectMap(Object? value) {
+  if (value is! Map) return <String, Object?>{};
+  return value.map((key, item) => MapEntry(key.toString(), item));
 }

@@ -1,0 +1,25 @@
+[Unit]
+Description=BIM Go Business Server
+After=network-online.target mysqld.service redis.service wukongim.service livekit.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=www
+Group=www
+WorkingDirectory=/opt/bim-server
+ExecStart=/opt/bim-server/bim-server serve --config /etc/bim/config.yaml
+Restart=always
+RestartSec=3
+LimitNOFILE=1048576
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/bim /var/log/bim
+CapabilityBoundingSet=
+LockPersonality=true
+MemoryDenyWriteExecute=true
+
+[Install]
+WantedBy=multi-user.target

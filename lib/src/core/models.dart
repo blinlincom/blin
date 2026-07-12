@@ -81,8 +81,7 @@ class GatewayStreamSession {
   final String lastCursor;
   final String httpsStreamAddr;
 
-  bool get isAvailable =>
-      ticket.isNotEmpty && frameKey.isNotEmpty && httpsStreamAddr.isNotEmpty;
+  bool get isAvailable => ticket.isNotEmpty && httpsStreamAddr.isNotEmpty;
 
   factory GatewayStreamSession.fromJson(
     Object? value, {
@@ -220,6 +219,9 @@ class UserSession {
     this.nickname = '',
     this.avatar = '',
     this.profileBackground = '',
+    this.refreshToken = '',
+    this.sessionId = '',
+    this.expiresAt = '',
   });
 
   final int userId;
@@ -229,15 +231,25 @@ class UserSession {
   final String nickname;
   final String avatar;
   final String profileBackground;
+  final String refreshToken;
+  final String sessionId;
+  final String expiresAt;
 
   factory UserSession.fromJson(Map<String, Object?> map) {
+    final user = map['user'] is Map
+        ? (map['user'] as Map).map(
+            (key, value) => MapEntry(key.toString(), value),
+          )
+        : map;
     return UserSession(
-      userId: int.tryParse(map['id']?.toString() ?? '') ?? 0,
-      username: map['username']?.toString() ?? '',
-      userToken: map['usertoken']?.toString() ?? '',
+      userId: int.tryParse(user['id']?.toString() ?? '') ?? 0,
+      username: user['username']?.toString() ?? '',
+      userToken:
+          map['access_token']?.toString() ?? map['usertoken']?.toString() ?? '',
       chat: map['chat'] == null ? null : ChatSession.fromJson(map['chat']),
-      nickname: map['nickname']?.toString() ?? '',
-      avatar: map['usertx']?.toString() ?? '',
+      nickname: user['nickname']?.toString() ?? '',
+      avatar:
+          user['avatar_url']?.toString() ?? user['usertx']?.toString() ?? '',
       profileBackground:
           _stringFromKeys(map, const [
             'profile_background',
@@ -250,6 +262,9 @@ class UserSession {
             'userbg',
           ]) ??
           '',
+      refreshToken: map['refresh_token']?.toString() ?? '',
+      sessionId: map['session_id']?.toString() ?? '',
+      expiresAt: map['expires_at']?.toString() ?? '',
     );
   }
 
@@ -261,6 +276,9 @@ class UserSession {
     'nickname': nickname,
     'usertx': avatar,
     'profile_background': profileBackground,
+    'refresh_token': refreshToken,
+    'session_id': sessionId,
+    'expires_at': expiresAt,
   };
 
   UserSession copyWith({
@@ -277,6 +295,9 @@ class UserSession {
       nickname: nickname ?? this.nickname,
       avatar: avatar ?? this.avatar,
       profileBackground: profileBackground ?? this.profileBackground,
+      refreshToken: refreshToken,
+      sessionId: sessionId,
+      expiresAt: expiresAt,
     );
   }
 }
@@ -340,7 +361,14 @@ class WalletBalance {
 
   factory WalletBalance.fromJson(Object? value) {
     final map = _objectMap(value);
-    final balance = _decimalLabel(map['balance']);
+    final availableRaw = map['available_balance'] ?? map['available'];
+    final frozenRaw = map['frozen_balance'] ?? map['frozen'];
+    final availableNumber =
+        double.tryParse(availableRaw?.toString() ?? '') ?? 0;
+    final frozenNumber = double.tryParse(frozenRaw?.toString() ?? '') ?? 0;
+    final balance = map['balance'] == null
+        ? (availableNumber + frozenNumber).toStringAsFixed(2)
+        : _decimalLabel(map['balance']);
     final methods = <WalletSecurityMethod>[];
     final rawMethods = map['security_methods'];
     if (rawMethods is Iterable) {
@@ -361,8 +389,8 @@ class WalletBalance {
         }
       }
     }
-    final availableBalance = _decimalLabel(map['available_balance']);
-    final frozenBalance = _decimalLabel(map['frozen_balance']);
+    final availableBalance = _decimalLabel(availableRaw);
+    final frozenBalance = _decimalLabel(frozenRaw);
     return WalletBalance(
       balance: balance,
       balanceLabel:
@@ -382,9 +410,16 @@ class WalletBalance {
             'frozen_balance_text',
           ]) ??
           frozenBalance,
-      walletStatus: int.tryParse(map['wallet_status']?.toString() ?? '') ?? 1,
-      walletStatusName: map['wallet_status_name']?.toString() ?? '',
-      walletLockReason: map['wallet_lock_reason']?.toString() ?? '',
+      walletStatus:
+          int.tryParse(map['wallet_status']?.toString() ?? '') ??
+          (map['status']?.toString() == 'active' ? 1 : 0),
+      walletStatusName:
+          map['wallet_status_name']?.toString() ??
+          (map['status']?.toString() == 'active' ? '状态正常' : '当前受限'),
+      walletLockReason:
+          map['wallet_lock_reason']?.toString() ??
+          map['lock_reason']?.toString() ??
+          '',
       freezeReason: map['freeze_reason']?.toString() ?? '',
       freezeRecords: freezeRecords,
       otcMerchantDeposit: _decimalLabel(map['otc_merchant_deposit']),
@@ -768,6 +803,7 @@ class ImageCaptcha {
             'captcha_image',
             'image_base64',
             'base64',
+            'image_data_uri',
           ]) ??
           _stringFromKeys(nested, const [
             'image',
@@ -778,6 +814,7 @@ class ImageCaptcha {
             'captcha_image',
             'image_base64',
             'base64',
+            'image_data_uri',
           ]) ??
           '',
       token:
@@ -787,6 +824,7 @@ class ImageCaptcha {
             'key',
             'captcha_key',
             'captcha_id',
+            'id',
           ]) ??
           _stringFromKeys(nested, const [
             'token',
@@ -794,6 +832,7 @@ class ImageCaptcha {
             'key',
             'captcha_key',
             'captcha_id',
+            'id',
           ]) ??
           '',
     );
@@ -1044,8 +1083,8 @@ class AppInfo {
         ? value.cast<String, Object?>()
         : <String, Object?>{};
     return AppInfo(
-      name: map['appname']?.toString() ?? 'BIM',
-      icon: map['appicon']?.toString() ?? '',
+      name: map['name']?.toString() ?? map['appname']?.toString() ?? 'BIM',
+      icon: map['icon']?.toString() ?? map['appicon']?.toString() ?? '',
       introduction: map['application_introduction']?.toString() ?? '',
       auth: AppAuthConfig.fromAppInfoMap(map),
     );

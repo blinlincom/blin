@@ -1,0 +1,18 @@
+:root {
+  font-family: Inter, "PingFang SC", "Microsoft YaHei", sans-serif;
+  color: #202124;
+  background: #f5f6f8;
+  font-synthesis: none;
+  --bim-primary: #1677ff;
+  --bim-surface: #ffffff;
+  --bim-fill: #f4f5f7;
+  --bim-border: #e7e8ec;
+  --bim-text: #202124;
+  --bim-muted: #6f7785;
+  --bim-danger: #dc2626;
+  --bim-radius: 6px;
+}
+* { box-sizing: border-box; }
+html, body, #app { min-height: 100%; margin: 0; }
+button, input { font: inherit; }
+button { cursor: pointer; }

@@ -70,9 +70,6 @@ class BusinessImService extends ChangeNotifier {
   String _device = '';
   GatewayStreamClient? _gatewayStream;
   int _gatewayEpoch = 0;
-  String _gatewayTicket = '';
-  String _gatewayAckUrl = '';
-  DateTime? _gatewayTicketExpiresAt;
   DateTime? _gatewayChatIssuedAt;
   bool _gatewayOpenTicketAvailable = false;
   final Queue<GatewayFrame> _gatewayAckQueue = Queue<GatewayFrame>();
@@ -323,9 +320,6 @@ class BusinessImService extends ChangeNotifier {
     _realtimeValidatedAt = null;
     final gatewayStream = _gatewayStream;
     _gatewayStream = null;
-    _gatewayTicket = '';
-    _gatewayAckUrl = '';
-    _gatewayTicketExpiresAt = null;
     _gatewayChatIssuedAt = null;
     _gatewayOpenTicketAvailable = false;
     _gatewayAckQueue.clear();
@@ -2867,11 +2861,6 @@ class BusinessImService extends ChangeNotifier {
           ? connectStartedAtSeconds - 2
           : 0;
       _gatewayStream = client;
-      _gatewayTicket = stream.ticket;
-      _gatewayTicketExpiresAt = DateTime.now().add(
-        Duration(seconds: max(30, stream.expireIn)),
-      );
-      _gatewayAckUrl = _gatewayAckUrlFor(openUrl);
       final recoveryReason = _hasRealtimeConnectedOnce || _reconnectAttempt > 0
           ? 'reconnect'
           : 'initial_connect';
@@ -3017,9 +3006,6 @@ class BusinessImService extends ChangeNotifier {
   }
 
   void _invalidateGatewayTransportTicket() {
-    _gatewayTicket = '';
-    _gatewayAckUrl = '';
-    _gatewayTicketExpiresAt = null;
     _gatewayChatIssuedAt = null;
     _gatewayOpenTicketAvailable = false;
   }
@@ -3171,18 +3157,6 @@ class BusinessImService extends ChangeNotifier {
 
   bool _isValidGatewayCursor(String value) {
     return RegExp(r'^(\d+-\d+|0-0)$').hasMatch(value.trim());
-  }
-
-  String _gatewayAckUrlFor(String openUrl) {
-    final uri = Uri.parse(openUrl);
-    var path = uri.path;
-    while (path.length > 1 && path.endsWith('/')) {
-      path = path.substring(0, path.length - 1);
-    }
-    path = path.endsWith('/open')
-        ? '${path.substring(0, path.length - 5)}/ack'
-        : '$path/ack';
-    return uri.replace(path: path).toString();
   }
 
   void _handleGatewayFrame(GatewayFrame frame) {
@@ -3769,76 +3743,14 @@ class BusinessImService extends ChangeNotifier {
     }
     final chat = _requireChat();
     final frame = frames.last;
-    final clientMsgNos = <String>{
-      for (final item in frames)
-        if (item.clientMsgNo.isNotEmpty) item.clientMsgNo,
-    }.toList(growable: false);
-    try {
-      var ticket = await _ensureGatewayAckTicket();
-      try {
-        await _api.ackGatewayCursor(
-          ackUrl: _gatewayAckUrl,
-          ticket: ticket,
-          lastCursor: frame.cursor,
-          clientMsgNos: clientMsgNos,
-        );
-      } on ApiException catch (error) {
-        if (error.code != 401 && error.code != 403) {
-          rethrow;
-        }
-        AppLogger.warn(
-          'im',
-          'gateway ack ticket rejected, refreshing transport ticket',
-          data: {'code': error.code, 'frame_count': frames.length},
-        );
-        try {
-          ticket = await _ensureGatewayAckTicket(force: true);
-        } on ApiException catch (refreshError) {
-          if (refreshError.code == 401 || refreshError.code == 403) {
-            _markRealtimeAuthInvalid(
-              refreshError,
-              'gateway_ack_ticket_refresh',
-            );
-          }
-          rethrow;
-        }
-        await _api.ackGatewayCursor(
-          ackUrl: _gatewayAckUrl,
-          ticket: ticket,
-          lastCursor: frame.cursor,
-          clientMsgNos: clientMsgNos,
-        );
-      }
-      _cache.writeGatewayCursor(
-        uid: chat.uid,
-        device: _device,
-        cursor: frame.cursor,
-      );
-      if (frames.length > 1) {
-        AppLogger.info(
-          'im',
-          'gateway ack batch committed',
-          data: {
-            'frame_count': frames.length,
-            'client_msg_no_count': clientMsgNos.length,
-            'cursor_len': frame.cursor.length,
-          },
-        );
-      }
-      return true;
-    } catch (error, stackTrace) {
-      AppLogger.error(
-        'im',
-        'gateway ack failed',
-        error: error,
-        stackTrace: stackTrace,
-        data: {
-          'cursor_len': frame.cursor.length,
-          'client_msg_no': frame.clientMsgNo,
-        },
-      );
-      return false;
-    }
+    // The WebSocket client has already ACKed the event. This local cursor is
+    // the durable resume point used when the connection is re-established.
+    _cache.writeGatewayCursor(
+      uid: chat.uid,
+      device: _device,
+      cursor: frame.cursor,
+    );
+    return true;
   }
 
   void _markRealtimeAuthInvalid(ApiException error, String source) {
@@ -3858,29 +3770,6 @@ class BusinessImService extends ChangeNotifier {
       'gateway auth invalid, stop realtime reconnect',
       data: {'source': source, 'code': error.code, 'message': error.message},
     );
-  }
-
-  Future<String> _ensureGatewayAckTicket({bool force = false}) async {
-    final expiresAt = _gatewayTicketExpiresAt;
-    if (!force &&
-        _gatewayTicket.isNotEmpty &&
-        _gatewayAckUrl.isNotEmpty &&
-        expiresAt != null &&
-        expiresAt.isAfter(DateTime.now().add(const Duration(seconds: 15)))) {
-      return _gatewayTicket;
-    }
-    final chat = await _refreshGatewayChat(forOpen: false);
-    final stream = chat.stream;
-    final openUrl = _gatewayOpenUrl(chat);
-    if (stream == null || stream.ticket.isEmpty || openUrl.isEmpty) {
-      throw ApiException('Gateway ACK ticket 缺失');
-    }
-    _gatewayTicket = stream.ticket;
-    _gatewayTicketExpiresAt = DateTime.now().add(
-      Duration(seconds: max(30, stream.expireIn)),
-    );
-    _gatewayAckUrl = _gatewayAckUrlFor(openUrl);
-    return _gatewayTicket;
   }
 
   void _handleRealtimeClosed(String source, String? reason) {
@@ -3950,9 +3839,6 @@ class BusinessImService extends ChangeNotifier {
   Future<void> _closeRealtimeOnly() async {
     final gatewayStream = _gatewayStream;
     _gatewayStream = null;
-    _gatewayTicket = '';
-    _gatewayAckUrl = '';
-    _gatewayTicketExpiresAt = null;
     _gatewayAckQueue.clear();
     _gatewayAckDraining = false;
     _realtimeValidated = false;
