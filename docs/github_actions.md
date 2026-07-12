@@ -13,7 +13,7 @@
 Repository Variables：
 
 - `BIM_API_BASE_URL`：业务端 API 地址，默认 `https://blcold.cn/api/`。
-- `BIM_APP_ID`：全新 Go 后端固定为 `1`，工作流不再读取旧仓库变量覆盖该值。
+- `BIM_APP_ID`：应用 ID，默认 `900000002`。
 
 Repository Secrets：
 
