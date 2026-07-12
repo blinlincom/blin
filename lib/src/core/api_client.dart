@@ -34,10 +34,6 @@ class ApiClient {
   final String appId;
   final RequestStamp _signer;
   final Random _nonceRandom = Random.secure();
-  final Map<int, int> _captchaIds = <int, int>{};
-  final Map<String, int> _verificationIds = <String, int>{};
-
-  int get _latestCaptchaId => _captchaIds.isEmpty ? 0 : _captchaIds.values.last;
 
   String get _clientPlatform {
     if (Platform.isAndroid) return 'android';
@@ -49,12 +45,13 @@ class ApiClient {
   }
 
   Future<AppInfo> getAppInfo() async {
-    final data = await _v2Request(
-      'GET',
-      'v2/app/info',
-      query: {'app_id': appId},
-    );
-    return AppInfo.fromJson(data);
+    final result = await post<Map<String, Object?>>('get_app_info', {
+      'timestamp': _timestamp(),
+    }, logDioErrorAsWarn: true);
+    if (!result.isSuccess) {
+      throw ApiException(result.message, code: result.code);
+    }
+    return AppInfo.fromJson(result.data);
   }
 
   Future<UserSession> login({
@@ -63,23 +60,15 @@ class ApiClient {
     required String device,
     String captcha = '',
   }) async {
-    final data = await _v2Request(
-      'POST',
-      'v2/auth/login/password',
-      body: {
-        'app_id': int.tryParse(appId) ?? 1,
-        'username': username,
-        'password': password,
-        'platform': _clientPlatform,
-        'device_id': device,
-        'device_name': device,
-        if (captcha.isNotEmpty) ...{
-          'captcha_id': _captchaIds[1] ?? 0,
-          'captcha_code': captcha,
-        },
-      },
+    final result = await securePublicPost<Map<String, Object?>>(
+      'login',
+      device: device,
+      params: {'username': username, 'password': password, 'captcha': captcha},
     );
-    return UserSession.fromJson(data);
+    if (!result.isSuccess) {
+      throw ApiException(result.message, code: result.code);
+    }
+    return UserSession.fromJson(result.data);
   }
 
   Future<UserSession> loginWithMobile({
@@ -88,32 +77,96 @@ class ApiClient {
     required String device,
     String captcha = '',
   }) async {
-    final data = await _v2Request(
-      'POST',
-      'v2/auth/login/code',
-      body: {
-        'app_id': int.tryParse(appId) ?? 1,
-        'identifier_type': 'phone',
-        'identifier': mobile,
-        'platform': _clientPlatform,
-        'device_id': device,
-        'device_name': device,
-        'verification_id': _verificationIds['login:$mobile'] ?? 0,
-        'verification_code': code,
-      },
+    final result = await securePublicPost<Map<String, Object?>>(
+      'mobile_login',
+      device: device,
+      params: {'mobile': mobile, 'code': code, 'captcha': captcha},
     );
-    return UserSession.fromJson(data);
+    if (!result.isSuccess) {
+      throw ApiException(result.message, code: result.code);
+    }
+    return UserSession.fromJson(result.data);
   }
 
   Future<ImageCaptcha> getImageCaptcha({required int type}) async {
-    final data = await _v2Request(
-      'POST',
-      'v2/verification/captcha',
-      body: {'app_id': int.tryParse(appId) ?? 1},
+    final stopwatch = Stopwatch()..start();
+    final requestId = AppLogger.traceId('api');
+    final params = <String, Object?>{
+      'appid': appId,
+      'type': type,
+      'timestamp': _timestamp(),
+      'nonce': _nonce(),
+    };
+    AppLogger.info(
+      'api',
+      'captcha image request start',
+      data: {
+        'request_id': requestId,
+        'action': 'get_image_verification_code',
+        'base_url': baseUrl,
+        'type': type,
+      },
     );
-    final id = int.tryParse(data['id']?.toString() ?? '') ?? 0;
-    if (id > 0) _captchaIds[type] = id;
-    return ImageCaptcha.fromJson(data);
+    try {
+      final response = await _dio.post<Object?>(
+        'get_image_verification_code',
+        data: FormData.fromMap(params),
+        options: Options(
+          responseType: ResponseType.bytes,
+          headers: {
+            Headers.acceptHeader:
+                'image/png,image/*;q=0.9,application/json;q=0.8',
+          },
+        ),
+      );
+      final captcha = _parseImageCaptchaResponse(
+        response.data,
+        contentType: response.headers.value(Headers.contentTypeHeader),
+      );
+      AppLogger.info(
+        'api',
+        'captcha image request success',
+        data: {
+          'request_id': requestId,
+          'status_code': response.statusCode,
+          'content_type': response.headers.value(Headers.contentTypeHeader),
+          'has_image': captcha.hasImage,
+          'ms': stopwatch.elapsedMilliseconds,
+        },
+      );
+      return captcha;
+    } on DioException catch (error) {
+      final response = error.response;
+      AppLogger.error(
+        'api',
+        'captcha image request failed',
+        error: error.message,
+        data: {
+          'request_id': requestId,
+          'type': error.type.name,
+          'status_code': response?.statusCode,
+          'content_type': response?.headers.value(Headers.contentTypeHeader),
+          'response_summary': _responseBodySummary(response?.data),
+          'ms': stopwatch.elapsedMilliseconds,
+        },
+      );
+      if (response?.data != null) {
+        return _parseImageCaptchaResponse(
+          response!.data,
+          contentType: response.headers.value(Headers.contentTypeHeader),
+        );
+      }
+      throw ApiException(error.message ?? '验证码加载失败');
+    } catch (error, stackTrace) {
+      AppLogger.error(
+        'api',
+        'captcha image parse failed',
+        error: error,
+        stackTrace: stackTrace,
+        data: {'request_id': requestId, 'ms': stopwatch.elapsedMilliseconds},
+      );
+      rethrow;
+    }
   }
 
   Future<void> register({
@@ -126,34 +179,23 @@ class ApiClient {
     String captcha = '',
     String inviteCode = '',
   }) async {
-    await _v2Request(
-      'POST',
-      'v2/auth/register',
-      body: {
-        'app_id': int.tryParse(appId) ?? 1,
+    final result = await securePublicPost<Object?>(
+      'register',
+      device: device,
+      params: {
         'username': username,
-        'nickname': nickname,
         'password': password,
-        'platform': _clientPlatform,
-        'device_id': device,
-        'device_name': device,
-        if (mobile.isNotEmpty) ...{
-          'identifier_type': 'phone',
-          'identifier': mobile,
-          'verification_id': _verificationIds['register:$mobile'] ?? 0,
-        } else if (email.isNotEmpty) ...{
-          'identifier_type': 'email',
-          'identifier': email,
-          'verification_id': _verificationIds['register:$email'] ?? 0,
-        },
-        if ((mobile.isNotEmpty || email.isNotEmpty) && captcha.isNotEmpty)
-          'verification_code': captcha,
-        if (mobile.isEmpty && email.isEmpty && captcha.isNotEmpty) ...{
-          'captcha_id': _captchaIds[2] ?? 0,
-          'captcha_code': captcha,
-        },
+        if (nickname.isNotEmpty) 'nickname': nickname,
+        if (mobile.isNotEmpty) 'mobile': mobile,
+        if (email.isNotEmpty) 'email': email,
+        if (captcha.isNotEmpty) 'captcha': captcha,
+        if (inviteCode.isNotEmpty) 'invitecode': inviteCode,
       },
+      expectSecureResponse: false,
     );
+    if (!result.isSuccess) {
+      throw ApiException(result.message, code: result.code);
+    }
   }
 
   Future<void> sendEmailCode(
@@ -162,21 +204,18 @@ class ApiClient {
     int type = 1,
     String captcha = '',
   }) async {
-    final data = await _v2Request(
-      'POST',
-      'v2/verification/code',
-      body: {
-        'app_id': int.tryParse(appId) ?? 1,
-        'scene': 'register',
-        'target': email,
-        'captcha_id': _captchaIds[2] ?? 0,
-        'captcha_code': captcha,
+    final result = await securePublicPost<Object?>(
+      'get_email_verification_code',
+      device: device,
+      params: {
+        'email': email,
+        'type': type.toString(),
+        if (captcha.isNotEmpty) 'captcha': captcha,
       },
+      expectSecureResponse: false,
     );
-    final verificationId =
-        int.tryParse(data['verification_id']?.toString() ?? '') ?? 0;
-    if (verificationId > 0) {
-      _verificationIds['register:$email'] = verificationId;
+    if (!result.isSuccess) {
+      throw ApiException(result.message, code: result.code);
     }
   }
 
@@ -186,22 +225,18 @@ class ApiClient {
     int type = 2,
     String captcha = '',
   }) async {
-    final data = await _v2Request(
-      'POST',
-      'v2/verification/code',
-      body: {
-        'app_id': int.tryParse(appId) ?? 1,
-        'scene': type == 1 ? 'login' : 'register',
-        'target': mobile,
-        'captcha_id': _captchaIds[type] ?? 0,
-        'captcha_code': captcha,
+    final result = await securePublicPost<Object?>(
+      'get_mobile_verification_code',
+      device: device,
+      params: {
+        'mobile': mobile,
+        'type': type.toString(),
+        if (captcha.isNotEmpty) 'captcha': captcha,
       },
+      expectSecureResponse: false,
     );
-    final verificationId =
-        int.tryParse(data['verification_id']?.toString() ?? '') ?? 0;
-    if (verificationId > 0) {
-      _verificationIds['${type == 1 ? 'login' : 'register'}:$mobile'] =
-          verificationId;
+    if (!result.isSuccess) {
+      throw ApiException(result.message, code: result.code);
     }
   }
 
@@ -209,18 +244,31 @@ class ApiClient {
     UserSession session, {
     required String device,
   }) async {
-    final data = await _v2Request('GET', 'v2/users/me', session: session);
-    final avatar = await _resolveAssetUrl(session, data['avatar_asset_id']);
-    final background = await _resolveAssetUrl(
-      session,
-      data['background_asset_id'],
+    final result = await secureSignedImPost<Map<String, Object?>>(
+      'get_user_other_information',
+      session: session,
+      device: device,
+      params: const {},
+      secureResponse: true,
     );
+    if (!result.isSuccess) {
+      throw ApiException(result.message, code: result.code);
+    }
     return session.copyWith(
-      nickname: data['nickname']?.toString() ?? session.nickname,
-      avatar: avatar.isEmpty ? session.avatar : avatar,
-      profileBackground: background.isEmpty
-          ? session.profileBackground
-          : background,
+      nickname: result.data['nickname']?.toString() ?? session.nickname,
+      avatar: result.data['usertx']?.toString() ?? session.avatar,
+      profileBackground:
+          _stringFromKeys(result.data, const [
+            'profile_background',
+            'profile_background_url',
+            'moments_background',
+            'moments_cover',
+            'cover_url',
+            'background_url',
+            'user_bg',
+            'userbg',
+          ]) ??
+          session.profileBackground,
     );
   }
 
@@ -228,8 +276,17 @@ class ApiClient {
     required UserSession session,
     required String device,
   }) async {
-    final data = await _v2Request('GET', 'v2/wallet/balance', session: session);
-    return WalletBalance.fromJson(data);
+    final result = await secureSignedImPost<Map<String, Object?>>(
+      'wallet_balance',
+      session: session,
+      device: device,
+      params: const {},
+      secureResponse: true,
+    );
+    if (!result.isSuccess) {
+      throw ApiException(result.message, code: result.code);
+    }
+    return WalletBalance.fromJson(result.data);
   }
 
   Future<List<WalletBill>> walletBills({
@@ -239,13 +296,21 @@ class ApiClient {
     int page = 1,
     int limit = 20,
   }) async {
-    final data = await _v2Request(
-      'GET',
-      'v2/wallet/bills',
+    final result = await secureSignedImPost<Map<String, Object?>>(
+      'wallet_bill_list',
       session: session,
-      query: {'limit': limit},
+      device: device,
+      params: {
+        'scene': scene,
+        'page': page.toString(),
+        'limit': limit.toString(),
+      },
+      secureResponse: true,
     );
-    final list = data['items'];
+    if (!result.isSuccess) {
+      throw ApiException(result.message, code: result.code);
+    }
+    final list = result.data['list'];
     if (list is! List) {
       return const [];
     }
@@ -714,18 +779,20 @@ class ApiClient {
     required String verificationMethod,
     required String verifyCode,
   }) async {
-    await _v2Request(
-      'PUT',
-      'v2/wallet/payment-password',
+    final result = await secureSignedImPost<Object?>(
+      'wallet_pay_password_set',
       session: session,
-      body: {
-        'password': password,
-        'method': verificationMethod,
-        'verification_id':
-            _verificationIds['payment_password:$verificationMethod'] ?? 0,
-        'verification_code': verifyCode,
+      device: device,
+      params: {
+        'new_pay_password': password,
+        'verification_method': verificationMethod,
+        'verify_code': verifyCode,
       },
+      secureResponse: true,
     );
+    if (!result.isSuccess) {
+      throw ApiException(result.message, code: result.code);
+    }
   }
 
   Future<Map<String, Object?>> walletSendPayPasswordCode({
@@ -734,62 +801,38 @@ class ApiClient {
     required String verificationMethod,
     required String captcha,
   }) async {
-    final security = await _v2Request(
-      'GET',
-      'v2/auth/security',
+    final result = await secureSignedImPost<Map<String, Object?>>(
+      'wallet_security_code_send',
       session: session,
-    );
-    final methods = _mapListFromPayload({'items': security['methods']});
-    final selected = methods.firstWhere(
-      (item) => item['type']?.toString() == verificationMethod,
-      orElse: () => const <String, Object?>{},
-    );
-    final target = selected['identifier']?.toString() ?? '';
-    if (target.isEmpty) throw ApiException('请先绑定安全验证方式');
-    final data = await _v2Request(
-      'POST',
-      'v2/verification/code',
-      body: {
-        'app_id': int.tryParse(appId) ?? 1,
-        'scene': 'payment_password',
-        'target': target,
-        'captcha_id': _latestCaptchaId,
-        'captcha_code': captcha,
+      device: device,
+      params: {
+        if (verificationMethod.isNotEmpty)
+          'verification_method': verificationMethod,
+        'captcha': captcha,
       },
+      secureResponse: true,
     );
-    _verificationIds['payment_password:$verificationMethod'] =
-        int.tryParse(data['verification_id']?.toString() ?? '') ?? 0;
-    return data;
+    if (!result.isSuccess) {
+      throw ApiException(result.message, code: result.code);
+    }
+    return result.data;
   }
 
   Future<UserSecurityInfo> userSecurityInfo({
     required UserSession session,
     required String device,
   }) async {
-    final data = await _v2Request('GET', 'v2/auth/security', session: session);
-    final methods = _mapListFromPayload({'items': data['methods']});
-    return UserSecurityInfo.fromJson({
-      'mobile_bound': methods.any((item) => item['type'] == 'phone'),
-      'email_bound': methods.any((item) => item['type'] == 'email'),
-      'mobile': methods
-          .where((item) => item['type'] == 'phone')
-          .map((item) => item['identifier'])
-          .firstOrNull,
-      'email': methods
-          .where((item) => item['type'] == 'email')
-          .map((item) => item['identifier'])
-          .firstOrNull,
-      'security_bound': methods.isNotEmpty,
-      'security_methods': methods
-          .map(
-            (item) => {
-              'method': item['type'],
-              'label': item['type'] == 'phone' ? '手机号' : '邮箱',
-              'target': item['identifier'],
-            },
-          )
-          .toList(),
-    });
+    final result = await secureSignedImPost<Map<String, Object?>>(
+      'user_security_info',
+      session: session,
+      device: device,
+      params: const {},
+      secureResponse: true,
+    );
+    if (!result.isSuccess) {
+      throw ApiException(result.message, code: result.code);
+    }
+    return UserSecurityInfo.fromJson(result.data);
   }
 
   Future<void> sendUserMobileBindCode({
@@ -798,19 +841,16 @@ class ApiClient {
     required String mobile,
     required String captcha,
   }) async {
-    final data = await _v2Request(
-      'POST',
-      'v2/verification/code',
-      body: {
-        'app_id': int.tryParse(appId) ?? 1,
-        'scene': 'bind_phone',
-        'target': mobile,
-        'captcha_id': _latestCaptchaId,
-        'captcha_code': captcha,
-      },
+    final result = await secureSignedImPost<Object?>(
+      'user_mobile_bind_code_send',
+      session: session,
+      device: device,
+      params: {'mobile': mobile, 'captcha': captcha},
+      secureResponse: true,
     );
-    _verificationIds['bind_phone:$mobile'] =
-        int.tryParse(data['verification_id']?.toString() ?? '') ?? 0;
+    if (!result.isSuccess) {
+      throw ApiException(result.message, code: result.code);
+    }
   }
 
   Future<UserSecurityInfo> confirmUserMobileBind({
@@ -819,18 +859,17 @@ class ApiClient {
     required String mobile,
     required String code,
   }) async {
-    await _v2Request(
-      'POST',
-      'v2/auth/security/bind',
+    final result = await secureSignedImPost<Map<String, Object?>>(
+      'user_mobile_bind_confirm',
       session: session,
-      body: {
-        'method': 'phone',
-        'identifier': mobile,
-        'verification_id': _verificationIds['bind_phone:$mobile'] ?? 0,
-        'verification_code': code,
-      },
+      device: device,
+      params: {'mobile': mobile, 'code': code},
+      secureResponse: true,
     );
-    return userSecurityInfo(session: session, device: device);
+    if (!result.isSuccess) {
+      throw ApiException(result.message, code: result.code);
+    }
+    return UserSecurityInfo.fromJson(result.data);
   }
 
   Future<void> sendUserEmailBindCode({
@@ -839,19 +878,16 @@ class ApiClient {
     required String email,
     required String captcha,
   }) async {
-    final data = await _v2Request(
-      'POST',
-      'v2/verification/code',
-      body: {
-        'app_id': int.tryParse(appId) ?? 1,
-        'scene': 'bind_email',
-        'target': email,
-        'captcha_id': _latestCaptchaId,
-        'captcha_code': captcha,
-      },
+    final result = await secureSignedImPost<Object?>(
+      'user_email_bind_code_send',
+      session: session,
+      device: device,
+      params: {'email': email, 'captcha': captcha},
+      secureResponse: true,
     );
-    _verificationIds['bind_email:$email'] =
-        int.tryParse(data['verification_id']?.toString() ?? '') ?? 0;
+    if (!result.isSuccess) {
+      throw ApiException(result.message, code: result.code);
+    }
   }
 
   Future<UserSecurityInfo> confirmUserEmailBind({
@@ -860,18 +896,17 @@ class ApiClient {
     required String email,
     required String code,
   }) async {
-    await _v2Request(
-      'POST',
-      'v2/auth/security/bind',
+    final result = await secureSignedImPost<Map<String, Object?>>(
+      'user_email_bind_confirm',
       session: session,
-      body: {
-        'method': 'email',
-        'identifier': email,
-        'verification_id': _verificationIds['bind_email:$email'] ?? 0,
-        'verification_code': code,
-      },
+      device: device,
+      params: {'email': email, 'code': code},
+      secureResponse: true,
     );
-    return userSecurityInfo(session: session, device: device);
+    if (!result.isSuccess) {
+      throw ApiException(result.message, code: result.code);
+    }
+    return UserSecurityInfo.fromJson(result.data);
   }
 
   Future<void> walletRechargeKm({
@@ -1071,33 +1106,63 @@ class ApiClient {
     required String device,
     CancelToken? cancelToken,
   }) async {
-    final data = await _v2Request(
-      'POST',
-      'sync/ticket',
+    final result = await secureSignedImPost<Map<String, Object?>>(
+      'im_connect',
       session: session,
-      body: const <String, Object?>{},
+      device: device,
+      params: const {},
+      secureResponse: true,
       cancelToken: cancelToken,
     );
-    final gatewayUrl = Uri.parse(baseUrl.endsWith('/') ? baseUrl : '$baseUrl/')
-        .resolve('sync/connect')
-        .replace(scheme: baseUrl.startsWith('https://') ? 'wss' : 'ws')
-        .toString();
-    return ChatSession.fromJson({
-      'uid': 'app${int.tryParse(appId) ?? 1}user${session.userId}',
-      'token': session.userToken,
-      'device': device,
-      'device_flag': AppConfig.imDeviceFlagApp,
-      'device_level': AppConfig.imDeviceLevelMaster,
-      'channel_type_person': 1,
-      'channel_type_group': 2,
-      'route': {'api_url': baseUrl, 'https_stream_addr': gatewayUrl},
-      'stream': {
-        'ticket': data['ticket']?.toString() ?? '',
-        'expire_in': int.tryParse(data['expires_in']?.toString() ?? '') ?? 120,
-        'https_stream_addr': gatewayUrl,
-      },
-      'server_history_sync_enabled': 1,
-    });
+    if (!result.isSuccess) {
+      throw ApiException(result.message, code: result.code);
+    }
+    return ChatSession.fromJson(result.data);
+  }
+
+  Future<void> ackGatewayCursor({
+    required String ackUrl,
+    required String ticket,
+    required String lastCursor,
+    List<String> clientMsgNos = const [],
+  }) async {
+    final stopwatch = Stopwatch()..start();
+    AppLogger.info(
+      'api',
+      'gateway ack start',
+      data: {'ack_url': ackUrl, 'cursor_len': lastCursor.length},
+    );
+    try {
+      final response = await _dio.post<Object?>(
+        ackUrl,
+        data: <String, Object?>{
+          'ticket': ticket,
+          'last_cursor': lastCursor,
+          if (clientMsgNos.isNotEmpty) 'client_msg_nos': clientMsgNos,
+        },
+        options: Options(
+          contentType: Headers.jsonContentType,
+          responseType: ResponseType.json,
+        ),
+      );
+      final result = _parse<Map<String, Object?>>(response.data);
+      if (!result.isSuccess) {
+        throw ApiException(result.message, code: result.code);
+      }
+      AppLogger.info(
+        'api',
+        'gateway ack success',
+        data: {
+          'cursor_len': lastCursor.length,
+          'ms': stopwatch.elapsedMilliseconds,
+        },
+      );
+    } on DioException catch (error) {
+      throw ApiException(
+        error.response?.data?.toString() ?? error.message ?? 'Gateway ACK 失败',
+        code: error.response?.statusCode,
+      );
+    }
   }
 
   Future<List<Map<String, Object?>>> conversations({
@@ -1106,25 +1171,34 @@ class ApiClient {
     int page = 1,
     int limit = 20,
   }) async {
-    final data = await _v2Request(
-      'GET',
-      'v2/im/conversations',
+    final result = await secureSignedImPost<Map<String, Object?>>(
+      'im_conversations',
       session: session,
-      query: {'limit': limit},
+      device: device,
+      params: {'page': page.toString(), 'limit': limit.toString()},
+      secureResponse: true,
     );
-    return _mapListFromPayload(data);
+    if (!result.isSuccess) {
+      throw ApiException(result.message, code: result.code);
+    }
+    return _mapListFromPayload(result.data);
   }
 
   Future<List<Map<String, Object?>>> serviceAccounts({
     required UserSession session,
     required String device,
   }) async {
-    final data = await _v2Request(
-      'GET',
-      'v2/service-accounts/',
+    final result = await secureSignedImPost<Map<String, Object?>>(
+      'service_account_list',
       session: session,
+      device: device,
+      params: const {},
+      secureResponse: true,
     );
-    return _mapListFromPayload(data);
+    if (!result.isSuccess) {
+      throw ApiException(result.message, code: result.code);
+    }
+    return _mapListFromPayload(result.data);
   }
 
   Future<Map<String, Object?>> serviceAccountDetail({
@@ -1132,8 +1206,17 @@ class ApiClient {
     required String device,
     required int serviceId,
   }) async {
-    final code = await _serviceAccountCode(session, serviceId);
-    return _v2Request('GET', 'v2/service-accounts/$code', session: session);
+    final result = await secureSignedImPost<Map<String, Object?>>(
+      'service_account_detail',
+      session: session,
+      device: device,
+      params: {'service_id': serviceId.toString()},
+      secureResponse: true,
+    );
+    if (!result.isSuccess) {
+      throw ApiException(result.message, code: result.code);
+    }
+    return Map<String, Object?>.from(result.data);
   }
 
   Future<Map<String, Object?>> updateServiceAccountSettings({
@@ -1144,13 +1227,22 @@ class ApiClient {
     bool? pinned,
     bool? following,
   }) async {
-    final code = await _serviceAccountCode(session, serviceId);
-    return _v2Request(
-      'PUT',
-      'v2/service-accounts/$code/settings',
+    final result = await secureSignedImPost<Map<String, Object?>>(
+      'service_account_settings_update',
       session: session,
-      body: {'muted': muted ?? false, 'subscribed': following ?? true},
+      device: device,
+      params: {
+        'service_id': serviceId.toString(),
+        if (muted != null) 'muted': muted ? '1' : '0',
+        if (pinned != null) 'pinned': pinned ? '1' : '0',
+        if (following != null) 'following': following ? '1' : '0',
+      },
+      secureResponse: true,
     );
+    if (!result.isSuccess) {
+      throw ApiException(result.message, code: result.code);
+    }
+    return Map<String, Object?>.from(result.data);
   }
 
   Future<List<Map<String, Object?>>> personMessages({
@@ -1185,17 +1277,25 @@ class ApiClient {
     bool unreadOnly = false,
     int unreadLimit = 0,
   }) async {
-    return _v2Request(
-      'GET',
-      'v2/im/history',
+    final result = await secureSignedImPost<Map<String, Object?>>(
+      'im_person_messages',
       session: session,
-      query: {
-        'channel_id': 'app${int.tryParse(appId) ?? 1}user$receiverId',
-        'channel_type': 1,
-        if (startMessageSeq > 0) 'before_seq': startMessageSeq,
-        'limit': limit,
+      device: device,
+      secureResponse: true,
+      params: {
+        'receiver_id': receiverId,
+        'start_message_seq': startMessageSeq.toString(),
+        'end_message_seq': endMessageSeq.toString(),
+        'limit': limit.toString(),
+        'pull_mode': pullMode.toString(),
+        if (unreadOnly) 'unread_only': '1',
+        if (unreadLimit > 0) 'unread_limit': unreadLimit.toString(),
       },
     );
+    if (!result.isSuccess) {
+      throw ApiException(result.message, code: result.code);
+    }
+    return result.data;
   }
 
   Future<List<Map<String, Object?>>> groupMessages({
@@ -1255,17 +1355,25 @@ class ApiClient {
     bool unreadOnly = false,
     int unreadLimit = 0,
   }) async {
-    return _v2Request(
-      'GET',
-      'v2/im/history',
+    final result = await secureSignedImPost<Map<String, Object?>>(
+      'im_group_messages',
       session: session,
-      query: {
-        'channel_id': 'app${int.tryParse(appId) ?? 1}group$groupId',
-        'channel_type': 2,
-        if (startMessageSeq > 0) 'before_seq': startMessageSeq,
-        'limit': limit,
+      device: device,
+      secureResponse: true,
+      params: {
+        'group_id': groupId,
+        'start_message_seq': startMessageSeq.toString(),
+        'end_message_seq': endMessageSeq.toString(),
+        'limit': limit.toString(),
+        'pull_mode': pullMode.toString(),
+        if (unreadOnly) 'unread_only': '1',
+        if (unreadLimit > 0) 'unread_limit': unreadLimit.toString(),
       },
     );
+    if (!result.isSuccess) {
+      throw ApiException(result.message, code: result.code);
+    }
+    return result.data;
   }
 
   Future<Map<String, Object?>> sendPersonMessage({
@@ -1277,24 +1385,21 @@ class ApiClient {
     Map<String, Object?> params = const {},
     String filePath = '',
     void Function(double progress)? onUploadProgress,
-  }) async {
-    final payload = Map<String, Object?>.from(params);
-    if (filePath.isNotEmpty) {
-      payload.addAll(
-        await _uploadV2Asset(session, filePath, contentType, onUploadProgress),
-      );
-    }
-    return _v2Request(
-      'POST',
-      'v2/im/messages',
+  }) {
+    return secureImBusinessAction(
+      action: 'im_person_send',
       session: session,
-      body: {
-        'channel_id': 'app${int.tryParse(appId) ?? 1}user$receiverId',
-        'channel_type': 1,
-        'client_msg_no': clientMsgNo,
-        'content_type': int.tryParse(contentType) ?? 1,
-        'payload': payload,
+      device: device,
+      clientMsgNo: clientMsgNo,
+      secureParams: {
+        'receiver_id': receiverId,
+        'content_type': contentType,
+        ...params,
       },
+      params: {'client_msg_no': clientMsgNo},
+      filePath: filePath,
+      onUploadProgress: onUploadProgress,
+      secureResponse: true,
     );
   }
 
@@ -1307,24 +1412,21 @@ class ApiClient {
     Map<String, Object?> params = const {},
     String filePath = '',
     void Function(double progress)? onUploadProgress,
-  }) async {
-    final payload = Map<String, Object?>.from(params);
-    if (filePath.isNotEmpty) {
-      payload.addAll(
-        await _uploadV2Asset(session, filePath, contentType, onUploadProgress),
-      );
-    }
-    return _v2Request(
-      'POST',
-      'v2/im/messages',
+  }) {
+    return secureImBusinessAction(
+      action: 'im_group_send',
       session: session,
-      body: {
-        'channel_id': 'app${int.tryParse(appId) ?? 1}group$groupId',
-        'channel_type': 2,
-        'client_msg_no': clientMsgNo,
-        'content_type': int.tryParse(contentType) ?? 1,
-        'payload': payload,
+      device: device,
+      clientMsgNo: clientMsgNo,
+      secureParams: {
+        'group_id': groupId,
+        'content_type': contentType,
+        ...params,
       },
+      params: {'client_msg_no': clientMsgNo},
+      filePath: filePath,
+      onUploadProgress: onUploadProgress,
+      secureResponse: true,
     );
   }
 
@@ -1427,17 +1529,47 @@ class ApiClient {
     int page = 1,
     int limit = 50,
   }) async {
-    final data = await _v2Request('GET', 'v2/social/friends', session: session);
-    final items = await _withResolvedAvatars(
-      session,
-      _mapListFromPayload(data),
-    );
-    return FriendSnapshot(
-      items: items,
-      complete: true,
-      version: DateTime.now().millisecondsSinceEpoch.toString(),
-      generatedAt: DateTime.now().millisecondsSinceEpoch ~/ 1000,
-    );
+    final items = <Map<String, Object?>>[];
+    var currentPage = page;
+    var version = '';
+    var generatedAt = 0;
+    for (var requestCount = 0; requestCount < 20; requestCount++) {
+      final result = await secureSignedImPost<Map<String, Object?>>(
+        'im_friend_list',
+        session: session,
+        device: device,
+        params: {'page': currentPage.toString(), 'limit': limit.toString()},
+        secureResponse: true,
+      );
+      if (!result.isSuccess) {
+        throw ApiException(result.message, code: result.code);
+      }
+      final pageVersion = result.data['snapshot_version']?.toString() ?? '';
+      if (pageVersion.isEmpty ||
+          (version.isNotEmpty && version != pageVersion)) {
+        throw ApiException('好友数据同步版本发生变化，请重试');
+      }
+      version = pageVersion;
+      generatedAt =
+          int.tryParse(result.data['generated_at']?.toString() ?? '') ??
+          generatedAt;
+      final list = result.data['list'];
+      if (list is List) {
+        items.addAll(
+          list.whereType<Map>().map((item) => item.cast<String, Object?>()),
+        );
+      }
+      if (result.data['snapshot_complete']?.toString() == '1') {
+        return FriendSnapshot(
+          items: items,
+          complete: true,
+          version: version,
+          generatedAt: generatedAt,
+        );
+      }
+      currentPage++;
+    }
+    throw ApiException('好友数量超过同步上限');
   }
 
   Future<List<Map<String, Object?>>> groups({
@@ -1446,8 +1578,24 @@ class ApiClient {
     int page = 1,
     int limit = 50,
   }) async {
-    final data = await _v2Request('GET', 'v2/social/groups', session: session);
-    return _withResolvedAvatars(session, _mapListFromPayload(data));
+    final result = await secureSignedImPost<Map<String, Object?>>(
+      'im_group_list',
+      session: session,
+      device: device,
+      params: {'page': page.toString(), 'limit': limit.toString()},
+      secureResponse: true,
+    );
+    if (!result.isSuccess) {
+      throw ApiException(result.message, code: result.code);
+    }
+    final list = result.data['list'];
+    if (list is List) {
+      return list
+          .whereType<Map>()
+          .map((item) => item.cast<String, Object?>())
+          .toList();
+    }
+    return [];
   }
 
   Future<Map<String, Object?>> momentsFeed({
@@ -1456,12 +1604,17 @@ class ApiClient {
     int page = 1,
     int limit = 20,
   }) async {
-    return _v2Request(
-      'GET',
-      'v2/moments/',
+    final result = await secureSignedImPost<Map<String, Object?>>(
+      'moments_feed',
       session: session,
-      query: {'limit': limit},
+      device: device,
+      params: {'page': page.toString(), 'limit': limit.toString()},
+      secureResponse: true,
     );
+    if (!result.isSuccess) {
+      throw ApiException(result.message, code: result.code);
+    }
+    return result.data;
   }
 
   Future<Map<String, Object?>> momentsUser({
@@ -1471,12 +1624,21 @@ class ApiClient {
     int page = 1,
     int limit = 20,
   }) async {
-    return _v2Request(
-      'GET',
-      'v2/moments/',
+    final result = await secureSignedImPost<Map<String, Object?>>(
+      'moments_user',
       session: session,
-      query: {'user_id': userId, 'limit': limit},
+      device: device,
+      params: {
+        'user_id': userId.toString(),
+        'page': page.toString(),
+        'limit': limit.toString(),
+      },
+      secureResponse: true,
     );
+    if (!result.isSuccess) {
+      throw ApiException(result.message, code: result.code);
+    }
+    return result.data;
   }
 
   Future<Map<String, Object?>> momentsPublish({
@@ -1489,17 +1651,24 @@ class ApiClient {
     List<int> remindUserIds = const [],
     String location = '',
   }) async {
-    final decodedMedia = jsonDecode(mediaJson);
-    return _v2Request(
-      'POST',
-      'v2/moments/',
+    final result = await secureSignedImPost<Map<String, Object?>>(
+      'moments_publish',
       session: session,
-      body: {
+      device: device,
+      params: {
         'content': content,
-        'visibility': visibility == 0 ? 'friends' : 'private',
-        'media': decodedMedia is List ? decodedMedia : const [],
+        'media': mediaJson,
+        'visibility': visibility.toString(),
+        if (visibleUserIds.isNotEmpty) 'visible_user_ids': visibleUserIds,
+        if (remindUserIds.isNotEmpty) 'remind_user_ids': remindUserIds,
+        if (location.isNotEmpty) 'location': location,
       },
+      secureResponse: true,
     );
+    if (!result.isSuccess) {
+      throw ApiException(result.message, code: result.code);
+    }
+    return result.data;
   }
 
   Future<Map<String, Object?>> momentsMediaUpload({
@@ -1514,8 +1683,27 @@ class ApiClient {
     int height = 0,
     int duration = 0,
     void Function(double progress)? onUploadProgress,
-  }) async {
-    return _uploadV2Asset(session, filePath, mediaType, onUploadProgress);
+  }) {
+    final clientMsgNo = _nonce();
+    return secureImBusinessAction(
+      action: 'moments_media_upload',
+      session: session,
+      device: device,
+      clientMsgNo: clientMsgNo,
+      params: {'client_msg_no': clientMsgNo},
+      secureParams: {
+        'media_type': mediaType,
+        if (name.isNotEmpty) 'name': name,
+        if (mime.isNotEmpty) 'mime': mime,
+        if (size > 0) 'size': size.toString(),
+        if (width > 0) 'width': width.toString(),
+        if (height > 0) 'height': height.toString(),
+        if (duration > 0) 'duration': duration.toString(),
+      },
+      filePath: filePath,
+      onUploadProgress: onUploadProgress,
+      secureResponse: true,
+    );
   }
 
   Future<Map<String, Object?>> momentsDelete({
@@ -1730,221 +1918,19 @@ class ApiClient {
     bool secureResponse = true,
     void Function(double progress)? onUploadProgress,
   }) async {
-    return _dispatchV2Action(action, session, params);
-  }
-
-  Future<Map<String, Object?>> _dispatchV2Action(
-    String action,
-    UserSession session,
-    Map<String, Object?> params,
-  ) {
-    final groupId = params['group_id']?.toString() ?? '';
-    final memberId = params['member_id']?.toString() ?? '';
-    switch (action) {
-      case 'im_friend_apply':
-        return _v2Request(
-          'POST',
-          'v2/social/friend-requests',
-          session: session,
-          body: {
-            'recipient_id':
-                int.tryParse(params['friend_id']?.toString() ?? '') ?? 0,
-            'message': params['remark']?.toString() ?? '',
-          },
-        );
-      case 'im_friend_handle':
-        return _v2Request(
-          'POST',
-          'v2/social/friend-requests/${params['apply_id']}/decision',
-          session: session,
-          body: {'accept': params['accept']?.toString() == '1'},
-        );
-      case 'im_friend_apply_list':
-        return _v2Request('GET', 'v2/social/friend-requests', session: session);
-      case 'im_friend_search':
-        return _v2Request(
-          'GET',
-          'v2/social/users/search',
-          session: session,
-          query: {'username': params['keyword']?.toString() ?? ''},
-        );
-      case 'im_friend_delete':
-        return _v2Request(
-          'DELETE',
-          'v2/social/friends/${params['friend_id']}',
-          session: session,
-        );
-      case 'im_friend_status':
-        return _friendStatusV2(session, params['friend_id']);
-      case 'im_group_create':
-        return _v2Request(
-          'POST',
-          'v2/social/groups',
-          session: session,
-          body: {
-            'name': params['name']?.toString() ?? '',
-            'member_ids': _numericIds(params['member_ids']),
-          },
-        );
-      case 'im_group_update':
-        return _v2Request(
-          'PATCH',
-          'v2/social/groups/$groupId',
-          session: session,
-          body: {
-            if (params.containsKey('name')) 'name': params['name'],
-            if (params.containsKey('notice')) 'announcement': params['notice'],
-          },
-        );
-      case 'im_group_members':
-        return _v2Request(
-          'GET',
-          'v2/social/groups/$groupId/members',
-          session: session,
-        );
-      case 'im_group_members_add':
-        return _v2Request(
-          'POST',
-          'v2/social/groups/$groupId/members',
-          session: session,
-          body: {'member_ids': _numericIds(params['member_ids'])},
-        );
-      case 'im_group_members_remove':
-        return _removeGroupMembers(
-          session,
-          groupId,
-          _numericIds(params['member_ids']),
-        );
-      case 'im_group_member_mute':
-        final seconds =
-            int.tryParse(params['expire_seconds']?.toString() ?? '') ?? 0;
-        return _v2Request(
-          'PUT',
-          'v2/social/groups/$groupId/members/$memberId/mute',
-          session: session,
-          body: {
-            'muted_until': seconds <= 0
-                ? null
-                : DateTime.now()
-                      .toUtc()
-                      .add(Duration(seconds: seconds))
-                      .toIso8601String(),
-          },
-        );
-      case 'im_group_member_unmute':
-        return _v2Request(
-          'PUT',
-          'v2/social/groups/$groupId/members/$memberId/mute',
-          session: session,
-          body: {'muted_until': null},
-        );
-      case 'im_group_admin_set':
-        return _v2Request(
-          'PUT',
-          'v2/social/groups/$groupId/members/$memberId/role',
-          session: session,
-          body: {
-            'role': params['is_admin']?.toString() == '1' ? 'admin' : 'member',
-          },
-        );
-      case 'im_group_leave':
-        return _v2Request(
-          'POST',
-          'v2/social/groups/$groupId/leave',
-          session: session,
-          body: const {},
-        );
-      case 'im_group_delete':
-        return _v2Request(
-          'DELETE',
-          'v2/social/groups/$groupId',
-          session: session,
-        );
-      case 'im_group_mute_status':
-        return _v2Request('GET', 'v2/social/groups/$groupId', session: session);
-      case 'im_person_conversation_delete':
-        return _v2Request(
-          'DELETE',
-          'v2/im/conversation',
-          session: session,
-          body: {
-            'channel_id':
-                'app${int.tryParse(appId) ?? 1}user${params['receiver_id']}',
-            'channel_type': 1,
-          },
-        );
-      case 'im_group_conversation_delete':
-        return _v2Request(
-          'DELETE',
-          'v2/im/conversation',
-          session: session,
-          body: {
-            'channel_id': 'app${int.tryParse(appId) ?? 1}group$groupId',
-            'channel_type': 2,
-          },
-        );
-      case 'moments_delete':
-        return _v2Request(
-          'DELETE',
-          'v2/moments/${params['post_id']}',
-          session: session,
-        );
-      case 'moments_like':
-        return _v2Request(
-          'PUT',
-          'v2/moments/${params['post_id']}/like',
-          session: session,
-          body: const {},
-        );
-      case 'moments_unlike':
-        return _v2Request(
-          'DELETE',
-          'v2/moments/${params['post_id']}/like',
-          session: session,
-        );
-      case 'moments_comment_add':
-        return _v2Request(
-          'POST',
-          'v2/moments/${params['post_id']}/comments',
-          session: session,
-          body: {
-            'content': params['content']?.toString() ?? '',
-            if ((int.tryParse(params['reply_user_id']?.toString() ?? '') ?? 0) >
-                0)
-              'reply_to_user_id': int.parse(params['reply_user_id'].toString()),
-          },
-        );
-      case 'moments_comment_delete':
-        return _v2Request(
-          'DELETE',
-          'v2/moments/comments/${params['comment_id']}',
-          session: session,
-        );
-      case 'im_message_read_receipts':
-        final receipts = _jsonList(params['receipts']);
-        final through = receipts.fold<int>(
-          0,
-          (value, item) => max(
-            value,
-            int.tryParse(item['message_seq']?.toString() ?? '') ?? 0,
-          ),
-        );
-        return _v2Request(
-          'POST',
-          'v2/im/read',
-          session: session,
-          body: {
-            'channel_id': params['channel_id']?.toString() ?? '',
-            'channel_type':
-                int.tryParse(params['channel_type']?.toString() ?? '') ?? 0,
-            'through_seq': through,
-          },
-        );
-      case 'im_retry_messages':
-        return Future.value(<String, Object?>{'queued': true});
-      default:
-        throw ApiException('客户端功能尚未迁移到新接口: $action');
+    final result = await secureSignedImPost<Map<String, Object?>>(
+      action,
+      session: session,
+      device: device,
+      params: params,
+      filePath: filePath,
+      onUploadProgress: onUploadProgress,
+      secureResponse: secureResponse,
+    );
+    if (!result.isSuccess) {
+      throw ApiException(result.message, code: result.code);
     }
+    return result.data;
   }
 
   Future<Map<String, Object?>> secureImBusinessAction({
@@ -2136,205 +2122,15 @@ class ApiClient {
     required UserSession session,
     required String device,
   }) async {
-    await _v2Request(
-      'POST',
-      'v2/auth/logout',
+    final result = await secureSignedImPost<Object?>(
+      'im_logout',
       session: session,
-      body: const <String, Object?>{},
+      device: device,
+      params: const {},
     );
-  }
-
-  Future<Map<String, Object?>> _v2Request(
-    String method,
-    String path, {
-    UserSession? session,
-    Map<String, Object?>? body,
-    Map<String, Object?>? query,
-    CancelToken? cancelToken,
-  }) async {
-    final requestId = AppLogger.traceId('api-v2');
-    try {
-      final response = await _dio.request<Object?>(
-        path,
-        data: body,
-        queryParameters: query,
-        cancelToken: cancelToken,
-        options: Options(
-          method: method,
-          contentType: Headers.jsonContentType,
-          headers: {
-            if (session != null) 'Authorization': 'Bearer ${session.userToken}',
-            'X-Request-ID': requestId,
-          },
-        ),
-      );
-      final envelope = response.data is Map
-          ? (response.data as Map).map(
-              (key, value) => MapEntry(key.toString(), value),
-            )
-          : <String, Object?>{};
-      if (envelope['code']?.toString() != 'OK') {
-        throw ApiException(
-          envelope['message']?.toString() ?? '接口请求失败',
-          code: response.statusCode,
-        );
-      }
-      final data = envelope['data'];
-      if (data is Map) {
-        return data.map((key, value) => MapEntry(key.toString(), value));
-      }
-      if (data is List) return <String, Object?>{'items': data};
-      return <String, Object?>{'value': data};
-    } on DioException catch (error) {
-      final envelope = error.response?.data is Map
-          ? (error.response!.data as Map).map(
-              (key, value) => MapEntry(key.toString(), value),
-            )
-          : const <String, Object?>{};
-      throw ApiException(
-        envelope['message']?.toString() ?? error.message ?? '网络请求失败',
-        code: error.response?.statusCode,
-      );
+    if (!result.isSuccess && result.code != 401) {
+      throw ApiException(result.message, code: result.code);
     }
-  }
-
-  Future<Map<String, Object?>> _uploadV2Asset(
-    UserSession session,
-    String filePath,
-    String contentType,
-    void Function(double progress)? onUploadProgress,
-  ) async {
-    final response = await _dio.post<Object?>(
-      'v2/assets/',
-      data: FormData.fromMap({
-        'kind': contentType,
-        'file': await MultipartFile.fromFile(filePath),
-      }),
-      options: Options(
-        headers: {'Authorization': 'Bearer ${session.userToken}'},
-      ),
-      onSendProgress: onUploadProgress == null
-          ? null
-          : (sent, total) {
-              if (total > 0) onUploadProgress(sent / total);
-            },
-    );
-    final envelope = response.data is Map
-        ? (response.data as Map).map(
-            (key, value) => MapEntry(key.toString(), value),
-          )
-        : <String, Object?>{};
-    if (envelope['code']?.toString() != 'OK' || envelope['data'] is! Map) {
-      throw ApiException(envelope['message']?.toString() ?? '文件上传失败');
-    }
-    final asset = (envelope['data'] as Map).map(
-      (key, value) => MapEntry(key.toString(), value),
-    );
-    return {
-      'asset_id': asset['id'],
-      'asset': asset,
-      if (asset['url'] != null) 'url': asset['url'],
-      if (asset['mime_type'] != null) 'mime_type': asset['mime_type'],
-      if (asset['size'] != null) 'size': asset['size'],
-      if (asset['original_name'] != null) 'file_name': asset['original_name'],
-    };
-  }
-
-  Future<String> _resolveAssetUrl(UserSession session, Object? rawId) async {
-    final id = int.tryParse(rawId?.toString() ?? '') ?? 0;
-    if (id <= 0) return '';
-    try {
-      final data = await _v2Request('GET', 'v2/assets/$id', session: session);
-      return data['url']?.toString() ?? '';
-    } on ApiException {
-      return '';
-    }
-  }
-
-  List<int> _numericIds(Object? value) {
-    final values = value is Iterable
-        ? value
-        : value?.toString().split(',') ?? const <String>[];
-    return values
-        .map((item) => int.tryParse(item.toString().trim()) ?? 0)
-        .where((id) => id > 0)
-        .toSet()
-        .toList(growable: false);
-  }
-
-  List<Map<String, Object?>> _jsonList(Object? value) {
-    Object? decoded = value;
-    if (value is String && value.isNotEmpty) decoded = jsonDecode(value);
-    if (decoded is! Iterable) return const <Map<String, Object?>>[];
-    return decoded
-        .whereType<Map>()
-        .map(
-          (item) => item.map((key, value) => MapEntry(key.toString(), value)),
-        )
-        .toList(growable: false);
-  }
-
-  Future<Map<String, Object?>> _removeGroupMembers(
-    UserSession session,
-    String groupId,
-    List<int> memberIds,
-  ) async {
-    for (final memberId in memberIds) {
-      await _v2Request(
-        'DELETE',
-        'v2/social/groups/$groupId/members/$memberId',
-        session: session,
-      );
-    }
-    return <String, Object?>{'removed': true};
-  }
-
-  Future<Map<String, Object?>> _friendStatusV2(
-    UserSession session,
-    Object? rawFriendId,
-  ) async {
-    final friendId = int.tryParse(rawFriendId?.toString() ?? '') ?? 0;
-    final data = await _v2Request('GET', 'v2/social/friends', session: session);
-    final item = _mapListFromPayload(data)
-        .cast<Map<String, Object?>?>()
-        .firstWhere(
-          (friend) => int.tryParse(friend?['id']?.toString() ?? '') == friendId,
-          orElse: () => null,
-        );
-    return <String, Object?>{'is_friend': item != null ? 1 : 0, 'friend': item};
-  }
-
-  Future<String> _serviceAccountCode(UserSession session, int serviceId) async {
-    final data = await _v2Request(
-      'GET',
-      'v2/service-accounts/',
-      session: session,
-    );
-    for (final item in _mapListFromPayload(data)) {
-      if (int.tryParse(item['id']?.toString() ?? '') == serviceId) {
-        final code = item['code']?.toString() ?? '';
-        if (code.isNotEmpty) return code;
-      }
-    }
-    throw ApiException('服务号不存在');
-  }
-
-  Future<List<Map<String, Object?>>> _withResolvedAvatars(
-    UserSession session,
-    List<Map<String, Object?>> items,
-  ) async {
-    return Future.wait(
-      items.map((item) async {
-        final result = Map<String, Object?>.from(item);
-        final avatar = await _resolveAssetUrl(session, item['avatar_asset_id']);
-        if (avatar.isNotEmpty) {
-          result['avatar_url'] = avatar;
-          result['usertx'] = avatar;
-          result['group_avatar'] = avatar;
-        }
-        return result;
-      }),
-    );
   }
 
   Future<ApiResult<T>> post<T>(
@@ -2464,6 +2260,114 @@ class ApiClient {
       );
       rethrow;
     }
+  }
+
+  ImageCaptcha _parseImageCaptchaResponse(
+    Object? body, {
+    required String? contentType,
+  }) {
+    final normalizedType = (contentType ?? '').split(';').first.trim();
+    if (body is List<int>) {
+      if (_looksLikeImageBytes(body, normalizedType)) {
+        final mimeType = normalizedType.startsWith('image/')
+            ? normalizedType
+            : _guessImageMimeType(body);
+        return ImageCaptcha(
+          image: 'data:$mimeType;base64,${base64Encode(body)}',
+        );
+      }
+      final text = utf8.decode(body, allowMalformed: true).trim();
+      if (text.isNotEmpty) {
+        try {
+          final decoded = jsonDecode(text);
+          final result = _parse<Object?>(decoded);
+          if (!result.isSuccess) {
+            throw ApiException(result.message, code: result.code);
+          }
+          return ImageCaptcha.fromJson(result.data);
+        } on FormatException {
+          throw ApiException('验证码返回格式不正确');
+        }
+      }
+    }
+    if (body is Map || body is String) {
+      final result = body is Map
+          ? _parse<Object?>(body)
+          : ApiResult<Object?>(
+              code: 1,
+              message: 'success',
+              data: body,
+              timestamp: 0,
+            );
+      if (!result.isSuccess) {
+        throw ApiException(result.message, code: result.code);
+      }
+      return ImageCaptcha.fromJson(result.data);
+    }
+    throw ApiException('验证码返回格式不正确');
+  }
+
+  bool _looksLikeImageBytes(List<int> bytes, String contentType) {
+    if (contentType.startsWith('image/')) {
+      return true;
+    }
+    if (bytes.length >= 8 &&
+        bytes[0] == 0x89 &&
+        bytes[1] == 0x50 &&
+        bytes[2] == 0x4E &&
+        bytes[3] == 0x47) {
+      return true;
+    }
+    if (bytes.length >= 3 &&
+        bytes[0] == 0xFF &&
+        bytes[1] == 0xD8 &&
+        bytes[2] == 0xFF) {
+      return true;
+    }
+    if (bytes.length >= 6) {
+      final header = String.fromCharCodes(bytes.take(6));
+      if (header == 'GIF87a' || header == 'GIF89a') {
+        return true;
+      }
+    }
+    if (bytes.length >= 12) {
+      final riff = String.fromCharCodes(bytes.take(4));
+      final webp = String.fromCharCodes(bytes.skip(8).take(4));
+      if (riff == 'RIFF' && webp == 'WEBP') {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  String _guessImageMimeType(List<int> bytes) {
+    if (bytes.length >= 4 &&
+        bytes[0] == 0x89 &&
+        bytes[1] == 0x50 &&
+        bytes[2] == 0x4E &&
+        bytes[3] == 0x47) {
+      return 'image/png';
+    }
+    if (bytes.length >= 3 &&
+        bytes[0] == 0xFF &&
+        bytes[1] == 0xD8 &&
+        bytes[2] == 0xFF) {
+      return 'image/jpeg';
+    }
+    if (bytes.length >= 6) {
+      final header = String.fromCharCodes(bytes.take(6));
+      if (header == 'GIF87a' || header == 'GIF89a') {
+        return 'image/gif';
+      }
+    }
+    if (bytes.length >= 12) {
+      final riff = String.fromCharCodes(bytes.take(4));
+      final webp = String.fromCharCodes(bytes.skip(8).take(4));
+      if (riff == 'RIFF' && webp == 'WEBP') {
+        return 'image/webp';
+      }
+    }
+    return 'image/png';
   }
 
   ApiResult<T> _parse<T>(
@@ -2634,6 +2538,16 @@ class _SecureResponseContext {
   final String device;
   final String timestamp;
   final String nonce;
+}
+
+String? _stringFromKeys(Map<String, Object?> map, List<String> keys) {
+  for (final key in keys) {
+    final value = map[key]?.toString().trim() ?? '';
+    if (value.isNotEmpty) {
+      return value;
+    }
+  }
+  return null;
 }
 
 Map<String, Object?> _objectResult(Object? value) {

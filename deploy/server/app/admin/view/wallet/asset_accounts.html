@@ -1,0 +1,35 @@
+{extend name="layout"/}
+{block name="body"}
+<div class="container-fluid p-t-15">
+    <div class="card">
+        <header class="card-header"><div class="card-title">数字资产账户</div></header>
+        <div class="card-body">
+            <div id="toolbar" class="row">
+                <div class="col-md-2"><input id="appid" class="form-control" placeholder="APPID"></div>
+                <div class="col-md-3"><input id="username" class="form-control" placeholder="用户名或昵称"></div>
+                <div class="col-md-2"><button id="search" class="btn btn-primary"><i class="mdi mdi-magnify"></i> 查询</button></div>
+                <div class="col-md-3"><a class="btn btn-default" href="{$Request.root}/wallet/asset_entries"><i class="mdi mdi-format-list-bulleted"></i> 全部资产流水</a></div>
+            </div>
+            <table id="table"></table>
+        </div>
+    </div>
+</div>
+{/block}
+{block name="js"}
+<script>
+$('#table').bootstrapTable({
+    url: "{$Request.root}/wallet/asset_accounts", method: 'get', dataType: 'json',
+    toolbar: '#toolbar', pagination: true, sidePagination: 'server', pageSize: 20,
+    queryParams: function (p) { return {limit:p.limit,page:(p.offset/p.limit)+1,appid:$('#appid').val(),username:$.trim($('#username').val())}; },
+    columns: [
+        {field:'id',title:'ID'}, {field:'appname',title:'应用'},
+        {field:'username',title:'用户',formatter:function(v,r){return (r.nickname||v||'-')+'<div class="text-muted">@'+(v||'-')+' · '+r.user_id+'</div>'; }},
+        {field:'symbol',title:'资产'}, {field:'available_balance',title:'可用余额'}, {field:'frozen_balance',title:'冻结余额'},
+        {field:'otc_frozen',title:'OTC冻结'}, {field:'risk_frozen',title:'风控冻结'}, {field:'total_in',title:'累计入账'}, {field:'total_out',title:'累计支出'},
+        {field:'id',title:'操作',formatter:function(v,r){return '<a class="btn btn-xs btn-primary" href="{$Request.root}/wallet/asset_entries?account_id='+v+'">流水</a> <button class="btn btn-xs btn-warning freeze-asset" data-id="'+v+'" data-user="'+(r.nickname||r.username||'-')+'">冻结</button>';}}
+    ]
+});
+$('#search').click(function(){ $('#table').bootstrapTable('refresh',{pageNumber:1}); });
+$(document).off('click.assetFreeze','.freeze-asset').on('click.assetFreeze','.freeze-asset',function(){var id=$(this).data('id'),user=$(this).data('user'),amount=window.prompt('冻结 '+user+' 的USDT数量');if(amount===null)return;var reason=window.prompt('请输入冻结原因');if(reason===null)return;$.ajax({ url:"{$Request.root}/wallet/asset_holds",type:'POST',dataType:'json',data:{action:'freeze',account_id:id,amount:amount,reason:reason}}).done(function(r){lightyear.notify(r.msg,Number(r.code)===1?'success':'danger');if(Number(r.code)===1)$('#table').bootstrapTable('refresh');}).fail(function(x){lightyear.notify((x.responseJSON||{}).msg||'冻结失败','danger');});});
+</script>
+{/block}

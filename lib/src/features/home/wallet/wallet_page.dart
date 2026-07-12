@@ -101,6 +101,33 @@ class _WalletPageState extends State<WalletPage> {
                       _WalletToolStrip(
                         actions: [
                           _WalletAction(
+                            icon: Icons.account_balance_wallet_outlined,
+                            label: 'USDT',
+                            color: BimColors.successText,
+                            onTap: () => _push(
+                              context,
+                              UsdtWalletPage(controller: widget.controller),
+                            ),
+                          ),
+                          _WalletAction(
+                            icon: Icons.currency_exchange_outlined,
+                            label: '买卖币',
+                            color: BimColors.primary,
+                            onTap: () => _push(
+                              context,
+                              OtcHomePage(controller: widget.controller),
+                            ),
+                          ),
+                          _WalletAction(
+                            icon: Icons.add_card_outlined,
+                            label: '充值',
+                            color: BimColors.primary,
+                            onTap: () => _push(
+                              context,
+                              WalletRechargePage(controller: widget.controller),
+                            ),
+                          ),
+                          _WalletAction(
                             icon: Icons.outbox_outlined,
                             label: '提现',
                             color: BimColors.transfer,
