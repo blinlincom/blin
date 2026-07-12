@@ -9,7 +9,7 @@ class AppConfig {
   );
   static const appId = String.fromEnvironment(
     'BIM_APP_ID',
-    defaultValue: '900000002',
+    defaultValue: '1',
   );
   static const appKey = String.fromEnvironment(
     'BIM_APP_KEY',

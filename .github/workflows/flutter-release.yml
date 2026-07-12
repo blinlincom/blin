@@ -38,7 +38,8 @@ permissions:
 
 env:
   BIM_API_BASE_URL: ${{ vars.BIM_API_BASE_URL || 'https://blcold.cn/api/' }}
-  BIM_APP_ID: ${{ vars.BIM_APP_ID || '900000002' }}
+  # 全新 Go 后端只初始化 application.id=1，禁止被旧仓库变量覆盖。
+  BIM_APP_ID: "1"
   BIM_APP_KEY: ${{ secrets.BIM_APP_KEY }}
 
 jobs:
