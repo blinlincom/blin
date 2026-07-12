@@ -64,6 +64,8 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   bool _voiceCancelAfterStart = false;
   bool _burnAfterRead = false;
   bool _peerBurnAfterRead = false;
+  bool _receiptEnabled = false;
+  bool _peerReceiptEnabled = false;
   bool _mentionAll = false;
   int _burnSeconds = 0;
   int _peerBurnSeconds = 0;
@@ -161,6 +163,9 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     });
     _refreshGroupMuteState();
     _refreshPeerOnlineStatus();
+    if (!_isGroup && !_readOnlyServiceConversation) {
+      unawaited(_loadPrivateReceiptSetting());
+    }
     if (_isGroup && !_channelInvalid) {
       unawaited(_loadGroupMuteStatus());
       unawaited(_refreshGroupPresence());
@@ -413,10 +418,28 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   }
 
   String _chatHeaderTitle() {
-    final title = widget.title.isEmpty ? '群聊' : widget.title;
     if (!_isGroup) {
       return widget.title;
     }
+    var title = widget.title;
+    for (final group in widget.controller.cachedGroups()) {
+      if (_groupIdFromItem(group) != _groupId &&
+          _groupChannelId(group) != widget.channelId) {
+        continue;
+      }
+      final nested = _asObjectMap(group['group']);
+      title = _value(
+        group,
+        ['name', 'group_name', 'title'],
+        fallback: _value(nested, [
+          'name',
+          'group_name',
+          'title',
+        ], fallback: title),
+      );
+      break;
+    }
+    if (title.isEmpty) title = '群聊';
     final count = _groupMemberCount;
     return count == null ? title : '$title（$count）';
   }
@@ -581,6 +604,10 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       _applyPeerBurnAfterReadState(event.message);
       return;
     }
+    if (event.source == 'private_receipt_setting_cmd') {
+      _applyPeerReceiptSetting(event.message);
+      return;
+    }
     final shouldStickToBottom = _shouldAutoScrollForMessage(event);
     final revealRequested =
         _pendingInitialClientMsgNo.isNotEmpty && !_initialClientMsgHandled;
@@ -594,10 +621,25 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         _messageRowKeys.clear();
         _highlightedMessageKey = '';
       } else if (_isMessageDeleteEvent(event.source)) {
-        final target = _value(event.message, ['client_msg_no']);
+        final target = _value(
+          event.message,
+          ['target_client_msg_no'],
+          fallback: _value(
+            _asObjectMap(event.message['payload']),
+            ['target_client_msg_no'],
+            fallback: _value(event.message, ['client_msg_no']),
+          ),
+        );
         _messages = _messages
             .where((item) => _value(item, ['client_msg_no']) != target)
             .toList(growable: false);
+        if (event.source == 'recall_cmd') {
+          _messages = _mergeMessageList(
+            _messages,
+            event.message,
+            limit: _messageUiLimit,
+          );
+        }
         _pruneMessageRowKeys(_messages);
       } else {
         _messages = _mergeMessageList(
@@ -639,6 +681,37 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       _message = enabled
           ? (seconds > 0 ? '对方已开启阅后即焚 ${seconds}s' : '对方已开启阅后即焚')
           : '对方已关闭阅后即焚';
+      _error = null;
+    });
+  }
+
+  Future<void> _loadPrivateReceiptSetting() async {
+    try {
+      final result = await widget.controller.privateReceiptSetting(
+        receiverId: _receiverId,
+      );
+      if (!mounted) return;
+      setState(() {
+        _receiptEnabled = _boolValue(result['own_enabled']);
+        _peerReceiptEnabled = _boolValue(result['peer_enabled']);
+      });
+    } catch (error) {
+      AppLogger.warn(
+        'ui',
+        'private receipt setting load failed',
+        data: {'receiver_id': _receiverId, 'error': error.toString()},
+      );
+    }
+  }
+
+  void _applyPeerReceiptSetting(Map<String, Object?> message) {
+    final payload = _asObjectMap(message['payload']);
+    final senderId = _value(payload, ['sender_id', 'from_id', 'user_id']);
+    if (senderId.isNotEmpty && senderId != _receiverId) return;
+    final enabled = _boolValue(payload['enabled']);
+    setState(() {
+      _peerReceiptEnabled = enabled;
+      _message = enabled ? '对方已开启消息已读回执' : '对方已关闭消息已读回执';
       _error = null;
     });
   }
@@ -3679,6 +3752,31 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       _messages = _messages
           .where((item) => _value(item, ['client_msg_no']) != target)
           .toList(growable: false);
+      final payload = _asObjectMap(result['payload']);
+      final receipt = <String, Object?>{
+        'client_msg_no': _value(result, [
+          'client_msg_no',
+        ], fallback: 'recall-receipt-$target'),
+        'content_type': 'recall',
+        'content': '你撤回了一条消息',
+        'is_system': true,
+        'system_message': true,
+        'is_me': true,
+        'create_time': DateTime.now().millisecondsSinceEpoch,
+        'payload': <String, Object?>{
+          ...payload,
+          'content_type': 'recall',
+          'is_system': true,
+          'system_message': true,
+          'target_client_msg_no': target,
+        },
+      };
+      widget.controller.storeRecallReceipt(
+        channelId: widget.channelId,
+        channelType: widget.channelType,
+        receipt: receipt,
+      );
+      _messages = _mergeMessageList(_messages, receipt, limit: _messageUiLimit);
       _selectedClientMsgNo = '';
       _selectedPayload = const {};
       _selectedMessage = const {};
@@ -4050,6 +4148,9 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
               burnSeconds: _burnSeconds,
               peerBurnSeconds: _peerBurnSeconds,
               onBurnChanged: _setBurnAfterReadFromSettings,
+              receiptEnabled: _receiptEnabled,
+              peerReceiptEnabled: _peerReceiptEnabled,
+              onReceiptChanged: _setPrivateReceiptSetting,
               onStartVoiceCall: () => _startLiveKitCall('audio'),
               onStartVideoCall: () => _startLiveKitCall('video'),
             ),
@@ -4065,6 +4166,18 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       _burnSeconds = enabled ? seconds : 0;
     });
     await _notifyBurnAfterReadState();
+  }
+
+  Future<void> _setPrivateReceiptSetting(bool enabled) async {
+    final result = await widget.controller.updatePrivateReceiptSetting(
+      receiverId: _receiverId,
+      enabled: enabled,
+    );
+    if (!mounted) return;
+    setState(() {
+      _receiptEnabled = _boolValue(result['own_enabled']);
+      _peerReceiptEnabled = _boolValue(result['peer_enabled']);
+    });
   }
 
   Future<void> _runSending(
@@ -4237,6 +4350,16 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         final avatar = _conversationAvatarUrl(item);
         if (avatar.isNotEmpty) {
           return avatar;
+        }
+      }
+    }
+    if (_isGroup) {
+      for (final item in widget.controller.cachedGroups()) {
+        final groupId = _groupIdFromItem(item);
+        final channelId = _groupChannelId(item);
+        if (groupId == _groupId || channelId == widget.channelId) {
+          final avatar = _groupAvatarUrl(item);
+          if (avatar.isNotEmpty) return avatar;
         }
       }
     }

@@ -32,6 +32,7 @@ dependencies:
   flutter:
     sdk: flutter
   cupertino_icons: ^1.0.9
+  cached_network_image: ^3.4.1
   dio: ^5.10.0
   mmkv: ^2.4.0
   crypto: ^3.0.7

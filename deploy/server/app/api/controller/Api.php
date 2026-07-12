@@ -12524,6 +12524,114 @@ class Api extends BaseController
         $this->json(0, '单条已读回执接口已关闭，请使用批量已读回执接口');
     }
 
+    // 查询当前私聊双方的回执开关。状态持久化，换设备或离线重登后仍可恢复。
+    public function im_private_receipt_setting()
+    {
+        $data = $this->secureChatRequestInput();
+        $receiverId = (int)($data['receiver_id'] ?? 0);
+        if ($receiverId <= 0 || $receiverId === (int)$this->user_info['id']) {
+            $this->json(0, '聊天对象无效');
+        }
+        $peer = Db::name('user')->where('appid', $this->appid)->where('id', $receiverId)->find();
+        if (!$peer) {
+            $this->json(0, '用户不存在');
+        }
+        $this->chatJson(1, 'success', $this->privateReceiptSettingPayload((int)$this->user_info['id'], $receiverId));
+    }
+
+    // 更新当前用户对指定私聊的回执开关，并通过命令消息实时通知对方。
+    public function im_private_receipt_setting_update()
+    {
+        $data = $this->secureChatRequestInput();
+        $receiverId = (int)($data['receiver_id'] ?? 0);
+        $enabled = (int)($data['enabled'] ?? 0) === 1 ? 1 : 0;
+        if ($receiverId <= 0 || $receiverId === (int)$this->user_info['id']) {
+            $this->json(0, '聊天对象无效');
+        }
+        if ((int)$this->chatControl()['read_receipt_enabled'] !== 1 && $enabled === 1) {
+            $this->json(0, '消息回执功能暂不可用');
+        }
+        $peer = Db::name('user')->where('appid', $this->appid)->where('id', $receiverId)->find();
+        if (!$peer) {
+            $this->json(0, '用户不存在');
+        }
+        $now = date('Y-m-d H:i:s');
+        $existing = Db::name('chat_private_receipt_setting')
+            ->where('appid', $this->appid)
+            ->where('user_id', (int)$this->user_info['id'])
+            ->where('peer_user_id', $receiverId)
+            ->find();
+        if ($existing) {
+            Db::name('chat_private_receipt_setting')->where('id', $existing['id'])->update([
+                'enabled' => $enabled,
+                'update_time' => $now,
+            ]);
+        } else {
+            Db::name('chat_private_receipt_setting')->insert([
+                'appid' => $this->appid,
+                'user_id' => (int)$this->user_info['id'],
+                'peer_user_id' => $receiverId,
+                'enabled' => $enabled,
+                'create_time' => $now,
+                'update_time' => $now,
+            ]);
+        }
+        $channelId = $this->wukongUid($receiverId);
+        $payload = [
+            'protocol' => 'blin.chat.v1',
+            'type' => WukongIM::CONTENT_TYPE_CMD,
+            'content_type' => 'cmd',
+            'cmd' => 'private_receipt_setting',
+            'channel_id' => $channelId,
+            'channel_type' => (int)config('wukongim.channel_type_person', WukongIM::CHANNEL_TYPE_PERSON),
+            'sender_id' => (int)$this->user_info['id'],
+            'sender_uid' => $this->wukongUid($this->user_info['id']),
+            'enabled' => $enabled,
+            'update_time' => time(),
+        ] + $this->chatDevicePayload();
+        $clientMsgNo = 'receipt-setting-' . (int)$this->user_info['id'] . '-' . $receiverId . '-' . time() . '-' . bin2hex(random_bytes(4));
+        try {
+            $result = (new WukongIM())->sendCommandMessage(
+                $this->wukongUid($this->user_info['id']),
+                $channelId,
+                (int)config('wukongim.channel_type_person', WukongIM::CHANNEL_TYPE_PERSON),
+                $payload,
+                $clientMsgNo
+            );
+            $this->publishSendResultToGateway($result, $clientMsgNo, $payload);
+        } catch (\Exception $e) {
+            // 数据库状态已经生效，实时通知失败时对方下次进入会话会重新查询。
+            error_log('private receipt setting notify failed: ' . $e->getMessage());
+        }
+        $this->chatJson(1, 'success', $this->privateReceiptSettingPayload((int)$this->user_info['id'], $receiverId));
+    }
+
+    protected function privateReceiptSettingPayload(int $userId, int $peerUserId): array
+    {
+        $rows = Db::name('chat_private_receipt_setting')
+            ->where('appid', $this->appid)
+            ->where(function ($query) use ($userId, $peerUserId) {
+                $query->where(function ($inner) use ($userId, $peerUserId) {
+                    $inner->where('user_id', $userId)->where('peer_user_id', $peerUserId);
+                })->whereOr(function ($inner) use ($userId, $peerUserId) {
+                    $inner->where('user_id', $peerUserId)->where('peer_user_id', $userId);
+                });
+            })
+            ->select()->toArray();
+        $own = 0;
+        $peer = 0;
+        foreach ($rows as $row) {
+            if ((int)$row['user_id'] === $userId) $own = (int)$row['enabled'];
+            if ((int)$row['user_id'] === $peerUserId) $peer = (int)$row['enabled'];
+        }
+        return [
+            'enabled' => $own,
+            'own_enabled' => $own,
+            'peer_enabled' => $peer,
+            'receiver_id' => $peerUserId,
+        ];
+    }
+
     //批量发送消息已读回执。客户端进入会话后只能走本接口，避免历史消息逐条请求造成请求风暴。
     public function im_message_read_receipts()
     {

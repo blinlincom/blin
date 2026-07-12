@@ -697,7 +697,11 @@ class _WalletCaptchaPreview extends StatelessWidget {
       return const Icon(Icons.refresh, color: _mutedColor, size: 20);
     }
     if (image.startsWith('http://') || image.startsWith('https://')) {
-      return Image.network(image, fit: BoxFit.cover);
+      return CachedNetworkImage(
+        imageUrl: image,
+        fit: BoxFit.cover,
+        fadeInDuration: Duration.zero,
+      );
     }
     final raw = image.contains(',') ? image.split(',').last : image;
     try {

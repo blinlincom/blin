@@ -29,6 +29,48 @@ class _ChatHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (isGroup) {
+      return Container(
+        height: BimDimensions.chatHeader,
+        decoration: const BoxDecoration(
+          color: BimColors.surface,
+          border: Border(bottom: BorderSide(color: BimColors.borderLight)),
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: BimSpacing.x1),
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            Align(
+              alignment: Alignment.centerLeft,
+              child: _HeaderIconButton(
+                tooltip: '返回',
+                icon: Icons.chevron_left,
+                iconSize: 31,
+                onPressed: onBack,
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(
+                horizontal: BimDimensions.touchTarget + BimSpacing.x2,
+              ),
+              child: _GroupHeaderTitle(
+                title: title,
+                statusText: statusText,
+                loading: groupPresenceLoading,
+              ),
+            ),
+            Align(
+              alignment: Alignment.centerRight,
+              child: _HeaderIconButton(
+                tooltip: '群设置',
+                icon: Icons.more_horiz,
+                onPressed: onDetail,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
     return Container(
       height: BimDimensions.chatHeader,
       decoration: const BoxDecoration(
@@ -44,25 +86,13 @@ class _ChatHeader extends StatelessWidget {
             iconSize: 31,
             onPressed: onBack,
           ),
-          if (!isGroup) ...[
-            _Avatar(
-              label: title,
-              imageUrl: avatarUrl,
-              size: 34,
-              color: BimColors.primary,
-            ),
-            const SizedBox(width: BimSpacing.x2),
-          ] else ...[
-            _Avatar(
-              label: title,
-              imageUrl: avatarUrl,
-              compositeMembers: avatarMembers,
-              size: 34,
-              color: BimColors.success,
-              icon: avatarMembers.isEmpty ? Icons.groups : null,
-            ),
-            const SizedBox(width: BimSpacing.x2),
-          ],
+          _Avatar(
+            label: title,
+            imageUrl: avatarUrl,
+            size: 34,
+            color: BimColors.primary,
+          ),
+          const SizedBox(width: BimSpacing.x2),
           Expanded(
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
@@ -98,7 +128,7 @@ class _ChatHeader extends StatelessWidget {
                         width: 7,
                         height: 7,
                         decoration: BoxDecoration(
-                          color: online || isGroup
+                          color: online
                               ? BimColors.online
                               : BimColors.mutedText,
                           shape: BoxShape.circle,
@@ -120,25 +150,97 @@ class _ChatHeader extends StatelessWidget {
               ],
             ),
           ),
-          if (!isGroup) ...[
-            _HeaderIconButton(
-              tooltip: '语音通话',
-              icon: Icons.call_outlined,
-              onPressed: onVoiceCall,
-            ),
-            _HeaderIconButton(
-              tooltip: '视频通话',
-              icon: Icons.videocam_outlined,
-              onPressed: onVideoCall,
-            ),
-          ],
           _HeaderIconButton(
-            tooltip: isGroup ? '群设置' : '聊天设置',
+            tooltip: '语音通话',
+            icon: Icons.call_outlined,
+            onPressed: onVoiceCall,
+          ),
+          _HeaderIconButton(
+            tooltip: '视频通话',
+            icon: Icons.videocam_outlined,
+            onPressed: onVideoCall,
+          ),
+          _HeaderIconButton(
+            tooltip: '聊天设置',
             icon: Icons.more_horiz,
             onPressed: onDetail,
           ),
         ],
       ),
+    );
+  }
+}
+
+class _GroupHeaderTitle extends StatelessWidget {
+  const _GroupHeaderTitle({
+    required this.title,
+    required this.statusText,
+    required this.loading,
+  });
+
+  final String title;
+  final String statusText;
+  final bool loading;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        Text(
+          title.isEmpty ? '群聊' : title,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          textAlign: TextAlign.center,
+          style: const TextStyle(
+            color: BimColors.textDark,
+            fontSize: BimTypography.title,
+            fontWeight: FontWeight.w700,
+            height: 1.1,
+          ),
+        ),
+        const SizedBox(height: BimSpacing.x1),
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            if (loading)
+              const SizedBox(
+                width: 8,
+                height: 8,
+                child: CircularProgressIndicator(
+                  strokeWidth: 1.3,
+                  color: BimColors.secondaryText,
+                ),
+              )
+            else
+              Container(
+                width: 7,
+                height: 7,
+                decoration: const BoxDecoration(
+                  color: BimColors.online,
+                  shape: BoxShape.circle,
+                ),
+              ),
+            const SizedBox(width: BimSpacing.x1),
+            Flexible(
+              child: Text(
+                statusText,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: BimColors.secondaryText,
+                  fontSize: BimTypography.caption,
+                  fontWeight: FontWeight.w500,
+                  height: 1,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ],
     );
   }
 }

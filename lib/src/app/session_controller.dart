@@ -1617,16 +1617,16 @@ class SessionController extends ChangeNotifier {
         .groups(session: current, device: _device)
         .timeout(const Duration(seconds: 15));
     final list = await _groupRequest!.whenComplete(() => _groupRequest = null);
-    _groupCache = list;
+    _groupCache = _mergeGroupListWithCache(list, _groupCache);
     _groupCacheAt = DateTime.now();
-    _writeGroupCache(list);
+    _writeGroupCache(_groupCache);
     notifyListeners();
     AppLogger.info(
       'session',
       'load groups success',
-      data: {'count': list.length},
+      data: {'count': _groupCache.length},
     );
-    return list;
+    return _copyList(_groupCache);
   }
 
   List<Map<String, Object?>> cachedMomentsFeed() {
@@ -2077,6 +2077,25 @@ class SessionController extends ChangeNotifier {
     );
   }
 
+  Future<Map<String, Object?>> privateReceiptSetting({
+    required String receiverId,
+  }) {
+    return sendImAction(
+      'im_private_receipt_setting',
+      params: {'receiver_id': receiverId},
+    );
+  }
+
+  Future<Map<String, Object?>> updatePrivateReceiptSetting({
+    required String receiverId,
+    required bool enabled,
+  }) {
+    return sendImAction(
+      'im_private_receipt_setting_update',
+      params: {'receiver_id': receiverId, 'enabled': enabled ? '1' : '0'},
+    );
+  }
+
   Future<Map<String, Object?>> deleteMessageForSelf({
     required String targetClientMsgNo,
     required String channelId,
@@ -2106,6 +2125,19 @@ class SessionController extends ChangeNotifier {
       channelID: channelId,
       channelType: channelType,
       clientMsgNo: targetClientMsgNo,
+    );
+    notifyListeners();
+  }
+
+  void storeRecallReceipt({
+    required String channelId,
+    required int channelType,
+    required Map<String, Object?> receipt,
+  }) {
+    _im.storeRecallReceipt(
+      channelID: channelId,
+      channelType: channelType,
+      receipt: receipt,
     );
     notifyListeners();
   }
@@ -2696,12 +2728,12 @@ class SessionController extends ChangeNotifier {
 
   Future<Map<String, Object?>> updateGroup({
     required String groupId,
-    String name = '',
-    String avatar = '',
-    String notice = '',
-  }) {
+    String? name,
+    String? avatar,
+    String? notice,
+  }) async {
     final current = _requireSession();
-    return _chat.groupUpdate(
+    final result = await _chat.groupUpdate(
       session: current,
       device: _device,
       groupId: groupId,
@@ -2709,21 +2741,27 @@ class SessionController extends ChangeNotifier {
       avatar: avatar,
       notice: notice,
     );
+    _upsertGroupCache(result);
+    notifyListeners();
+    return result;
   }
 
   Future<Map<String, Object?>> uploadGroupAvatar({
     required String groupId,
     required String filePath,
     void Function(double progress)? onUploadProgress,
-  }) {
+  }) async {
     final current = _requireSession();
-    return _chat.groupAvatarUpload(
+    final result = await _chat.groupAvatarUpload(
       session: current,
       device: _device,
       groupId: groupId,
       filePath: filePath,
       onUploadProgress: onUploadProgress,
     );
+    _upsertGroupCache(result);
+    notifyListeners();
+    return result;
   }
 
   Future<Map<String, Object?>> deleteGroup(String groupId) {
@@ -3591,6 +3629,74 @@ class SessionController extends ChangeNotifier {
       return;
     }
     _cache.writeGroupList(uid: uid, groups: groups);
+  }
+
+  void _upsertGroupCache(Map<String, Object?> group) {
+    if (group.isEmpty) return;
+    final key = _groupCacheKey(group);
+    if (key.isEmpty) return;
+    final current = cachedGroups();
+    var found = false;
+    final next = current
+        .map((item) {
+          if (_groupCacheKey(item) != key) return item;
+          found = true;
+          return <String, Object?>{...item, ...group};
+        })
+        .toList(growable: true);
+    if (!found) next.add(Map<String, Object?>.from(group));
+    _groupCache = next;
+    _groupCacheAt = DateTime.now();
+    _writeGroupCache(next);
+  }
+
+  List<Map<String, Object?>> _mergeGroupListWithCache(
+    List<Map<String, Object?>> incoming,
+    List<Map<String, Object?>> memory,
+  ) {
+    final uid = _chatUid();
+    final cached = memory.isNotEmpty
+        ? memory
+        : (uid.isEmpty
+              ? const <Map<String, Object?>>[]
+              : _cache.readGroupList(uid));
+    final previousByKey = <String, Map<String, Object?>>{
+      for (final item in cached)
+        if (_groupCacheKey(item).isNotEmpty) _groupCacheKey(item): item,
+    };
+    return incoming
+        .map((item) {
+          final next = Map<String, Object?>.from(item);
+          final previous = previousByKey[_groupCacheKey(item)];
+          if (previous == null) return next;
+          for (final key in ['avatar', 'group_avatar']) {
+            final value = next[key]?.toString().trim() ?? '';
+            final oldValue = previous[key]?.toString().trim() ?? '';
+            if (value.isEmpty && oldValue.isNotEmpty) next[key] = oldValue;
+          }
+          final members = next['avatar_members'];
+          if ((members is! List || members.isEmpty) &&
+              previous['avatar_members'] is List &&
+              (previous['avatar_members'] as List).isNotEmpty) {
+            next['avatar_members'] = previous['avatar_members'];
+          }
+          return next;
+        })
+        .toList(growable: false);
+  }
+
+  String _groupCacheKey(Map<String, Object?> item) {
+    for (final key in ['group_id', 'id', 'channel_id', 'uid']) {
+      final value = item[key]?.toString().trim() ?? '';
+      if (value.isNotEmpty) return value;
+    }
+    final group = item['group'];
+    if (group is Map) {
+      return _groupCacheKey(
+        group.map((key, value) => MapEntry(key.toString(), value)),
+      );
+    }
+    return '';
   }
 
   void _writeServiceAccountCache(List<Map<String, Object?>> accounts) {

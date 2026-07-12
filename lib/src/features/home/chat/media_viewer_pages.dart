@@ -150,21 +150,13 @@ class _ImageMediaViewerPageState extends State<_ImageMediaViewerPage> {
                 const _FullScreenMediaError(text: '图片无法显示'),
           )
         : widget.media.url.isNotEmpty
-        ? Image.network(
-            widget.media.url,
+        ? CachedNetworkImage(
+            imageUrl: widget.media.url,
             fit: BoxFit.contain,
-            gaplessPlayback: true,
-            loadingBuilder: (context, child, progress) {
-              if (progress == null) {
-                return child;
-              }
-              final expected = progress.expectedTotalBytes;
-              final value = expected == null || expected <= 0
-                  ? null
-                  : progress.cumulativeBytesLoaded / expected;
-              return _FullScreenMediaLoading(progress: value);
-            },
-            errorBuilder: (_, __, ___) =>
+            fadeInDuration: Duration.zero,
+            progressIndicatorBuilder: (_, __, progress) =>
+                _FullScreenMediaLoading(progress: progress.progress),
+            errorWidget: (_, __, ___) =>
                 const _FullScreenMediaError(text: '图片加载失败'),
           )
         : const _FullScreenMediaError(text: '图片资源不存在');

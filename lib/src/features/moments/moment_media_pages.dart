@@ -337,13 +337,12 @@ class _MomentAvatar extends StatelessWidget {
       height: size,
       clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(borderRadius: BorderRadius.circular(radius)),
-      child: Image.network(
-        url,
+      child: CachedNetworkImage(
+        imageUrl: url,
         fit: BoxFit.cover,
-        gaplessPlayback: true,
-        errorBuilder: (_, __, ___) => fallback,
-        loadingBuilder: (context, child, progress) =>
-            progress == null ? child : fallback,
+        fadeInDuration: Duration.zero,
+        errorWidget: (_, __, ___) => fallback,
+        placeholder: (_, _) => fallback,
       ),
     );
   }
@@ -444,13 +443,12 @@ class _MomentVideoFramePreviewState extends State<_MomentVideoFramePreview> {
   @override
   Widget build(BuildContext context) {
     if (widget.coverUrl.isNotEmpty) {
-      return Image.network(
-        widget.coverUrl,
+      return CachedNetworkImage(
+        imageUrl: widget.coverUrl,
         fit: BoxFit.cover,
-        gaplessPlayback: true,
-        errorBuilder: (_, __, ___) => _firstFrameOrFallback(),
-        loadingBuilder: (context, child, progress) =>
-            progress == null ? child : widget.fallback,
+        fadeInDuration: Duration.zero,
+        errorWidget: (_, __, ___) => _firstFrameOrFallback(),
+        placeholder: (_, _) => widget.fallback,
       );
     }
     return _firstFrameOrFallback();

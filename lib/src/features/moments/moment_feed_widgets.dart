@@ -130,13 +130,12 @@ class _MomentCoverImage extends StatelessWidget {
       fit: StackFit.expand,
       children: [
         if (url.isNotEmpty)
-          Image.network(
-            url,
+          CachedNetworkImage(
+            imageUrl: url,
             fit: BoxFit.cover,
-            gaplessPlayback: true,
-            errorBuilder: (_, __, ___) => const _MomentCoverFallback(),
-            loadingBuilder: (context, child, progress) =>
-                progress == null ? child : const _MomentCoverFallback(),
+            fadeInDuration: Duration.zero,
+            placeholder: (_, _) => const _MomentCoverFallback(),
+            errorWidget: (_, __, ___) => const _MomentCoverFallback(),
           )
         else
           const _MomentCoverFallback(),
@@ -702,16 +701,14 @@ class _MomentMediaTile extends StatelessWidget {
                     fallback: const _MomentMediaFallback(isVideo: true),
                   )
                 else if (url.isNotEmpty)
-                  Image.network(
-                    url,
+                  CachedNetworkImage(
+                    imageUrl: url,
                     fit: BoxFit.cover,
-                    gaplessPlayback: true,
-                    errorBuilder: (_, __, ___) =>
+                    fadeInDuration: Duration.zero,
+                    errorWidget: (_, __, ___) =>
                         const _MomentMediaFallback(isVideo: false),
-                    loadingBuilder: (context, child, progress) =>
-                        progress == null
-                        ? child
-                        : const _MomentMediaFallback(isVideo: false),
+                    placeholder: (_, _) =>
+                        const _MomentMediaFallback(isVideo: false),
                   )
                 else
                   _MomentMediaFallback(isVideo: isVideo),
@@ -816,10 +813,11 @@ class _MomentMediaViewerScaffold extends StatelessWidget {
           minScale: 1,
           maxScale: 4,
           child: Center(
-            child: Image.network(
-              url,
+            child: CachedNetworkImage(
+              imageUrl: url,
               fit: BoxFit.contain,
-              errorBuilder: (_, __, ___) => const Icon(
+              fadeInDuration: Duration.zero,
+              errorWidget: (_, __, ___) => const Icon(
                 Icons.broken_image_outlined,
                 color: Colors.white70,
                 size: 48,

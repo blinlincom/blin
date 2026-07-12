@@ -718,14 +718,14 @@ class _StickerThumb extends StatelessWidget {
       );
     }
     if (url.isNotEmpty) {
-      return Image.network(
-        url,
+      return CachedNetworkImage(
+        imageUrl: url,
         width: size,
         height: size,
         fit: BoxFit.contain,
-        gaplessPlayback: true,
+        fadeInDuration: Duration.zero,
         filterQuality: FilterQuality.medium,
-        errorBuilder: (_, __, ___) => _stickerFallback,
+        errorWidget: (_, __, ___) => _stickerFallback,
       );
     }
     return _stickerFallback;

@@ -309,12 +309,16 @@ class _GroupDetailPageState extends State<GroupDetailPage> {
   String _message = '';
   late bool _pinned;
   String _groupAvatar = '';
+  late String _groupTitle;
+  String _groupNotice = '';
 
   @override
   void initState() {
     super.initState();
     _pinned = _initialPinned();
     _groupAvatar = widget.avatarUrl;
+    _groupTitle = widget.title;
+    _hydrateGroupDetails();
     _refreshMembers();
   }
 
@@ -345,20 +349,20 @@ class _GroupDetailPageState extends State<GroupDetailPage> {
             ),
             const _SectionHeader(text: '群聊资料'),
             _GroupAvatarSettingsTile(
-              title: widget.title,
+              title: _groupTitle,
               imageUrl: _groupAvatar,
               members: _members,
               onTap: _uploadGroupAvatar,
             ),
             _GroupSettingsInfoTile(
               title: '群聊名称',
-              value: widget.title.isEmpty ? '群聊' : widget.title,
-              onTap: _updateGroup,
+              value: _groupTitle.isEmpty ? '群聊' : _groupTitle,
+              onTap: _updateGroupName,
             ),
             _GroupSettingsInfoTile(
               title: '群公告',
-              value: '查看或更新群公告',
-              onTap: _updateGroup,
+              value: _groupNotice.isEmpty ? '暂无群公告' : _groupNotice,
+              onTap: _updateGroupNotice,
             ),
             const _SectionHeader(text: '聊天设置'),
             _GroupSettingsNavTile(title: '查找聊天记录', onTap: _openMessageSearch),
@@ -387,6 +391,39 @@ class _GroupDetailPageState extends State<GroupDetailPage> {
   String _groupCountTitleSuffix() {
     final count = _loadedMemberCount ?? widget.memberCount;
     return count == null || count <= 0 ? '' : '($count)';
+  }
+
+  void _hydrateGroupDetails() {
+    for (final group in widget.controller.cachedGroups()) {
+      if (_groupIdFromItem(group) != widget.groupId &&
+          _groupChannelId(group) != widget.channelId) {
+        continue;
+      }
+      final title = _groupTitleFromData(group);
+      final notice = _groupNoticeFromData(group);
+      final avatar = _groupAvatarUrl(group);
+      if (title.isNotEmpty) _groupTitle = title;
+      _groupNotice = notice;
+      if (avatar.isNotEmpty) _groupAvatar = avatar;
+      break;
+    }
+  }
+
+  String _groupTitleFromData(Map<String, Object?> group) {
+    final nested = _asObjectMap(group['group']);
+    return _value(group, [
+      'name',
+      'group_name',
+      'title',
+    ], fallback: _value(nested, ['name', 'group_name', 'title']));
+  }
+
+  String _groupNoticeFromData(Map<String, Object?> group) {
+    final nested = _asObjectMap(group['group']);
+    return _value(group, [
+      'notice',
+      'announcement',
+    ], fallback: _value(nested, ['notice', 'announcement']));
   }
 
   void _refreshMembers() {
@@ -507,25 +544,56 @@ class _GroupDetailPageState extends State<GroupDetailPage> {
     }
   }
 
-  Future<void> _updateGroup() async {
+  Future<void> _updateGroupName() async {
     final data = await _openInput(
       context,
-      title: '更新群资料',
-      fields: const [
-        ActionInputField(id: 'name', label: '群名称'),
-        ActionInputField(id: 'notice', label: '群公告', maxLines: 3),
+      title: '修改群聊名称',
+      fields: [
+        ActionInputField(id: 'name', label: '群聊名称', initial: _groupTitle),
       ],
     );
     if (data == null) {
       return;
     }
-    await _run(
-      () => widget.controller.updateGroup(
+    final name = data['name']?.trim() ?? '';
+    if (name.isEmpty) {
+      setState(() => _error = '群聊名称不能为空');
+      return;
+    }
+    await _run(() async {
+      final result = await widget.controller.updateGroup(
         groupId: widget.groupId,
-        name: data['name'] ?? '',
-        notice: data['notice'] ?? '',
-      ),
+        name: name,
+      );
+      if (mounted) setState(() => _groupTitle = name);
+      return result;
+    });
+  }
+
+  Future<void> _updateGroupNotice() async {
+    final data = await _openInput(
+      context,
+      title: '编辑群公告',
+      fields: [
+        ActionInputField(
+          id: 'notice',
+          label: '群公告',
+          initial: _groupNotice,
+          hint: '群成员可在群资料中查看',
+          maxLines: 6,
+        ),
+      ],
     );
+    if (data == null) return;
+    final notice = data['notice']?.trim() ?? '';
+    await _run(() async {
+      final result = await widget.controller.updateGroup(
+        groupId: widget.groupId,
+        notice: notice,
+      );
+      if (mounted) setState(() => _groupNotice = notice);
+      return result;
+    });
   }
 
   Future<void> _uploadGroupAvatar() async {

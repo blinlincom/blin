@@ -368,11 +368,11 @@ class _MomentPreviewThumb extends StatelessWidget {
         color: _fillColor,
         borderRadius: BorderRadius.circular(BimRadius.xs),
       ),
-      child: Image.network(
-        _normalizeAvatarUrl(imageUrl),
+      child: CachedNetworkImage(
+        imageUrl: _normalizeAvatarUrl(imageUrl),
         fit: BoxFit.cover,
-        gaplessPlayback: true,
-        errorBuilder: (_, __, ___) => const ColoredBox(color: _fillColor),
+        fadeInDuration: Duration.zero,
+        errorWidget: (_, __, ___) => const ColoredBox(color: _fillColor),
       ),
     );
   }
@@ -531,11 +531,11 @@ class _FriendMomentMediaThumb extends StatelessWidget {
         fit: StackFit.expand,
         children: [
           if (url.isNotEmpty)
-            Image.network(
-              _normalizeAvatarUrl(url),
+            CachedNetworkImage(
+              imageUrl: _normalizeAvatarUrl(url),
               fit: BoxFit.cover,
-              gaplessPlayback: true,
-              errorBuilder: (_, __, ___) => const ColoredBox(color: _fillColor),
+              fadeInDuration: Duration.zero,
+              errorWidget: (_, __, ___) => const ColoredBox(color: _fillColor),
             )
           else
             const ColoredBox(color: _fillColor),

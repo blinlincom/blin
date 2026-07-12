@@ -13,6 +13,9 @@ class PrivateChatActionsPage extends StatefulWidget {
     this.burnSeconds = 0,
     this.peerBurnSeconds = 0,
     this.onBurnChanged,
+    this.receiptEnabled = false,
+    this.peerReceiptEnabled = false,
+    this.onReceiptChanged,
     this.onStartVoiceCall,
     this.onStartVideoCall,
     super.key,
@@ -29,6 +32,9 @@ class PrivateChatActionsPage extends StatefulWidget {
   final int burnSeconds;
   final int peerBurnSeconds;
   final Future<void> Function(bool enabled, int seconds)? onBurnChanged;
+  final bool receiptEnabled;
+  final bool peerReceiptEnabled;
+  final Future<void> Function(bool enabled)? onReceiptChanged;
   final VoidCallback? onStartVoiceCall;
   final VoidCallback? onStartVideoCall;
 
@@ -42,6 +48,7 @@ class _PrivateChatActionsPageState extends State<PrivateChatActionsPage> {
   late bool _burnAfterRead;
   late int _burnSeconds;
   late bool _pinned;
+  late bool _receiptEnabled;
   bool _busy = false;
 
   @override
@@ -50,6 +57,7 @@ class _PrivateChatActionsPageState extends State<PrivateChatActionsPage> {
     _burnAfterRead = widget.burnAfterRead;
     _burnSeconds = widget.burnSeconds;
     _pinned = _initialPinned();
+    _receiptEnabled = widget.receiptEnabled;
   }
 
   @override
@@ -75,6 +83,16 @@ class _PrivateChatActionsPageState extends State<PrivateChatActionsPage> {
               subtitle: '',
               value: _pinned,
               onChanged: _busy ? null : _changePinned,
+            ),
+            _SettingsSwitchTile(
+              title: '消息已读回执',
+              subtitle: widget.peerReceiptEnabled
+                  ? '对方已开启 · 你发送的消息可显示已读状态'
+                  : '开启后对方会知道你已启用消息回执',
+              value: _receiptEnabled,
+              onChanged: _busy || widget.onReceiptChanged == null
+                  ? null
+                  : _changeReceipt,
             ),
             _SettingsSwitchTile(
               title: '阅后即焚',
@@ -120,6 +138,31 @@ class _PrivateChatActionsPageState extends State<PrivateChatActionsPage> {
       );
     }
     return parts.join(' · ');
+  }
+
+  Future<void> _changeReceipt(bool value) async {
+    final previous = _receiptEnabled;
+    setState(() {
+      _receiptEnabled = value;
+      _busy = true;
+      _message = '';
+      _error = '';
+    });
+    try {
+      await widget.onReceiptChanged?.call(value);
+      if (mounted) {
+        setState(() => _message = value ? '消息已读回执已开启' : '消息已读回执已关闭');
+      }
+    } catch (error) {
+      if (mounted) {
+        setState(() {
+          _receiptEnabled = previous;
+          _error = error.toString();
+        });
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   bool _initialPinned() {

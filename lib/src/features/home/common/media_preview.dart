@@ -37,13 +37,16 @@ class _EmojiMessagePreview extends StatelessWidget {
             errorBuilder: (_, __, ___) => _fallbackText,
           )
         : url.isNotEmpty
-        ? Image.network(
-            url,
+        ? CachedNetworkImage(
+            imageUrl: url,
             fit: BoxFit.contain,
-            gaplessPlayback: true,
+            fadeInDuration: Duration.zero,
             filterQuality: FilterQuality.medium,
-            loadingBuilder: _mediaLoadingBuilder,
-            errorBuilder: (_, __, ___) => _fallbackText,
+            placeholder: (_, _) => const _MediaLoadPlaceholder(
+              icon: Icons.image_outlined,
+              title: '图片加载中',
+            ),
+            errorWidget: (_, __, ___) => _fallbackText,
           )
         : _fallbackText;
     return ClipRRect(
@@ -114,12 +117,15 @@ class _ImageMessagePreview extends StatelessWidget {
             ),
           )
         : url.isNotEmpty
-        ? Image.network(
-            url,
+        ? CachedNetworkImage(
+            imageUrl: url,
             fit: BoxFit.cover,
-            gaplessPlayback: true,
-            loadingBuilder: _mediaLoadingBuilder,
-            errorBuilder: (_, __, ___) => const _MediaLoadPlaceholder(
+            fadeInDuration: Duration.zero,
+            placeholder: (_, _) => const _MediaLoadPlaceholder(
+              icon: Icons.image_outlined,
+              title: '图片加载中',
+            ),
+            errorWidget: (_, __, ___) => const _MediaLoadPlaceholder(
               icon: Icons.broken_image_outlined,
               title: '图片加载失败',
             ),
@@ -210,12 +216,15 @@ class _VideoMessagePreview extends StatelessWidget {
             ),
           )
         : coverUrl.isNotEmpty
-        ? Image.network(
-            coverUrl,
+        ? CachedNetworkImage(
+            imageUrl: coverUrl,
             fit: BoxFit.cover,
-            gaplessPlayback: true,
-            loadingBuilder: _mediaLoadingBuilder,
-            errorBuilder: (_, __, ___) => const _MediaLoadPlaceholder(
+            fadeInDuration: Duration.zero,
+            placeholder: (_, _) => const _MediaLoadPlaceholder(
+              icon: Icons.videocam_outlined,
+              title: '封面加载中',
+            ),
+            errorWidget: (_, __, ___) => const _MediaLoadPlaceholder(
               icon: Icons.videocam_off_outlined,
               title: '封面加载失败',
             ),
@@ -289,58 +298,21 @@ class _VideoMessagePreview extends StatelessWidget {
   }
 }
 
-Widget _mediaLoadingBuilder(
-  BuildContext context,
-  Widget child,
-  ImageChunkEvent? loadingProgress,
-) {
-  if (loadingProgress == null) {
-    return child;
-  }
-  final expected = loadingProgress.expectedTotalBytes;
-  final progress = expected == null || expected <= 0
-      ? null
-      : loadingProgress.cumulativeBytesLoaded / expected;
-  return _MediaLoadPlaceholder(
-    icon: Icons.image_outlined,
-    title: '加载中',
-    progress: progress,
-  );
-}
-
 class _MediaLoadPlaceholder extends StatelessWidget {
-  const _MediaLoadPlaceholder({
-    required this.icon,
-    required this.title,
-    this.progress,
-  });
+  const _MediaLoadPlaceholder({required this.icon, required this.title});
 
   final IconData icon;
   final String title;
-  final double? progress;
 
   @override
   Widget build(BuildContext context) {
-    final value = progress;
     return DecoratedBox(
       decoration: const BoxDecoration(color: Color(0xffeef0f3)),
       child: Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            if (value == null)
-              Icon(icon, color: BimColors.mutedText, size: 28)
-            else
-              SizedBox(
-                width: 28,
-                height: 28,
-                child: CircularProgressIndicator(
-                  value: value.clamp(0, 1).toDouble(),
-                  strokeWidth: 2.2,
-                  color: BimColors.mutedText,
-                  backgroundColor: const Color(0x338e96a3),
-                ),
-              ),
+            Icon(icon, color: BimColors.mutedText, size: 28),
             const SizedBox(height: 7),
             Text(
               title,

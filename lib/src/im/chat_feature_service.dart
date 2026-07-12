@@ -169,9 +169,9 @@ class ChatFeatureService {
     required UserSession session,
     required String device,
     required String groupId,
-    String name = '',
-    String avatar = '',
-    String notice = '',
+    String? name,
+    String? avatar,
+    String? notice,
   }) {
     return action(
       action: 'im_group_update',
@@ -179,9 +179,9 @@ class ChatFeatureService {
       device: device,
       params: {
         'group_id': groupId,
-        if (name.isNotEmpty) 'name': name,
-        if (avatar.isNotEmpty) 'avatar': avatar,
-        if (notice.isNotEmpty) 'notice': notice,
+        if (name != null) 'name': name,
+        if (avatar != null) 'avatar': avatar,
+        if (notice != null) 'notice': notice,
       },
     );
   }

@@ -42,19 +42,15 @@ class _Avatar extends StatelessWidget {
         fit: StackFit.expand,
         children: [
           fallback,
-          Image.network(
-            url,
+          CachedNetworkImage(
+            imageUrl: url,
             width: size,
             height: size,
             fit: BoxFit.cover,
-            gaplessPlayback: true,
-            frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
-              if (wasSynchronouslyLoaded || frame != null) {
-                return child;
-              }
-              return const SizedBox.shrink();
-            },
-            errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+            fadeInDuration: Duration.zero,
+            fadeOutDuration: Duration.zero,
+            placeholder: (_, _) => const SizedBox.shrink(),
+            errorWidget: (_, _, _) => const SizedBox.shrink(),
           ),
         ],
       ),

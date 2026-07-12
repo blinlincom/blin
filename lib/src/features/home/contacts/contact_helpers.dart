@@ -106,7 +106,21 @@ String _searchFriendTitle(Map<String, Object?> item) {
 }
 
 String _groupAvatarUrl(Map<String, Object?> item) {
-  return _avatarUrlFromMap(item);
+  final direct = _avatarUrlFromMap(item);
+  if (direct.isNotEmpty) {
+    return direct;
+  }
+  final group = _asObjectMap(item['group']);
+  return group.isEmpty ? '' : _avatarUrlFromMap(group);
+}
+
+List<Map<String, Object?>> _groupAvatarMembers(Map<String, Object?> item) {
+  final direct = _mapListValue(item, ['avatar_members']);
+  if (direct.isNotEmpty) {
+    return direct;
+  }
+  final group = _asObjectMap(item['group']);
+  return group.isEmpty ? const [] : _mapListValue(group, ['avatar_members']);
 }
 
 String _avatarUrlFromMap(Map<String, Object?> item, {String fallback = ''}) {

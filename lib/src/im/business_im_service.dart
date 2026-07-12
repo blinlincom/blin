@@ -1000,6 +1000,22 @@ class BusinessImService extends ChangeNotifier {
     }
   }
 
+  void storeRecallReceipt({
+    required String channelID,
+    required int channelType,
+    required Map<String, Object?> receipt,
+  }) {
+    if (receipt.isEmpty) return;
+    channelID = _canonicalChannelId(channelID, channelType);
+    _upsertMessage(channelID, channelType, receipt);
+    _upsertConversationFromMessage(receipt);
+    _markMessageChannel(
+      source: 'recall_receipt_local',
+      channelId: channelID,
+      channelType: channelType,
+    );
+  }
+
   Future<void> markRedPacketReceivedLocal({
     required String channelID,
     required int channelType,
@@ -5112,6 +5128,29 @@ class BusinessImService extends ChangeNotifier {
         channelType: channelType,
         clientMsgNo: target,
       );
+      final operatorId = _value(payload, ['operator_id', 'sender_id']);
+      final currentUserId = _receiverIdFromChannel(chat.uid);
+      final isMe = operatorId.isNotEmpty && operatorId == currentUserId;
+      final receiptClientMsgNo = _value(payload, [
+        'client_msg_no',
+      ], fallback: 'recall-receipt-$target');
+      final receipt = <String, Object?>{
+        'client_msg_no': receiptClientMsgNo,
+        'content_type': 'recall',
+        'content': isMe ? '你撤回了一条消息' : '对方撤回了一条消息',
+        'is_system': true,
+        'system_message': true,
+        'is_me': isMe,
+        'create_time': _value(payload, ['recall_time', 'timestamp']),
+        'payload': <String, Object?>{
+          ...payload,
+          'content_type': 'recall',
+          'is_system': true,
+          'system_message': true,
+          'target_client_msg_no': target,
+        },
+      };
+      _upsertMessage(channelId, channelType, receipt);
       _markMessageChannel(
         source: 'recall_cmd',
         channelId: channelId,
@@ -5121,11 +5160,7 @@ class BusinessImService extends ChangeNotifier {
         source: 'recall_cmd',
         channelId: channelId,
         channelType: channelType,
-        message: <String, Object?>{
-          'client_msg_no': target,
-          'content_type': 'recall',
-          'cmd': 'recall',
-        },
+        message: <String, Object?>{...receipt, 'target_client_msg_no': target},
       );
     }
     return true;
@@ -5189,6 +5224,20 @@ class BusinessImService extends ChangeNotifier {
     if (cmd == 'burn_after_read_state') {
       _publishMessageEvent(
         source: 'burn_after_read_state_cmd',
+        channelId: channelId,
+        channelType: channelType,
+        message: <String, Object?>{
+          'client_msg_no': _value(payload, ['client_msg_no']),
+          'content_type': 'cmd',
+          'cmd': cmd,
+          'payload': Map<String, Object?>.from(payload),
+        },
+      );
+      return true;
+    }
+    if (cmd == 'private_receipt_setting') {
+      _publishMessageEvent(
+        source: 'private_receipt_setting_cmd',
         channelId: channelId,
         channelType: channelType,
         message: <String, Object?>{

@@ -475,6 +475,7 @@ bool _isSystemNoticeMessage(Map<String, Object?> item) {
   final payload = _asObjectMap(item['payload']);
   return contentType == ChatContentTypes.redPacketReceived ||
       contentType == ChatContentTypes.transferReceived ||
+      contentType == 'recall' ||
       contentType == 'cmd' ||
       _boolValue(item['is_system']) ||
       _boolValue(item['system_message']) ||
@@ -487,6 +488,9 @@ String _systemNoticeText(Map<String, Object?> item) {
   final contentType = _messageContentType(item);
   if (contentType == ChatContentTypes.call) {
     return _callNoticeText(payload);
+  }
+  if (contentType == 'recall') {
+    return _boolValue(item['is_me']) ? '你撤回了一条消息' : '对方撤回了一条消息';
   }
   final content = _messageContentText(item, payload);
   if (content.isNotEmpty &&

@@ -25,12 +25,13 @@ class _AuthBrand extends StatelessWidget {
                   color: Colors.white,
                   size: 30,
                 )
-              : Image.network(
-                  icon,
+              : CachedNetworkImage(
+                  imageUrl: icon,
                   width: 56,
                   height: 56,
                   fit: BoxFit.cover,
-                  errorBuilder: (_, __, ___) => const Icon(
+                  fadeInDuration: Duration.zero,
+                  errorWidget: (_, __, ___) => const Icon(
                     Icons.chat_bubble_rounded,
                     color: Colors.white,
                     size: 30,
@@ -451,7 +452,11 @@ class _CaptchaPreview extends StatelessWidget {
       return null;
     }
     if (image.startsWith('http://') || image.startsWith('https://')) {
-      return Image.network(image, fit: BoxFit.cover);
+      return CachedNetworkImage(
+        imageUrl: image,
+        fit: BoxFit.cover,
+        fadeInDuration: Duration.zero,
+      );
     }
     final bytes = _decodeImageBytes(image);
     if (bytes == null) {

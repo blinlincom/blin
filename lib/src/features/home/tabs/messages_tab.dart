@@ -369,7 +369,7 @@ class _MessagesTabState extends State<MessagesTab> {
         isGroup: channelType == _groupChannelType,
         isPinned: pinned,
         avatarUrl: _conversationAvatarUrl(item),
-        avatarMembers: _mapListValue(item, ['avatar_members']),
+        avatarMembers: _groupAvatarMembers(item),
         onLongPress: () => _showConversationActions(item),
         onTap: () {
           if (channelId.isEmpty) {

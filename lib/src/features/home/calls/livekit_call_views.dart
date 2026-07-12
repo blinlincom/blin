@@ -835,12 +835,13 @@ class _CallAvatar extends StatelessWidget {
     if (url.isNotEmpty) {
       return ClipRRect(
         borderRadius: BorderRadius.circular(size * 0.24),
-        child: Image.network(
-          url,
+        child: CachedNetworkImage(
+          imageUrl: url,
           width: size,
           height: size,
           fit: BoxFit.cover,
-          errorBuilder: (_, __, ___) => _fallback(),
+          fadeInDuration: Duration.zero,
+          errorWidget: (_, __, ___) => _fallback(),
         ),
       );
     }
