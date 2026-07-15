@@ -13,7 +13,7 @@
 Repository Variables：
 
 - `BIM_API_BASE_URL`：业务端 API 地址，默认 `https://blcold.cn/api/`。
-- `BIM_APP_ID`：应用 ID，默认 `900000002`。
+- `BIM_APP_ID`：旧 TP8 生产环境固定为 `900000002`，工作流不读取仓库变量覆盖该值。
 
 Repository Secrets：
 
